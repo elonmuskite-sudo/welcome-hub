@@ -14,16 +14,304 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      conversations: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          last_message: string | null
+          last_message_at: string
+          user_a: string
+          user_b: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind?: string
+          last_message?: string | null
+          last_message_at?: string
+          user_a: string
+          user_b?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          last_message?: string | null
+          last_message_at?: string
+          user_a?: string
+          user_b?: string | null
+        }
+        Relationships: []
+      }
+      messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          encrypted: boolean
+          file_name: string | null
+          file_url: string | null
+          id: string
+          sender_id: string | null
+          sender_kind: string
+          type: string
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          encrypted?: boolean
+          file_name?: string | null
+          file_url?: string | null
+          id?: string
+          sender_id?: string | null
+          sender_kind?: string
+          type?: string
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          encrypted?: boolean
+          file_name?: string | null
+          file_url?: string | null
+          id?: string
+          sender_id?: string | null
+          sender_kind?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          bio: string
+          created_at: string
+          first_name: string
+          full_name: string
+          id: string
+          interests: string[]
+          last_name: string
+          nexus_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string
+          created_at?: string
+          first_name?: string
+          full_name?: string
+          id: string
+          interests?: string[]
+          last_name?: string
+          nexus_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string
+          created_at?: string
+          first_name?: string
+          full_name?: string
+          id?: string
+          interests?: string[]
+          last_name?: string
+          nexus_id?: string
+        }
+        Relationships: []
+      }
+      saved_contacts: {
+        Row: {
+          contact_id: string
+          created_at: string
+          nickname: string | null
+          owner_id: string
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          nickname?: string | null
+          owner_id: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          nickname?: string | null
+          owner_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "saved_contacts_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "saved_contacts_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      support_requests: {
+        Row: {
+          admin_id: string | null
+          claimed_at: string | null
+          closed_at: string | null
+          conversation_id: string
+          created_at: string
+          id: string
+          reason: string | null
+          status: string
+          user_id: string
+          waiting_since: string | null
+        }
+        Insert: {
+          admin_id?: string | null
+          claimed_at?: string | null
+          closed_at?: string | null
+          conversation_id: string
+          created_at?: string
+          id?: string
+          reason?: string | null
+          status?: string
+          user_id: string
+          waiting_since?: string | null
+        }
+        Update: {
+          admin_id?: string | null
+          claimed_at?: string | null
+          closed_at?: string | null
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          reason?: string | null
+          status?: string
+          user_id?: string
+          waiting_since?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_requests_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: true
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
-      [_ in never]: never
+      members: {
+        Row: {
+          avatar_url: string | null
+          bio: string | null
+          created_at: string | null
+          first_name: string | null
+          full_name: string | null
+          id: string | null
+          interests: string[] | null
+          last_name: string | null
+          member_id: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string | null
+          first_name?: string | null
+          full_name?: string | null
+          id?: string | null
+          interests?: string[] | null
+          last_name?: string | null
+          member_id?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string | null
+          first_name?: string | null
+          full_name?: string | null
+          id?: string | null
+          interests?: string[] | null
+          last_name?: string | null
+          member_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      can_view_conversation: {
+        Args: { _conv: string; _user: string }
+        Returns: boolean
+      }
+      claim_support_request: { Args: { p_request: string }; Returns: string }
+      close_support_request: {
+        Args: { p_conversation: string }
+        Returns: undefined
+      }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      is_conversation_member: {
+        Args: { _conv: string; _user: string }
+        Returns: boolean
+      }
+      lookup_member_by_nexus_id: {
+        Args: { p_nexus_id: string }
+        Returns: {
+          avatar_url: string
+          first_name: string
+          full_name: string
+          id: string
+          last_name: string
+          nexus_id: string
+        }[]
+      }
+      request_live_agent: {
+        Args: { p_conversation: string; p_reason?: string }
+        Returns: undefined
+      }
+      shares_conversation: {
+        Args: { _a: string; _b: string }
+        Returns: boolean
+      }
+      start_direct_conversation: { Args: { p_other: string }; Returns: string }
+      start_support_conversation: { Args: never; Returns: string }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +438,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const

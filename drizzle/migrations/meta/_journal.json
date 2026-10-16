@@ -8,6 +8,13 @@
       "when": 1791765040954,
       "tag": "0000_nexus_chat_core",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792151198497,
+      "tag": "0001_profile_account_compatibility",
+      "breakpoints": true
     }
   ]
 }
