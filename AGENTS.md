@@ -16,3 +16,6 @@
 - Production runs on the user's own Supabase project via Vercel env vars; docs/supabase-schema.sql is the schema to apply there, since that project is not managed from Lovable.
 - Encode reactions and reply metadata with the versioned chat protocol in existing message fields; this preserves compatibility without requiring unprovisioned database columns.
 - Centralize chat controls in ChatButton and chat presentation effects in global semantic-token CSS; this keeps interaction and theme behavior consistent.
+- Email verification uses native Auth OTPs and recovery sessions, never browser-readable custom signed code state; this prevents code disclosure and replay.
+- Welcome mail verifies the caller server-side, fixes the recipient to the confirmed account, and uses Resend idempotency plus server-owned account metadata; this prevents arbitrary sends and duplicate welcomes.
+- Auth screens share AuthShell and existing button controls with semantic tokens; this keeps account forms consistent with the app theme.
