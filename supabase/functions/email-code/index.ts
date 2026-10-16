@@ -146,21 +146,16 @@ async function checkSendLimit(admin: ReturnType<typeof createAdminClient>, purpo
   return data === true
 }
 
-async function resolvePendingUser(admin: ReturnType<typeof createAdminClient>, email: string, purpose: string, fallbackUserId?: string) {
-  if (purpose === 'signup') {
-    try {
-      const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-      if (error) return fallbackUserId ? { id: fallbackUserId } : null
-      const user = data?.users?.find((item) => normalizedEmail(item.email) === email)
-      if (!user) return fallbackUserId ? { id: fallbackUserId } : null
-      return user
-    } catch {
-      return fallbackUserId ? { id: fallbackUserId } : null
-    }
+async function resolvePendingUser(admin: ReturnType<typeof createAdminClient>, email: string, _purpose: string, fallbackUserId?: string) {
+  try {
+    const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+    if (error) return fallbackUserId ? { id: fallbackUserId } : null
+    const user = data?.users?.find((item) => normalizedEmail(item.email) === email)
+    if (!user) return fallbackUserId ? { id: fallbackUserId } : null
+    return user
+  } catch {
+    return fallbackUserId ? { id: fallbackUserId } : null
   }
-  const { data, error } = await admin.from('members').select('auth_user_id').eq('email', email).maybeSingle()
-  if (error || !data?.auth_user_id) return fallbackUserId ? { id: fallbackUserId } : null
-  return { id: data.auth_user_id }
 }
 
 Deno.serve(async (req) => {
@@ -300,14 +295,9 @@ Deno.serve(async (req) => {
     if (error) return json(400, { error: error.message })
     generated = { user: data.user }
   } else {
-    const { data, error } = await admin
-      .from('members')
-      .select('auth_user_id')
-      .eq('email', email)
-      .maybeSingle()
-    if (error) return json(502, { error: 'Unable to send a recovery code right now.' })
-    if (!data?.auth_user_id) return json(200, { ok: true })
-    generated = { user: { id: data.auth_user_id } }
+    const existing = await resolvePendingUser(admin, email, purpose)
+    if (!existing) return json(200, { ok: true })
+    generated = { user: { id: existing.id } }
   }
 
   const code = generateVerificationCode()
