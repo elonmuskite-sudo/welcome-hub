@@ -163,8 +163,8 @@ export async function startPasswordRecoveryCode(email) {
     return result
   }
   if (!supabase) throw new Error('Password recovery is not configured.')
-  const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email), { redirectTo: `${window.location.origin}/reset-password` })
-  if (error) throw error
+  const data = await invokeEmailCode({ action: 'recovery', purpose: 'recovery', email: normalizeEmail(email) })
+  writeEmailCodeState(email, 'recovery', data?.state)
   return { ok: true }
 }
 
