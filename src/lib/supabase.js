@@ -22,40 +22,96 @@ export function isSupabaseConfigured() {
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase()
 export const RECOVERY_SESSION_KEY = 'nexus-recovery-user'
+const EMAIL_CODE_STATE_KEY = 'nexus-email-code-state'
+
+function readEmailCodeState(email, purpose) {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(EMAIL_CODE_STATE_KEY) || 'null')
+    if (saved && saved.email === normalizeEmail(email) && saved.purpose === purpose) return saved.state || ''
+  } catch {
+    // Session storage is optional; a missing state simply requires a fresh code.
+  }
+  return ''
+}
+
+function writeEmailCodeState(email, purpose, state) {
+  if (!state) return
+  try {
+    sessionStorage.setItem(EMAIL_CODE_STATE_KEY, JSON.stringify({ email: normalizeEmail(email), purpose, state }))
+  } catch {
+    // Session storage is optional; verification still works while the page stays open.
+  }
+}
+
+async function invokeEmailCode(payload) {
+  if (!supabase) throw new Error('Email verification is not configured.')
+  const { data, error } = await supabase.functions.invoke('email-code', { body: payload })
+  if (error) {
+    let details = error.message
+    try {
+      if (error.context instanceof Response) {
+        const body = await error.context.json()
+        if (body?.error) details = body.error
+      }
+    } catch {
+      // Keep the original error message when the response is not JSON.
+    }
+    throw new Error(details)
+  }
+  if (data?.error) throw new Error(data.error)
+  return data
+}
 
 export async function startSignupEmailCode({ email, password, firstName, lastName, memberId }) {
   if (!supabase) throw new Error('Account registration is not configured.')
   if (await isPasswordPwned(password)) throw new Error('This password has appeared in known data breaches. Choose another password.')
-  const { data, error } = await supabase.auth.signUp({
-    email: normalizeEmail(email), password,
-    options: { emailRedirectTo: window.location.origin, data: { first_name: firstName, last_name: lastName, member_id: memberId } },
+  const data = await invokeEmailCode({
+    action: 'signup',
+    purpose: 'signup',
+    email: normalizeEmail(email),
+    password,
+    firstName,
+    lastName,
+    memberId,
   })
-  if (error) throw error
+  writeEmailCodeState(email, 'signup', data?.state)
   return data
 }
 
 export async function verifyEmailCode(email, token, type = 'signup') {
   if (!supabase) throw new Error('Email verification is not configured.')
-  const purpose = ['signup', 'recovery', 'email'].includes(type) ? type : 'signup'
-  const { data, error } = await supabase.auth.verifyOtp({ email: normalizeEmail(email), token: String(token || '').trim(), type: purpose })
+  const purpose = ['signup', 'recovery'].includes(type) ? type : 'signup'
+  const data = await invokeEmailCode({
+    action: 'verify',
+    purpose,
+    email: normalizeEmail(email),
+    code: String(token || '').trim(),
+    state: readEmailCodeState(email, purpose),
+  })
+  if (!data?.tokenHash || !data?.verificationType) {
+    throw new Error('Verification did not complete. Request a fresh code.')
+  }
+  const { data: authData, error } = await supabase.auth.verifyOtp({
+    token_hash: data.tokenHash,
+    type: data.verificationType,
+  })
   if (error) throw error
-  if (!data.session || !data.user) throw new Error('Verification did not establish an account session. Request a fresh code.')
-  if (purpose === 'recovery') sessionStorage.setItem(RECOVERY_SESSION_KEY, data.user.id)
-  return data
+  if (!authData.session || !authData.user) throw new Error('Verification did not establish an account session. Request a fresh code.')
+  if (purpose === 'recovery') sessionStorage.setItem(RECOVERY_SESSION_KEY, authData.user.id)
+  return authData
 }
 
 export async function resendEmailCode(email, purpose = 'signup') {
   if (!supabase) throw new Error('Email verification is not configured.')
-  if (purpose === 'recovery') return startPasswordRecoveryCode(email)
-  if (purpose === 'email') return startSignInEmailCode(email)
-  const { error } = await supabase.auth.resend({ type: 'signup', email: normalizeEmail(email), options: { emailRedirectTo: window.location.origin } })
-  if (error) throw error
-}
-
-export async function startSignInEmailCode(email) {
-  if (!supabase) throw new Error('Account sign-in is not configured.')
-  const { error } = await supabase.auth.signInWithOtp({ email: normalizeEmail(email), options: { shouldCreateUser: false, emailRedirectTo: window.location.origin } })
-  if (error) throw error
+  const normalizedPurpose = purpose === 'recovery' ? 'recovery' : 'signup'
+  const data = await invokeEmailCode({
+    action: 'resend',
+    purpose: normalizedPurpose,
+    email: normalizeEmail(email),
+    state: readEmailCodeState(email, normalizedPurpose),
+  })
+  writeEmailCodeState(email, normalizedPurpose, data?.state)
+  return data
 }
 
 export async function sendWelcomeEmail() {
@@ -107,8 +163,8 @@ export async function startPasswordRecoveryCode(email) {
     return result
   }
   if (!supabase) throw new Error('Password recovery is not configured.')
-  const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email), { redirectTo: `${window.location.origin}/reset-password` })
-  if (error) throw error
+  const data = await invokeEmailCode({ action: 'recovery', purpose: 'recovery', email: normalizeEmail(email) })
+  writeEmailCodeState(email, 'recovery', data?.state)
   return { ok: true }
 }
 

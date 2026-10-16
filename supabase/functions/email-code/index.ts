@@ -104,14 +104,18 @@ function codeMatches(provided: unknown, expected: string) {
   return a.length === 6 && expected.length === 6 && a === expected
 }
 
-async function sendWithResend({ email, code, purpose, apiKey, from }: {
-  email: string; code: string; purpose: string; apiKey: string; from: string
+async function sendWithResend({ email, code, purpose, apiKey, from, lovableKey }: {
+  email: string; code: string; purpose: string; apiKey: string; from: string; lovableKey: string
 }) {
   const subject = purpose === 'signup' ? 'Verify your Nexus Chat email' : 'Reset your Nexus Chat password'
   const action = purpose === 'signup' ? 'verify your email address' : 'reset your password'
-  const response = await fetch('https://api.resend.com/emails', {
+  const response = await fetch('https://connector-gateway.lovable.dev/resend/emails', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': `Bearer ${lovableKey}`,
+      'X-Connection-Api-Key': apiKey,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
       from,
       to: [email],
@@ -142,21 +146,16 @@ async function checkSendLimit(admin: ReturnType<typeof createAdminClient>, purpo
   return data === true
 }
 
-async function resolvePendingUser(admin: ReturnType<typeof createAdminClient>, email: string, purpose: string, fallbackUserId?: string) {
-  if (purpose === 'signup') {
-    try {
-      const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-      if (error) return fallbackUserId ? { id: fallbackUserId } : null
-      const user = data?.users?.find((item) => normalizedEmail(item.email) === email)
-      if (!user) return fallbackUserId ? { id: fallbackUserId } : null
-      return user
-    } catch {
-      return fallbackUserId ? { id: fallbackUserId } : null
-    }
+async function resolvePendingUser(admin: ReturnType<typeof createAdminClient>, email: string, _purpose: string, fallbackUserId?: string) {
+  try {
+    const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+    if (error) return fallbackUserId ? { id: fallbackUserId } : null
+    const user = data?.users?.find((item) => normalizedEmail(item.email) === email)
+    if (!user) return fallbackUserId ? { id: fallbackUserId } : null
+    return user
+  } catch {
+    return fallbackUserId ? { id: fallbackUserId } : null
   }
-  const { data, error } = await admin.from('members').select('auth_user_id').eq('email', email).maybeSingle()
-  if (error || !data?.auth_user_id) return fallbackUserId ? { id: fallbackUserId } : null
-  return { id: data.auth_user_id }
 }
 
 Deno.serve(async (req) => {
@@ -166,8 +165,9 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const resendApiKey = Deno.env.get('RESEND_API_KEY')
+  const lovableKey = Deno.env.get('LOVABLE_API_KEY')
   const sender = Deno.env.get('RESEND_FROM') || 'Nexus Chat <onboarding@resend.dev>'
-  if (!supabaseUrl || !serviceRoleKey || !resendApiKey) {
+  if (!supabaseUrl || !serviceRoleKey || !resendApiKey || !lovableKey) {
     return json(503, { error: 'Email verification is not configured on the server.' })
   }
 
@@ -217,7 +217,7 @@ Deno.serve(async (req) => {
     }
 
     try {
-      await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender })
+      await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender, lovableKey })
       const state = await sealPayload(payload, serviceRoleKey)
       return json(200, { ok: true, state })
     } catch (error) {
@@ -295,14 +295,9 @@ Deno.serve(async (req) => {
     if (error) return json(400, { error: error.message })
     generated = { user: data.user }
   } else {
-    const { data, error } = await admin
-      .from('members')
-      .select('auth_user_id')
-      .eq('email', email)
-      .maybeSingle()
-    if (error) return json(502, { error: 'Unable to send a recovery code right now.' })
-    if (!data?.auth_user_id) return json(200, { ok: true })
-    generated = { user: { id: data.auth_user_id } }
+    const existing = await resolvePendingUser(admin, email, purpose)
+    if (!existing) return json(200, { ok: true })
+    generated = { user: { id: existing.id } }
   }
 
   const code = generateVerificationCode()
@@ -316,7 +311,7 @@ Deno.serve(async (req) => {
   }, serviceRoleKey)
 
   try {
-    await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender })
+    await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender, lovableKey })
     return json(200, { ok: true, state })
   } catch (error) {
     return json(502, {
