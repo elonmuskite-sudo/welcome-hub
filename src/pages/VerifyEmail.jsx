@@ -1,3 +1,4 @@
+import ChatButton from '../components/chat/ChatButton'
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import AuthShell from '../components/AuthShell'
@@ -37,7 +38,6 @@ export default function VerifyEmail() {
   const { verifyEmailCode, resendVerificationCode } = useAuth()
   const appwriteProvider = new URLSearchParams(location.search).get('provider') === 'appwrite'
   const [email] = useState(() => location.state?.email || getPendingEmail())
-  const [password] = useState(() => location.state?.password || sessionStorage.getItem('nexus-pending-verification-password') || '')
   const [purpose] = useState(() => location.state?.purpose || new URLSearchParams(location.search).get('purpose') || getPendingPurpose())
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
@@ -84,14 +84,14 @@ export default function VerifyEmail() {
   const handleVerify = async (event) => {
     event.preventDefault()
     setError('')
-    if (!/^\d{6}$/.test(code)) {
-      setError('Enter the 6-digit code from your email.')
+    if (!/^\d{4,8}$/.test(code)) {
+      setError('Enter the code from your email.')
       return
     }
 
     setVerifying(true)
     try {
-      await verifyEmailCode(email, code, purpose, password)
+      await verifyEmailCode(email, code, purpose)
       clearPendingEmail()
       try {
         sessionStorage.removeItem(PENDING_PURPOSE_KEY)
@@ -124,35 +124,35 @@ export default function VerifyEmail() {
   if (appwriteProvider) {
     return (
       <AuthShell title="Verify your email" subtitle="Open the verification link Appwrite sent to your inbox." compact>
-        <div className="mx-auto w-full max-w-md rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-sm">
+        <div className="mx-auto w-full max-w-md text-foreground">
           {verifying && <p role="status" className="text-sm text-muted-foreground">Verifying your email...</p>}
           {!verifying && !error && (
             <>
               <p className="text-sm text-muted-foreground">
                 {email ? `A verification link was sent to ${email}.` : 'Check your inbox for the verification link.'}
               </p>
-              {message && <p role="status" className="mt-3 text-sm text-emerald-600">{message}</p>}
-              <button
+              {message && <p role="status" className="mt-3 text-sm text-primary">{message}</p>}
+              <ChatButton
                 type="button"
                 onClick={handleResend}
                 disabled={resending || resendCooldown > 0}
                 className="mt-5 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {resending ? 'Sending...' : resendCooldown ? `Resend in ${resendCooldown}s` : 'Resend verification link'}
-              </button>
+              </ChatButton>
             </>
           )}
           {error && (
             <>
               <p role="alert" className="text-sm text-destructive">{error}</p>
-              <button
+              <ChatButton
                 type="button"
                 onClick={handleResend}
                 disabled={resending || resendCooldown > 0}
                 className="mt-5 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {resending ? 'Sending...' : 'Request a new verification link'}
-              </button>
+              </ChatButton>
             </>
           )}
         </div>
@@ -164,12 +164,12 @@ export default function VerifyEmail() {
     <AuthShell
       title="Verify your email"
       subtitle={email
-        ? `${purpose === 'recovery' ? 'Enter the 6-digit password recovery code sent to' : 'Enter the 6-digit verification code sent to'} ${email}.`
+        ? `${purpose === 'recovery' ? 'Enter the password recovery code sent to' : 'Enter the verification code sent to'} ${email}.`
         : 'Complete registration or password recovery to request a code.'}
       compact
     >
       {email ? (
-        <div className="mx-auto w-full max-w-md rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-sm">
+        <div className="mx-auto w-full max-w-md text-foreground">
           <form onSubmit={handleVerify} className="space-y-5">
             <div>
               <label htmlFor="verification-code" className="mb-2 block text-sm font-medium">Verification code</label>
@@ -177,15 +177,15 @@ export default function VerifyEmail() {
                 id="verification-code"
                 type="text"
                 value={code}
-                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 8))}
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                pattern="[0-9]{6}"
-                minLength={6}
-                maxLength={6}
+                pattern="[0-9]{4,8}"
+                minLength={4}
+                maxLength={8}
                 required
                 autoFocus
-                className="w-full rounded-xl border border-input bg-background px-4 py-3 text-center text-2xl font-semibold tracking-[0.3em] text-foreground outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-xl border border-input bg-background px-4 py-3 text-center text-2xl font-semibold tracking-normal text-foreground outline-none focus:ring-2 focus:ring-ring"
                 aria-describedby="verification-code-help"
               />
               <p id="verification-code-help" className="mt-2 text-sm text-muted-foreground">
@@ -194,27 +194,27 @@ export default function VerifyEmail() {
             </div>
 
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-            {message && <p role="status" className="text-sm text-emerald-600">{message}</p>}
+            {message && <p role="status" className="text-sm text-primary">{message}</p>}
 
-            <button
+            <ChatButton
               type="submit"
-              disabled={verifying || code.length !== 6}
+              disabled={verifying || code.length < 4}
               className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {verifying ? 'Verifying...' : purpose === 'recovery' ? 'Verify recovery code' : 'Verify email'}
-            </button>
+            </ChatButton>
           </form>
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm">
             <span className="text-muted-foreground">Didn’t receive the code?</span>
-            <button
+            <ChatButton
               type="button"
               onClick={handleResend}
               disabled={resending || resendCooldown > 0}
               className="font-medium text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
             >
               {resending ? 'Sending...' : resendCooldown ? `Resend in ${resendCooldown}s` : 'Resend code'}
-            </button>
+            </ChatButton>
           </div>
         </div>
       ) : (

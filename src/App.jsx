@@ -36,7 +36,7 @@ function App() {
             <Route path="/register" element={<AuthGuard><Register /></AuthGuard>} />
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/forgot-password" element={<AuthGuard><ForgotPassword /></AuthGuard>} />
-            <Route path="/reset-password" element={<AuthGuard><ResetPassword /></AuthGuard>} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route
               path="/app"
               element={

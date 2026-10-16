@@ -20,87 +20,51 @@ export function isSupabaseConfigured() {
   return isAppwriteAuthEnabled() || Boolean(supabase && supabaseUrl && supabaseAnonKey)
 }
 
-const EMAIL_CODE_STATE_KEY = 'nexus_auth_email_code_state'
-
-function readEmailCodeState() {
-  try {
-    return sessionStorage.getItem(EMAIL_CODE_STATE_KEY) || ''
-  } catch {
-    return ''
-  }
-}
-
-function writeEmailCodeState(state) {
-  try {
-    if (state) sessionStorage.setItem(EMAIL_CODE_STATE_KEY, state)
-    else sessionStorage.removeItem(EMAIL_CODE_STATE_KEY)
-  } catch {
-    // sessionStorage unavailable; the flow will require a fresh code
-  }
-}
-
-async function requestEmailCode(body) {
-  if (!supabase) throw new Error('Supabase Auth is not configured.')
-  const { data: result, error: invokeError } = await supabase.functions.invoke('email-code', {
-    body: { ...body, state: readEmailCodeState() },
-  })
-  if (invokeError) {
-    const message = result?.error || invokeError.message || 'Could not send the email code.'
-    const error = new Error(message)
-    error.verificationPending = Boolean(result?.verificationPending)
-    throw error
-  }
-  if (result?.error) {
-    const error = new Error(result.error)
-    error.verificationPending = Boolean(result.verificationPending)
-    if (result.state) writeEmailCodeState(result.state)
-    throw error
-  }
-  if (body.action === 'verify') writeEmailCodeState('')
-  else if (result?.state) writeEmailCodeState(result.state)
-  return result
-}
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase()
+export const RECOVERY_SESSION_KEY = 'nexus-recovery-user'
 
 export async function startSignupEmailCode({ email, password, firstName, lastName, memberId }) {
-  return requestEmailCode({
-    action: 'signup',
-    purpose: 'signup',
-    email,
-    password,
-    firstName,
-    lastName,
-    memberId,
+  if (!supabase) throw new Error('Account registration is not configured.')
+  if (await isPasswordPwned(password)) throw new Error('This password has appeared in known data breaches. Choose another password.')
+  const { data, error } = await supabase.auth.signUp({
+    email: normalizeEmail(email), password,
+    options: { emailRedirectTo: window.location.origin, data: { first_name: firstName, last_name: lastName, member_id: memberId } },
   })
+  if (error) throw error
+  return data
 }
 
-export async function verifyEmailCode(email, token, type = 'signup', password = '') {
-  if (!supabase) throw new Error('Supabase Auth is not configured.')
-  const purpose = type === 'recovery' ? 'recovery' : 'signup'
-  const result = await requestEmailCode({
-    action: 'verify',
-    purpose,
-    email,
-    code: String(token || '').trim(),
-  })
+export async function verifyEmailCode(email, token, type = 'signup') {
+  if (!supabase) throw new Error('Email verification is not configured.')
+  const purpose = ['signup', 'recovery', 'email'].includes(type) ? type : 'signup'
+  const { data, error } = await supabase.auth.verifyOtp({ email: normalizeEmail(email), token: String(token || '').trim(), type: purpose })
+  if (error) throw error
+  if (!data.session || !data.user) throw new Error('Verification did not establish an account session. Request a fresh code.')
+  if (purpose === 'recovery') sessionStorage.setItem(RECOVERY_SESSION_KEY, data.user.id)
+  return data
+}
 
-  if (purpose === 'signup' && password) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: String(email || '').trim().toLowerCase(),
-      password,
-    })
-    if (error) throw error
-    return data
+export async function resendEmailCode(email, purpose = 'signup') {
+  if (!supabase) throw new Error('Email verification is not configured.')
+  if (purpose === 'recovery') return startPasswordRecoveryCode(email)
+  if (purpose === 'email') return startSignInEmailCode(email)
+  const { error } = await supabase.auth.resend({ type: 'signup', email: normalizeEmail(email), options: { emailRedirectTo: window.location.origin } })
+  if (error) throw error
+}
+
+export async function startSignInEmailCode(email) {
+  if (!supabase) throw new Error('Account sign-in is not configured.')
+  const { error } = await supabase.auth.signInWithOtp({ email: normalizeEmail(email), options: { shouldCreateUser: false, emailRedirectTo: window.location.origin } })
+  if (error) throw error
+}
+
+export async function sendWelcomeEmail() {
+  if (!supabase || isAppwriteAuthEnabled()) return
+  const { error } = await supabase.functions.invoke('welcome-email', { body: {} })
+  if (error) {
+    const details = error.context instanceof Response ? await error.context.text() : error.message
+    console.error('Welcome email delivery:', details)
   }
-
-  return result
-}
-
-export async function resendEmailCode(email, purpose) {
-  return requestEmailCode({
-    action: 'resend',
-    purpose,
-    email,
-  })
 }
 
 export async function signInWithEmail(email, password) {
@@ -142,11 +106,10 @@ export async function startPasswordRecoveryCode(email) {
     }
     return result
   }
-  return requestEmailCode({
-    action: 'recovery',
-    purpose: 'recovery',
-    email,
-  })
+  if (!supabase) throw new Error('Password recovery is not configured.')
+  const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email), { redirectTo: `${window.location.origin}/reset-password` })
+  if (error) throw error
+  return { ok: true }
 }
 
 export async function updateAuthenticatedPassword(password) {
@@ -173,7 +136,7 @@ export async function getMemberProfile(userId) {
   if (!supabase) throw new Error('Supabase Auth is not configured.')
   const { data, error } = await supabase
     .from('members')
-    .select('id, member_id, first_name, last_name, full_name, email, email_verified, avatar_url, bio, interests, created_at')
+    .select('id, member_id, first_name, last_name, full_name, avatar_url, bio, interests, created_at')
     .eq('id', userId)
     .single()
   if (error) throw error
@@ -246,7 +209,7 @@ export async function updateMemberProfile(userId, updates) {
     .from('members')
     .update(profileUpdates)
     .eq('id', userId)
-    .select('id, member_id, first_name, last_name, full_name, email, email_verified, avatar_url, bio, interests, created_at')
+    .select('id, member_id, first_name, last_name, full_name, avatar_url, bio, interests, created_at')
     .single()
   if (error) throw error
   const { data: isAdmin } = await supabase.rpc('has_role', { _user_id: userId, _role: 'admin' })

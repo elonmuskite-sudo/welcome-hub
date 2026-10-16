@@ -1,4 +1,9 @@
 # Chat refresh
+## Account verification and welcome email
+- [ ] Restore native email verification, sign-up, sign-in, and safe password recovery.
+- [ ] Add a branded animated welcome email sent once after email confirmation via connected Resend.
+- [ ] Verify account flows and delivery; document any production prerequisites.
+
 - [x] Repair message history, realtime cache updates, and sending errors; reject non-shareable attachments.
 - [x] Add reaction event persistence, replies, copy, and conversation search.
 - [x] Restore chat styling, transitions, and mobile chat access.

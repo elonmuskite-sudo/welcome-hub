@@ -4,6 +4,8 @@ export function isAdminRole(role) {
 }
 import {
   getMemberProfile,
+  sendWelcomeEmail,
+  RECOVERY_SESSION_KEY,
   isSupabaseConfigured,
   resendEmailCode,
   startPasswordRecoveryCode,
@@ -108,7 +110,10 @@ export function AuthProvider({ children }) {
         return
       }
       try {
-        const profile = await getMemberProfile(session.user.id)
+        const { data, error: validationError } = await supabase.auth.getUser()
+        if (validationError || !data.user) throw validationError || new Error('Session expired.')
+        const profile = await getMemberProfile(data.user.id)
+        void sendWelcomeEmail()
         if (!active) return
         setUser(normalizeUser({
           ...profile,
@@ -123,7 +128,8 @@ export function AuthProvider({ children }) {
       }
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' && session?.user) sessionStorage.setItem(RECOVERY_SESSION_KEY, session.user.id)
       setTimeout(() => { void syncSession(session) }, 0)
     })
     supabase.auth.getSession()
@@ -149,6 +155,7 @@ export function AuthProvider({ children }) {
     if (!isSupabaseConfigured()) throw new Error('Account sign-in is not configured.')
     const { user: authUser } = await signInWithEmail(email, password)
     const profile = await getMemberProfile(authUser.id)
+    void sendWelcomeEmail()
     const sessionUser = normalizeUser({
       ...profile,
       email: authUser.email,
@@ -173,7 +180,9 @@ export function AuthProvider({ children }) {
     if (!authUser && purpose === 'recovery') {
       return { ok: true }
     }
+    if (purpose === 'recovery') return { ok: true }
     const profile = await getMemberProfile(authUser.id)
+    void sendWelcomeEmail()
     const sessionUser = normalizeUser({
       ...profile,
       email: authUser.email,
@@ -251,6 +260,7 @@ export function AuthProvider({ children }) {
       await updateAuthenticatedPassword(newPassword)
     }
     await signOutFromSupabase()
+    sessionStorage.removeItem(RECOVERY_SESSION_KEY)
     setUser(null)
     return { ok: true }
   }, [])

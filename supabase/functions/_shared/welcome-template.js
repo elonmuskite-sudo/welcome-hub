@@ -1,0 +1,15 @@
+const escape = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]))
+const palette = { ink: '#172033', muted: '#526176', blue: '#0084ff', white: '#ffffff', line: '#e5eaf0' }
+
+export function welcomeTemplate({ name, appUrl }) {
+  const url = new URL(appUrl)
+  if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('A secure app URL is required.')
+  const greeting = name ? `Welcome, ${escape(name)}.` : 'Welcome to Nexus.'
+  const app = escape(new URL('/app', url).href)
+  const image = escape(new URL('/email/nexus-welcome.gif', url).href)
+  return {
+    subject: 'Welcome to Nexus — your account is ready',
+    text: `Welcome${name ? `, ${name}` : ' to Nexus'}. Your email is verified and your account is ready. Open Nexus: ${new URL('/app', url).href}. You can update your name and photo in your profile. If you did not create this account, reset your password from the sign-in page.`,
+    html: `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:${palette.white};font-family:Arial,Helvetica,sans-serif;color:${palette.ink}"><div style="display:none;max-height:0;overflow:hidden">Your email is verified. Welcome to your Nexus account.</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:40px 20px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:540px"><tr><td style="font-size:22px;font-weight:700;padding-bottom:24px">NEXUS<span style="color:${palette.blue}">.</span></td></tr><tr><td><img src="${image}" width="160" height="120" alt="Nexus — connected" style="display:block;border:0;width:160px;height:120px"></td></tr><tr><td><h1 style="font-size:34px;line-height:1.2;margin:24px 0 16px">${greeting}</h1><p style="color:${palette.muted};font-size:17px;line-height:1.7;margin:0 0 28px">Your email is verified and your account is ready. It’s good to have you here.</p><table role="presentation" cellspacing="0" cellpadding="0"><tr><td style="background:${palette.blue};border-radius:8px"><a href="${app}" style="display:inline-block;padding:16px 28px;color:${palette.white};font-size:16px;font-weight:bold;text-decoration:none">Open Nexus &rarr;</a></td></tr></table><p style="font-size:15px;line-height:1.8;color:${palette.muted};margin:28px 0">Make it yours: add a name and photo to your profile, then start a conversation.</p></td></tr><tr><td style="border-top:1px solid ${palette.line};padding-top:24px;font-size:12px;line-height:1.8;color:${palette.muted}">This account email follows your registration with Nexus. If you didn’t create this account, reset your password from the sign-in page.</td></tr></table></td></tr></table></body></html>`,
+  }
+}
