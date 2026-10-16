@@ -37,7 +37,6 @@ export default function VerifyEmail() {
   const { verifyEmailCode, resendVerificationCode } = useAuth()
   const appwriteProvider = new URLSearchParams(location.search).get('provider') === 'appwrite'
   const [email] = useState(() => location.state?.email || getPendingEmail())
-  const [password] = useState(() => location.state?.password || sessionStorage.getItem('nexus-pending-verification-password') || '')
   const [purpose] = useState(() => location.state?.purpose || new URLSearchParams(location.search).get('purpose') || getPendingPurpose())
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
@@ -84,14 +83,14 @@ export default function VerifyEmail() {
   const handleVerify = async (event) => {
     event.preventDefault()
     setError('')
-    if (!/^\d{6}$/.test(code)) {
-      setError('Enter the 6-digit code from your email.')
+    if (!/^\d{4,8}$/.test(code)) {
+      setError('Enter the code from your email.')
       return
     }
 
     setVerifying(true)
     try {
-      await verifyEmailCode(email, code, purpose, password)
+      await verifyEmailCode(email, code, purpose)
       clearPendingEmail()
       try {
         sessionStorage.removeItem(PENDING_PURPOSE_KEY)
@@ -164,7 +163,7 @@ export default function VerifyEmail() {
     <AuthShell
       title="Verify your email"
       subtitle={email
-        ? `${purpose === 'recovery' ? 'Enter the 6-digit password recovery code sent to' : 'Enter the 6-digit verification code sent to'} ${email}.`
+        ? `${purpose === 'recovery' ? 'Enter the password recovery code sent to' : 'Enter the verification code sent to'} ${email}.`
         : 'Complete registration or password recovery to request a code.'}
       compact
     >
@@ -177,15 +176,15 @@ export default function VerifyEmail() {
                 id="verification-code"
                 type="text"
                 value={code}
-                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 8))}
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                pattern="[0-9]{6}"
-                minLength={6}
-                maxLength={6}
+                pattern="[0-9]{4,8}"
+                minLength={4}
+                maxLength={8}
                 required
                 autoFocus
-                className="w-full rounded-xl border border-input bg-background px-4 py-3 text-center text-2xl font-semibold tracking-[0.3em] text-foreground outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-xl border border-input bg-background px-4 py-3 text-center text-2xl font-semibold tracking-normal text-foreground outline-none focus:ring-2 focus:ring-ring"
                 aria-describedby="verification-code-help"
               />
               <p id="verification-code-help" className="mt-2 text-sm text-muted-foreground">
@@ -198,7 +197,7 @@ export default function VerifyEmail() {
 
             <button
               type="submit"
-              disabled={verifying || code.length !== 6}
+              disabled={verifying || code.length < 4}
               className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {verifying ? 'Verifying...' : purpose === 'recovery' ? 'Verify recovery code' : 'Verify email'}

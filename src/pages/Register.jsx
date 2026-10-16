@@ -51,9 +51,7 @@ export default function Register() {
         try {
           sessionStorage.setItem('nexus-pending-verification-email', result.email)
           sessionStorage.setItem('nexus-pending-verification-purpose', 'signup')
-          if (result.verificationMethod !== 'link') {
-            sessionStorage.setItem('nexus-pending-verification-password', password)
-          }
+          sessionStorage.removeItem('nexus-pending-verification-password')
         } catch {
           // Route state still carries the address for this verification visit.
         }
@@ -64,7 +62,7 @@ export default function Register() {
             state: {
               email: result.email,
               purpose: 'signup',
-              ...(result.verificationMethod === 'link' ? {} : { password }),
+
             },
           },
         )
@@ -78,7 +76,7 @@ export default function Register() {
         try {
           sessionStorage.setItem('nexus-pending-verification-email', pendingEmail)
           sessionStorage.setItem('nexus-pending-verification-purpose', 'signup')
-          if (!appwriteMode) sessionStorage.setItem('nexus-pending-verification-password', password)
+          sessionStorage.removeItem('nexus-pending-verification-password')
         } catch {
           // Route state carries the address for this visit.
         }
@@ -87,7 +85,7 @@ export default function Register() {
           state: {
             email: pendingEmail,
             purpose: 'signup',
-            ...(appwriteMode ? {} : { password }),
+
             notice: 'Your account was created, but email delivery failed. Wait briefly, then request another verification message.',
           },
         })
