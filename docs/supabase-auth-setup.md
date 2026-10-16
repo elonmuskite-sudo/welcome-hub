@@ -1,6 +1,6 @@
 # Supabase Auth and Resend setup
 
-The application uses Supabase Auth for credentials and recovery, Supabase `members` rows for Nexus profiles, and Appwrite for the existing chat data. A Vercel serverless function creates an unconfirmed Supabase user, generates a six-digit code, and sends signup, resend, and recovery codes directly through the Resend API. After validating the code, it exchanges a short-lived Supabase token hash for the browser auth session. `RESEND_API_KEY` is server-only and must never be exposed through a `VITE_` variable or browser bundle.
+The application uses Supabase Auth for credentials and recovery, Supabase `members` rows for Nexus profiles, and Appwrite for the existing chat data. A Vercel serverless function or the `email-code` Edge Function creates an unconfirmed Supabase user, generates a native Auth OTP, and sends signup, resend, and recovery codes directly through the Resend API. The browser verifies that six-digit code with `verifyOtp`; email verification links are not part of the flow. `RESEND_API_KEY` is server-only and must never be exposed through a `VITE_` variable or browser bundle.
 
 ## 1. Apply the database migration
 
@@ -29,11 +29,10 @@ where auth_user_id = (
 In Supabase Dashboard, open **Authentication → URL Configuration**:
 
 - Site URL: `https://nexus-chat-world.com`
-- Redirect URLs: `https://nexus-chat-world.com/verify-email`
-- Redirect URLs: `https://nexus-chat-world.com/verify-email?purpose=recovery`
-- For local development, add `http://localhost:5173/verify-email` and `http://localhost:5173/verify-email?purpose=recovery`.
+- Redirect URLs are not used to complete email verification. Users enter the Resend OTP on `/verify-email` and `/verify-email?purpose=recovery`.
+- For local development, open `http://localhost:5173/verify-email` after registration or recovery.
 
-Keep **Confirm email** enabled in **Authentication → Providers → Email**. App verification codes expire after 10 minutes, allow at most five guesses, and are rate-limited by the database RPC installed by the schema migration. Supabase's built-in email templates are not used for these flows.
+Keep **Confirm email** enabled in **Authentication → Providers → Email**. App verification codes expire after 10 minutes, allow at most five guesses, and are rate-limited by the database RPC installed by the schema migration. Do not send Supabase's built-in confirmation or recovery links; Resend delivers the OTP instead.
 
 ## 3. Configure Resend API
 

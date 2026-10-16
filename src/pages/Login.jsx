@@ -15,7 +15,7 @@ export default function Login() {
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const { login, user } = useAuth()
+  const { login, user, resendVerificationCode } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -43,6 +43,27 @@ export default function Login() {
       const destination = result?.user?.role === 'admin' ? '/admin' : '/app'
       navigate(destination)
     } catch (err) {
+      const pendingEmail = email.trim().toLowerCase()
+      const unconfirmed = err?.code === 'email_not_confirmed' || /not confirmed/i.test(err.message || '')
+      if (unconfirmed) {
+        try {
+          sessionStorage.setItem('nexus-pending-verification-email', pendingEmail)
+          sessionStorage.setItem('nexus-pending-verification-purpose', 'signup')
+        } catch {
+          // Route state still carries the address for this verification visit.
+        }
+        let notice = 'Enter the verification code sent to your email.'
+        try {
+          await resendVerificationCode(pendingEmail, 'signup')
+        } catch (resendError) {
+          notice = resendError.message || notice
+        }
+        navigate('/verify-email', {
+          replace: true,
+          state: { email: pendingEmail, purpose: 'signup', notice },
+        })
+        return
+      }
       setError(err.message || 'Login failed')
     } finally {
       setLoading(false)

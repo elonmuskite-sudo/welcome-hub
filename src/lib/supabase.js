@@ -11,7 +11,7 @@ export const supabase = supabaseUrl && supabaseAnonKey
       auth: {
         persistSession: !appwriteSelected,
         autoRefreshToken: !appwriteSelected,
-        detectSessionInUrl: !appwriteSelected,
+        detectSessionInUrl: false,
       },
     })
   : null
@@ -22,96 +22,194 @@ export function isSupabaseConfigured() {
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase()
 export const RECOVERY_SESSION_KEY = 'nexus-recovery-user'
-const EMAIL_CODE_STATE_KEY = 'nexus-email-code-state'
+const OTP_TYPE_KEY = 'nexus-email-otp-type'
+const OTP_TYPES = new Set(['signup', 'invite', 'magiclink', 'recovery', 'email', 'email_change'])
 
-function readEmailCodeState(email, purpose) {
-  try {
-    const saved = JSON.parse(sessionStorage.getItem(EMAIL_CODE_STATE_KEY) || 'null')
-    if (saved && saved.email === normalizeEmail(email) && saved.purpose === purpose) return saved.state || ''
-  } catch {
-    // Session storage is optional; a missing state simply requires a fresh code.
-  }
-  return ''
+function normalizePurpose(value) {
+  return ['signup', 'recovery', 'email'].includes(value) ? value : 'signup'
 }
 
-function writeEmailCodeState(email, purpose, state) {
-  if (!state) return
+function defaultOtpType(purpose) {
+  if (purpose === 'recovery') return 'recovery'
+  if (purpose === 'email') return 'email'
+  return 'signup'
+}
+
+function readOtpType(email, purpose) {
   try {
-    sessionStorage.setItem(EMAIL_CODE_STATE_KEY, JSON.stringify({ email: normalizeEmail(email), purpose, state }))
+    const saved = JSON.parse(sessionStorage.getItem(OTP_TYPE_KEY) || 'null')
+    if (
+      saved
+      && saved.email === normalizeEmail(email)
+      && saved.purpose === purpose
+      && OTP_TYPES.has(saved.otpType)
+    ) {
+      return saved.otpType
+    }
+  } catch {
+    // Session storage is optional; verification still works with the purpose default.
+  }
+  return defaultOtpType(purpose)
+}
+
+function writeOtpType(email, purpose, otpType) {
+  try {
+    sessionStorage.setItem(OTP_TYPE_KEY, JSON.stringify({
+      email: normalizeEmail(email),
+      purpose,
+      otpType: OTP_TYPES.has(otpType) ? otpType : defaultOtpType(purpose),
+    }))
   } catch {
     // Session storage is optional; verification still works while the page stays open.
   }
 }
 
+function throwEmailCodeError(body, fallback) {
+  const error = new Error(body?.error || fallback)
+  if (body?.verificationPending) error.verificationPending = true
+  throw error
+}
+
+async function invokeEmailCodeViaApi(payload) {
+  const response = await fetch('/api/auth/email-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(payload),
+  })
+  let body = null
+  try {
+    body = await response.json()
+  } catch {
+    body = null
+  }
+  return { status: response.status, ok: response.ok, body }
+}
+
 async function invokeEmailCode(payload) {
-  if (!supabase) throw new Error('Email verification is not configured.')
+  let apiResult = null
+  try {
+    apiResult = await invokeEmailCodeViaApi(payload)
+  } catch {
+    apiResult = null
+  }
+
+  if (apiResult?.ok && !apiResult.body?.error) {
+    return apiResult.body || { ok: true }
+  }
+
+  const apiStatus = apiResult?.status
+  if (apiResult && [400, 429].includes(apiStatus)) {
+    throwEmailCodeError(apiResult.body, 'Could not send a verification code.')
+  }
+
+  const shouldFallback = !apiResult || [401, 403, 404, 405, 501, 502, 503].includes(apiStatus)
+  if (!shouldFallback) {
+    throwEmailCodeError(apiResult?.body, 'Could not send a verification code.')
+  }
+
+  if (!supabase) throwEmailCodeError(apiResult?.body, 'Email verification is not configured.')
+
   const { data, error } = await supabase.functions.invoke('email-code', { body: payload })
   if (error) {
     let details = error.message
+    let verificationPending = false
     try {
       if (error.context instanceof Response) {
         const body = await error.context.json()
         if (body?.error) details = body.error
+        verificationPending = Boolean(body?.verificationPending)
       }
     } catch {
       // Keep the original error message when the response is not JSON.
     }
-    throw new Error(details)
+    throwEmailCodeError({ error: details, verificationPending }, details)
   }
-  if (data?.error) throw new Error(data.error)
+  if (data?.error) throwEmailCodeError(data, data.error)
+  return data
+}
+
+function rememberIssuedOtp(email, purpose, data) {
+  writeOtpType(email, purpose, data?.otpType)
   return data
 }
 
 export async function startSignupEmailCode({ email, password, firstName, lastName, memberId }) {
   if (!supabase) throw new Error('Account registration is not configured.')
   if (await isPasswordPwned(password)) throw new Error('This password has appeared in known data breaches. Choose another password.')
+  const normalized = normalizeEmail(email)
   const data = await invokeEmailCode({
     action: 'signup',
     purpose: 'signup',
-    email: normalizeEmail(email),
+    email: normalized,
     password,
     firstName,
     lastName,
     memberId,
   })
-  writeEmailCodeState(email, 'signup', data?.state)
-  return data
+  return rememberIssuedOtp(normalized, 'signup', data)
+}
+
+export async function startSignInEmailCode(email) {
+  if (!supabase) throw new Error('Email sign-in is not configured.')
+  const normalized = normalizeEmail(email)
+  const data = await invokeEmailCode({
+    action: 'email',
+    purpose: 'email',
+    email: normalized,
+  })
+  return rememberIssuedOtp(normalized, 'email', data)
 }
 
 export async function verifyEmailCode(email, token, type = 'signup') {
   if (!supabase) throw new Error('Email verification is not configured.')
-  const purpose = ['signup', 'recovery'].includes(type) ? type : 'signup'
-  const data = await invokeEmailCode({
-    action: 'verify',
-    purpose,
-    email: normalizeEmail(email),
-    code: String(token || '').trim(),
-    state: readEmailCodeState(email, purpose),
-  })
-  if (!data?.tokenHash || !data?.verificationType) {
-    throw new Error('Verification did not complete. Request a fresh code.')
+  const purpose = normalizePurpose(type)
+  const otpTypes = [...new Set([
+    readOtpType(email, purpose),
+    defaultOtpType(purpose),
+    purpose === 'signup' ? 'magiclink' : '',
+    purpose === 'email' ? 'magiclink' : '',
+  ].filter(Boolean))]
+
+  let authData = null
+  let lastError = null
+  for (const otpType of otpTypes) {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: normalizeEmail(email),
+      token: String(token || '').trim(),
+      type: otpType,
+    })
+    if (!error && data?.session && data?.user) {
+      authData = data
+      break
+    }
+    lastError = error
+    if (/expired|otp_expired/i.test(error?.message || '')) break
   }
-  const { data: authData, error } = await supabase.auth.verifyOtp({
-    token_hash: data.tokenHash,
-    type: data.verificationType,
-  })
-  if (error) throw error
-  if (!authData.session || !authData.user) throw new Error('Verification did not establish an account session. Request a fresh code.')
+  if (!authData) {
+    const message = lastError?.message || ''
+    if (/expired|otp_expired/i.test(message)) throw new Error('This code expired. Request a new one.')
+    throw lastError || new Error('Verification did not establish an account session. Request a fresh code.')
+  }
   if (purpose === 'recovery') sessionStorage.setItem(RECOVERY_SESSION_KEY, authData.user.id)
+  try {
+    sessionStorage.removeItem(OTP_TYPE_KEY)
+  } catch {
+    // Session storage is optional.
+  }
   return authData
 }
 
 export async function resendEmailCode(email, purpose = 'signup') {
   if (!supabase) throw new Error('Email verification is not configured.')
-  const normalizedPurpose = purpose === 'recovery' ? 'recovery' : 'signup'
+  const normalizedPurpose = normalizePurpose(purpose)
+  const normalized = normalizeEmail(email)
   const data = await invokeEmailCode({
     action: 'resend',
     purpose: normalizedPurpose,
-    email: normalizeEmail(email),
-    state: readEmailCodeState(email, normalizedPurpose),
+    email: normalized,
   })
-  writeEmailCodeState(email, normalizedPurpose, data?.state)
-  return data
+  return rememberIssuedOtp(normalized, normalizedPurpose, data)
 }
 
 export async function sendWelcomeEmail() {
@@ -163,8 +261,9 @@ export async function startPasswordRecoveryCode(email) {
     return result
   }
   if (!supabase) throw new Error('Password recovery is not configured.')
-  const data = await invokeEmailCode({ action: 'recovery', purpose: 'recovery', email: normalizeEmail(email) })
-  writeEmailCodeState(email, 'recovery', data?.state)
+  const normalized = normalizeEmail(email)
+  const data = await invokeEmailCode({ action: 'recovery', purpose: 'recovery', email: normalized })
+  rememberIssuedOtp(normalized, 'recovery', data)
   return { ok: true }
 }
 

@@ -85,7 +85,7 @@ export default function Register() {
   return (
     <AuthShell
       title="Create your secure Nexus account"
-      subtitle="Register with your email address. You’ll receive a Nexus number for your profile after signing up."
+      subtitle="Register with your email address. We’ll email a one-time code to verify your account."
       compact
     >
       <div className="w-full">

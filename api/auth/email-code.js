@@ -1,10 +1,10 @@
-import { createDecipheriv, createHash, createCipheriv, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
+import { otpEmail } from '../../supabase/functions/_shared/otp-email.js'
 
-const COOKIE_NAME = 'nexus_auth_email_code'
-const CODE_TTL_SECONDS = 600
 const RATE_LIMIT_WINDOW_SECONDS = 60
 const RATE_LIMIT_PER_WINDOW = 3
+const PURPOSES = new Set(['signup', 'recovery', 'email'])
 
 function json(res, status, body) {
   res.setHeader('Cache-Control', 'no-store')
@@ -35,44 +35,10 @@ function secureOrigin(req) {
   }
 }
 
-function encryptionKey(secret) {
-  return createHash('sha256').update(secret).digest()
-}
-
-function encryptPayload(payload, secret) {
-  const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', encryptionKey(secret), iv)
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload)), cipher.final()])
-  return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64url')
-}
-
-function decryptPayload(value, secret) {
-  try {
-    const packed = Buffer.from(value, 'base64url')
-    const decipher = createDecipheriv('aes-256-gcm', encryptionKey(secret), packed.subarray(0, 12))
-    decipher.setAuthTag(packed.subarray(12, 28))
-    const plaintext = Buffer.concat([decipher.update(packed.subarray(28)), decipher.final()])
-    return JSON.parse(plaintext.toString('utf8'))
-  } catch {
-    return null
-  }
-}
-
-function getCookie(req, name) {
-  const entry = String(req.headers.cookie || '').split(';').map((part) => part.trim())
-    .find((part) => part.startsWith(`${name}=`))
-  return entry ? decodeURIComponent(entry.slice(name.length + 1)) : ''
-}
-
-function setCodeCookie(req, res, payload, secret) {
-  const secure = req.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production'
-  const cookie = `${COOKIE_NAME}=${encodeURIComponent(encryptPayload(payload, secret))}; Path=/api/auth; Max-Age=${CODE_TTL_SECONDS}; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`
-  res.setHeader('Set-Cookie', cookie)
-}
-
-function clearCodeCookie(req, res) {
-  const secure = req.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production'
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/api/auth; Max-Age=0; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`)
+function createAdminClient(url, serviceRoleKey) {
+  return createClient(url, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
 }
 
 async function checkSendLimit(admin, purpose, email) {
@@ -86,63 +52,85 @@ async function checkSendLimit(admin, purpose, email) {
   return data === true
 }
 
-function codeMatches(provided, expected) {
-  const providedBytes = Buffer.from(String(provided || ''))
-  const expectedBytes = Buffer.from(String(expected || ''))
-  return providedBytes.length === 6
-    && expectedBytes.length === 6
-    && timingSafeEqual(providedBytes, expectedBytes)
+function nativeEmailOtp(data) {
+  return data?.properties?.email_otp || data?.email_otp || ''
 }
 
-function generateVerificationCode(previousCode) {
-  const candidate = String(randomInt(0, 1_000_000)).padStart(6, '0')
-  if (!previousCode || candidate !== previousCode) return candidate
-  return String((Number.parseInt(candidate, 10) + 1) % 1_000_000).padStart(6, '0')
+function nativeVerificationType(data) {
+  return data?.properties?.verification_type || data?.verification_type || ''
 }
 
-async function sendWithResend({ email, code, purpose, apiKey, from }) {
-  const subject = purpose === 'signup' ? 'Verify your Nexus Chat email' : 'Reset your Nexus Chat password'
-  const action = purpose === 'signup' ? 'verify your email address' : 'reset your password'
+async function findAuthUserByEmail(admin, email) {
+  try {
+    const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+    if (error) return null
+    return data?.users?.find((item) => normalizedEmail(item.email) === email) || null
+  } catch {
+    return null
+  }
+}
+
+async function sendWithResend({ email, code, purpose, apiKey, from, idempotencyKey }) {
+  const template = otpEmail({ code, purpose })
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey.slice(0, 256),
     },
     body: JSON.stringify({
       from,
       to: [email],
-      subject,
-      text: `Your Nexus Chat verification code is ${code}. Enter this code to ${action}. It expires in 10 minutes. If you did not request this, ignore this email.`,
-      html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;color:#172033"><h1 style="font-size:22px">Nexus Chat</h1><p>Use this code to ${action}:</p><p style="font-size:32px;font-weight:700;letter-spacing:8px">${code}</p><p>This code expires in 10 minutes. If you did not request this, you can ignore this email.</p></div>`,
+      subject: template.subject,
+      text: template.text,
+      html: template.html,
     }),
   })
 
   if (!response.ok) throw new Error('Email delivery failed. Check the Resend API key and verified sender domain.')
 }
 
-async function resolvePendingUser(admin, email, purpose, fallbackUserId) {
-  if (purpose === 'signup') {
-    try {
-      const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-      if (error) return fallbackUserId ? { id: fallbackUserId } : null
-      const user = data?.users?.find((item) => normalizedEmail(item.email) === normalizedEmail(email))
-      if (!user) return fallbackUserId ? { id: fallbackUserId } : null
-      return user
-    } catch {
-      return fallbackUserId ? { id: fallbackUserId } : null
-    }
-  }
-
-  const { data, error } = await admin.from('members').select('auth_user_id').eq('email', email).maybeSingle()
-  if (error || !data?.auth_user_id) return fallbackUserId ? { id: fallbackUserId } : null
-  return { id: data.auth_user_id }
+function fallbackOtpType(purpose) {
+  if (purpose === 'recovery') return 'recovery'
+  if (purpose === 'email') return 'email'
+  return 'signup'
 }
 
-function createAdminClient(url, serviceRoleKey) {
-  return createClient(url, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
+function linkAttempts({ email, purpose, password }) {
+  if (purpose === 'recovery') return [{ type: 'recovery', email }]
+  if (purpose === 'email') return [{ type: 'magiclink', email }]
+  const attempts = []
+  if (password) attempts.push({ type: 'signup', email, password })
+  attempts.push({ type: 'magiclink', email })
+  return attempts
+}
+
+async function issueNativeOtp(admin, { email, purpose, userId, apiKey, from, password }) {
+  let issued = null
+  let lastError = null
+  for (const params of linkAttempts({ email, purpose, password })) {
+    const { data, error } = await admin.auth.admin.generateLink(params)
+    const code = nativeEmailOtp(data)
+    if (!error && code) {
+      issued = { data, code }
+      break
+    }
+    lastError = error
+  }
+  if (!issued) {
+    throw new Error(lastError?.message || 'Could not generate a verification code. Please try again.')
+  }
+  const tokenHint = issued.data?.properties?.hashed_token || issued.data?.hashed_token || `${Date.now()}`
+  await sendWithResend({
+    email,
+    code: issued.code,
+    purpose,
+    apiKey,
+    from,
+    idempotencyKey: `auth-otp/${purpose}/${userId}/${tokenHint}`,
   })
+  return nativeVerificationType(issued.data) || fallbackOtpType(purpose)
 }
 
 export default async function handler(req, res) {
@@ -172,91 +160,23 @@ export default async function handler(req, res) {
   const action = String(body.action || '')
   const purpose = String(body.purpose || (action === 'signup' ? 'signup' : ''))
   const email = normalizedEmail(body.email)
-  if (!['signup', 'recovery'].includes(purpose) || !email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!PURPOSES.has(purpose) || !email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return json(res, 400, { error: 'Enter a valid email address.' })
   }
 
   const admin = createAdminClient(supabaseUrl, serviceRoleKey)
 
-  if (action === 'resend') {
-    const saved = decryptPayload(getCookie(req, COOKIE_NAME), serviceRoleKey)
-    const hasSavedCode = saved && saved.email === email && saved.purpose === purpose
-    const needsRefresh = !hasSavedCode || saved.expiresAt < Date.now()
-
-    const user = needsRefresh
-      ? (await resolvePendingUser(admin, email, purpose, saved?.userId))
-      : { id: saved.userId }
-
-    if (!user) return json(res, 200, { ok: true })
-
-    let allowed
-    try {
-      allowed = await checkSendLimit(admin, purpose, email)
-    } catch (error) {
-      return json(res, 503, { error: error.message })
-    }
-    if (!allowed) return json(res, 429, { error: 'Please wait a minute before requesting another code.' })
-
-    const code = generateVerificationCode(saved?.code)
-    const payload = {
-      email,
-      purpose,
-      code,
-      userId: user.id,
-      attempts: 0,
-      expiresAt: Date.now() + CODE_TTL_SECONDS * 1000,
-    }
-
-    try {
-      await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender })
-      setCodeCookie(req, res, payload, serviceRoleKey)
-      return json(res, 200, { ok: true })
-    } catch (error) {
-      return json(res, 502, { error: error.message })
-    }
-  }
-
   if (action === 'verify') {
-    const saved = decryptPayload(getCookie(req, COOKIE_NAME), serviceRoleKey)
-    if (!saved || saved.email !== email || saved.purpose !== purpose) {
-      clearCodeCookie(req, res)
-      return json(res, 400, { error: 'This code expired. Request a new one.' })
-    }
-    if (saved.expiresAt < Date.now()) {
-      clearCodeCookie(req, res)
-      return json(res, 400, { error: 'This code expired. Request a new one.' })
-    }
-    if (saved.attempts >= 5) {
-      clearCodeCookie(req, res)
-      return json(res, 429, { error: 'Too many incorrect attempts. Request a new code.' })
-    }
-    if (!codeMatches(body.code, saved.code)) {
-      saved.attempts += 1
-      setCodeCookie(req, res, saved, serviceRoleKey)
-      return json(res, 400, { error: 'That code is not valid. Check it and try again.' })
-    }
-
-    if (purpose === 'signup') {
-      const { error: confirmError } = await admin.auth.admin.updateUserById(saved.userId, { email_confirm: true })
-      if (confirmError) return json(res, 502, { error: 'Could not confirm the account. Please try the code again.' })
-    }
-
-    const verificationType = purpose === 'signup' ? 'magiclink' : 'recovery'
-    const { data, error } = await admin.auth.admin.generateLink({
-      type: verificationType,
-      email,
-    })
-    if (error || !data?.properties?.hashed_token) {
-      return json(res, 502, { error: 'Could not complete verification. Please try again.' })
-    }
-
-    clearCodeCookie(req, res)
-    return json(res, 200, { ok: true, tokenHash: data.properties.hashed_token, verificationType })
+    return json(res, 400, { error: 'Enter the code from your email in the app. Verification links are not used.' })
   }
 
-  if ((action !== 'signup' && action !== 'recovery') || action !== purpose) {
+  if (!['signup', 'recovery', 'email', 'resend'].includes(action)) {
     return json(res, 400, { error: 'Invalid email code action.' })
   }
+  if (action !== 'resend' && action !== purpose) {
+    return json(res, 400, { error: 'Invalid email code action.' })
+  }
+
   let allowed
   try {
     allowed = await checkSendLimit(admin, purpose, email)
@@ -265,9 +185,10 @@ export default async function handler(req, res) {
   }
   if (!allowed) return json(res, 429, { error: 'Please wait a minute before requesting another code.' })
 
-  let generated
-  if (purpose === 'signup') {
-    const password = String(body.password || '')
+  let user = null
+  let password = ''
+  if (action === 'signup') {
+    password = String(body.password || '')
     const firstName = String(body.firstName || '').trim()
     const lastName = String(body.lastName || '').trim()
     const memberId = String(body.memberId || '')
@@ -280,33 +201,31 @@ export default async function handler(req, res) {
       email_confirm: false,
       user_metadata: { first_name: firstName, last_name: lastName, member_id: memberId },
     })
-    if (error) return json(res, 400, { error: error.message })
-    generated = { user: data.user }
+    if (error) {
+      const existing = await findAuthUserByEmail(admin, email)
+      if (!existing || existing.email_confirmed_at) {
+        return json(res, 400, { error: error.message })
+      }
+      user = existing
+    } else {
+      user = data.user
+    }
   } else {
-    const { data, error } = await admin
-      .from('members')
-      .select('auth_user_id')
-      .eq('email', email)
-      .maybeSingle()
-    if (error) return json(res, 502, { error: 'Unable to send a recovery code right now.' })
-    if (!data?.auth_user_id) return json(res, 200, { ok: true })
-    generated = { user: { id: data.auth_user_id } }
+    user = await findAuthUserByEmail(admin, email)
+    if (!user) return json(res, 200, { ok: true })
   }
-
-  const code = generateVerificationCode()
-
-  setCodeCookie(req, res, {
-    email,
-    purpose,
-    code,
-    userId: generated.user.id,
-    attempts: 0,
-    expiresAt: Date.now() + CODE_TTL_SECONDS * 1000,
-  }, serviceRoleKey)
+  if (!user?.id) return json(res, 502, { error: 'Could not prepare email verification. Please try again.' })
 
   try {
-    await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender })
-    return json(res, 200, { ok: true })
+    const otpType = await issueNativeOtp(admin, {
+      email,
+      purpose,
+      userId: user.id,
+      apiKey: resendApiKey,
+      from: sender,
+      password: action === 'signup' ? password : '',
+    })
+    return json(res, 200, { ok: true, otpType })
   } catch (error) {
     return json(res, 502, {
       error: error.message,

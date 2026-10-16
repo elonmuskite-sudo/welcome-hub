@@ -164,7 +164,7 @@ export default function VerifyEmail() {
     <AuthShell
       title="Verify your email"
       subtitle={email
-        ? `${purpose === 'recovery' ? 'Enter the password recovery code sent to' : 'Enter the verification code sent to'} ${email}.`
+        ? `${purpose === 'recovery' ? 'Enter the password recovery code sent to' : purpose === 'email' ? 'Enter the sign-in code sent to' : 'Enter the verification code sent to'} ${email}.`
         : 'Complete registration or password recovery to request a code.'}
       compact
     >
@@ -201,7 +201,7 @@ export default function VerifyEmail() {
               disabled={verifying || code.length < 4}
               className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {verifying ? 'Verifying...' : purpose === 'recovery' ? 'Verify recovery code' : 'Verify email'}
+              {verifying ? 'Verifying...' : purpose === 'recovery' ? 'Verify recovery code' : purpose === 'email' ? 'Verify sign-in code' : 'Verify email'}
             </ChatButton>
           </form>
 

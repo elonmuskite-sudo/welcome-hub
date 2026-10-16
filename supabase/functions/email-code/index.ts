@@ -1,9 +1,10 @@
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { otpEmail } from '../_shared/otp-email.js'
 
-const CODE_TTL_SECONDS = 600
 const RATE_LIMIT_WINDOW_SECONDS = 60
 const RATE_LIMIT_PER_WINDOW = 3
+const PURPOSES = new Set(['signup', 'recovery', 'email'])
 
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
@@ -14,58 +15,8 @@ function json(status: number, body: Record<string, unknown>) {
 
 const normalizedEmail = (value: unknown) => String(value || '').trim().toLowerCase()
 
-async function hmacKey(secret: string, usage: 'sign' | 'verify') {
-  const keyData = new TextEncoder().encode(secret)
-  const hash = await crypto.subtle.digest('SHA-256', keyData)
-  return crypto.subtle.importKey('raw', hash, { name: 'HMAC', hash: 'SHA-256' }, false, [usage])
-}
-
-function b64urlEncode(bytes: Uint8Array) {
-  let bin = ''
-  for (const b of bytes) bin += String.fromCharCode(b)
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-function b64urlDecode(value: string) {
-  const b64 = value.replace(/-/g, '+').replace(/_/g, '/')
-  const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4))
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return bytes
-}
-
-interface CodePayload {
-  email: string
-  purpose: 'signup' | 'recovery'
-  code: string
-  userId: string
-  attempts: number
-  expiresAt: number
-}
-
-async function sealPayload(payload: CodePayload, secret: string): Promise<string> {
-  const data = new TextEncoder().encode(JSON.stringify(payload))
-  const key = await hmacKey(secret, 'sign')
-  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, data))
-  const packed = new Uint8Array(data.length + sig.length)
-  packed.set(data)
-  packed.set(sig, data.length)
-  return b64urlEncode(packed)
-}
-
-async function openPayload(token: string, secret: string): Promise<CodePayload | null> {
-  try {
-    const packed = b64urlDecode(String(token || ''))
-    if (packed.length < 33) return null
-    const data = packed.subarray(0, packed.length - 32)
-    const sig = packed.subarray(packed.length - 32)
-    const key = await hmacKey(secret, 'verify')
-    const valid = await crypto.subtle.verify('HMAC', key, sig, data)
-    if (!valid) return null
-    return JSON.parse(new TextDecoder().decode(data))
-  } catch {
-    return null
-  }
+function createAdminClient(url: string, serviceRoleKey: string) {
+  return createClient(url, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
 }
 
 async function sha256Hex(input: string) {
@@ -93,48 +44,6 @@ async function isPasswordPwned(password: string) {
   return ranges.split(/\r?\n/).some((line) => line.split(':')[0]?.toUpperCase() === suffix)
 }
 
-function generateVerificationCode(previousCode?: string) {
-  const candidate = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0')
-  if (!previousCode || candidate !== previousCode) return candidate
-  return String((Number.parseInt(candidate, 10) + 1) % 1_000_000).padStart(6, '0')
-}
-
-function codeMatches(provided: unknown, expected: string) {
-  const a = String(provided || '')
-  return a.length === 6 && expected.length === 6 && a === expected
-}
-
-async function sendWithResend({ email, code, purpose, apiKey, from, lovableKey }: {
-  email: string; code: string; purpose: string; apiKey: string; from: string; lovableKey: string
-}) {
-  const subject = purpose === 'signup' ? 'Verify your Nexus Chat email' : 'Reset your Nexus Chat password'
-  const action = purpose === 'signup' ? 'verify your email address' : 'reset your password'
-  const response = await fetch('https://connector-gateway.lovable.dev/resend/emails', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${lovableKey}`,
-      'X-Connection-Api-Key': apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from,
-      to: [email],
-      subject,
-      text: `Your Nexus Chat verification code is ${code}. Enter this code to ${action}. It expires in 10 minutes. If you did not request this, ignore this email.`,
-      html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;color:#172033"><h1 style="font-size:22px">Nexus Chat</h1><p>Use this code to ${action}:</p><p style="font-size:32px;font-weight:700;letter-spacing:8px">${code}</p><p>This code expires in 10 minutes. If you did not request this, you can ignore this email.</p></div>`,
-    }),
-  })
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '')
-    console.error('Resend delivery failed', response.status, detail)
-    throw new Error('Email delivery failed. Check the Resend API key and verified sender domain.')
-  }
-}
-
-function createAdminClient(url: string, serviceRoleKey: string) {
-  return createClient(url, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
-}
-
 async function checkSendLimit(admin: ReturnType<typeof createAdminClient>, purpose: string, email: string) {
   const bucketKey = await sha256Hex(`${purpose}:${email}`)
   const { data, error } = await admin.rpc('consume_auth_email_code_limit', {
@@ -146,16 +55,96 @@ async function checkSendLimit(admin: ReturnType<typeof createAdminClient>, purpo
   return data === true
 }
 
-async function resolvePendingUser(admin: ReturnType<typeof createAdminClient>, email: string, _purpose: string, fallbackUserId?: string) {
+function nativeEmailOtp(data: { properties?: { email_otp?: string }; email_otp?: string } | null) {
+  return data?.properties?.email_otp || data?.email_otp || ''
+}
+
+function nativeVerificationType(data: { properties?: { verification_type?: string }; verification_type?: string } | null) {
+  return data?.properties?.verification_type || data?.verification_type || ''
+}
+
+async function findAuthUserByEmail(admin: ReturnType<typeof createAdminClient>, email: string) {
   try {
     const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-    if (error) return fallbackUserId ? { id: fallbackUserId } : null
-    const user = data?.users?.find((item) => normalizedEmail(item.email) === email)
-    if (!user) return fallbackUserId ? { id: fallbackUserId } : null
-    return user
+    if (error) return null
+    return data?.users?.find((item) => normalizedEmail(item.email) === email) || null
   } catch {
-    return fallbackUserId ? { id: fallbackUserId } : null
+    return null
   }
+}
+
+async function sendWithResend({
+  email, code, purpose, apiKey, from, idempotencyKey,
+}: {
+  email: string; code: string; purpose: string; apiKey: string; from: string; idempotencyKey: string
+}) {
+  const template = otpEmail({ code, purpose })
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey.slice(0, 256),
+    },
+    body: JSON.stringify({
+      from,
+      to: [email],
+      subject: template.subject,
+      text: template.text,
+      html: template.html,
+    }),
+  })
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '')
+    console.error('Resend delivery failed', response.status, detail)
+    throw new Error('Email delivery failed. Check the Resend API key and verified sender domain.')
+  }
+}
+
+function fallbackOtpType(purpose: string) {
+  if (purpose === 'recovery') return 'recovery'
+  if (purpose === 'email') return 'email'
+  return 'signup'
+}
+
+function linkAttempts({ email, purpose, password }: { email: string; purpose: string; password?: string }) {
+  if (purpose === 'recovery') return [{ type: 'recovery' as const, email }]
+  if (purpose === 'email') return [{ type: 'magiclink' as const, email }]
+  const attempts: Array<{ type: 'signup' | 'magiclink'; email: string; password?: string }> = []
+  if (password) attempts.push({ type: 'signup', email, password })
+  attempts.push({ type: 'magiclink', email })
+  return attempts
+}
+
+async function issueNativeOtp(admin: ReturnType<typeof createAdminClient>, {
+  email, purpose, userId, apiKey, from, password,
+}: {
+  email: string; purpose: string; userId: string; apiKey: string; from: string; password?: string
+}) {
+  let issued: { data: { properties?: { hashed_token?: string; verification_type?: string }; hashed_token?: string; verification_type?: string } | null; code: string } | null = null
+  let lastError: { message?: string } | null = null
+  for (const params of linkAttempts({ email, purpose, password })) {
+    const { data, error } = await admin.auth.admin.generateLink(params)
+    const code = nativeEmailOtp(data)
+    if (!error && code) {
+      issued = { data, code }
+      break
+    }
+    lastError = error
+  }
+  if (!issued) {
+    throw new Error(lastError?.message || 'Could not generate a verification code. Please try again.')
+  }
+  const tokenHint = issued.data?.properties?.hashed_token || `${Date.now()}`
+  await sendWithResend({
+    email,
+    code: issued.code,
+    purpose,
+    apiKey,
+    from,
+    idempotencyKey: `auth-otp/${purpose}/${userId}/${tokenHint}`,
+  })
+  return nativeVerificationType(issued.data) || fallbackOtpType(purpose)
 }
 
 Deno.serve(async (req) => {
@@ -165,9 +154,8 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const resendApiKey = Deno.env.get('RESEND_API_KEY')
-  const lovableKey = Deno.env.get('LOVABLE_API_KEY')
-  const sender = Deno.env.get('RESEND_FROM') || 'Nexus Chat <onboarding@resend.dev>'
-  if (!supabaseUrl || !serviceRoleKey || !resendApiKey || !lovableKey) {
+  const sender = Deno.env.get('RESEND_FROM')
+  if (!supabaseUrl || !serviceRoleKey || !resendApiKey || !sender) {
     return json(503, { error: 'Email verification is not configured on the server.' })
   }
 
@@ -181,82 +169,20 @@ Deno.serve(async (req) => {
   const action = String(body.action || '')
   const purpose = String(body.purpose || (action === 'signup' ? 'signup' : ''))
   const email = normalizedEmail(body.email)
-  if (!['signup', 'recovery'].includes(purpose) || !email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!PURPOSES.has(purpose) || !email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return json(400, { error: 'Enter a valid email address.' })
   }
 
   const admin = createAdminClient(supabaseUrl, serviceRoleKey)
 
-  if (action === 'resend') {
-    const saved = await openPayload(String(body.state || ''), serviceRoleKey)
-    const hasSavedCode = saved && saved.email === email && saved.purpose === purpose
-    const needsRefresh = !hasSavedCode || saved.expiresAt < Date.now()
-
-    const user = needsRefresh
-      ? await resolvePendingUser(admin, email, purpose, saved?.userId)
-      : { id: saved!.userId }
-
-    if (!user) return json(200, { ok: true })
-
-    let allowed: boolean
-    try {
-      allowed = await checkSendLimit(admin, purpose, email)
-    } catch (error) {
-      return json(503, { error: (error as Error).message })
-    }
-    if (!allowed) return json(429, { error: 'Please wait a minute before requesting another code.' })
-
-    const code = generateVerificationCode(saved?.code)
-    const payload: CodePayload = {
-      email,
-      purpose: purpose as CodePayload['purpose'],
-      code,
-      userId: user.id,
-      attempts: 0,
-      expiresAt: Date.now() + CODE_TTL_SECONDS * 1000,
-    }
-
-    try {
-      await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender, lovableKey })
-      const state = await sealPayload(payload, serviceRoleKey)
-      return json(200, { ok: true, state })
-    } catch (error) {
-      return json(502, { error: (error as Error).message })
-    }
-  }
-
   if (action === 'verify') {
-    const saved = await openPayload(String(body.state || ''), serviceRoleKey)
-    if (!saved || saved.email !== email || saved.purpose !== purpose) {
-      return json(400, { error: 'This code expired. Request a new one.' })
-    }
-    if (saved.expiresAt < Date.now()) {
-      return json(400, { error: 'This code expired. Request a new one.' })
-    }
-    if (saved.attempts >= 5) {
-      return json(429, { error: 'Too many incorrect attempts. Request a new code.' })
-    }
-    if (!codeMatches(body.code, saved.code)) {
-      saved.attempts += 1
-      const state = await sealPayload(saved, serviceRoleKey)
-      return json(400, { error: 'That code is not valid. Check it and try again.', state })
-    }
-
-    if (purpose === 'signup') {
-      const { error: confirmError } = await admin.auth.admin.updateUserById(saved.userId, { email_confirm: true })
-      if (confirmError) return json(502, { error: 'Could not confirm the account. Please try the code again.' })
-    }
-
-    const verificationType = purpose === 'signup' ? 'magiclink' : 'recovery'
-    const { data, error } = await admin.auth.admin.generateLink({ type: verificationType, email })
-    if (error || !data?.properties?.hashed_token) {
-      return json(502, { error: 'Could not complete verification. Please try again.' })
-    }
-
-    return json(200, { ok: true, tokenHash: data.properties.hashed_token, verificationType })
+    return json(400, { error: 'Enter the code from your email in the app. Verification links are not used.' })
   }
 
-  if ((action !== 'signup' && action !== 'recovery') || action !== purpose) {
+  if (!['signup', 'recovery', 'email', 'resend'].includes(action)) {
+    return json(400, { error: 'Invalid email code action.' })
+  }
+  if (action !== 'resend' && action !== purpose) {
     return json(400, { error: 'Invalid email code action.' })
   }
 
@@ -268,9 +194,10 @@ Deno.serve(async (req) => {
   }
   if (!allowed) return json(429, { error: 'Please wait a minute before requesting another code.' })
 
-  let generated: { user: { id: string } }
-  if (purpose === 'signup') {
-    const password = String(body.password || '')
+  let user: { id: string; email_confirmed_at?: string | null } | null = null
+  let password = ''
+  if (action === 'signup') {
+    password = String(body.password || '')
     const firstName = String(body.firstName || '').trim()
     const lastName = String(body.lastName || '').trim()
     const memberId = String(body.memberId || '')
@@ -292,27 +219,31 @@ Deno.serve(async (req) => {
       email_confirm: false,
       user_metadata: { first_name: firstName, last_name: lastName, member_id: memberId },
     })
-    if (error) return json(400, { error: error.message })
-    generated = { user: data.user }
+    if (error) {
+      const existing = await findAuthUserByEmail(admin, email)
+      if (!existing || existing.email_confirmed_at) {
+        return json(400, { error: error.message })
+      }
+      user = existing
+    } else {
+      user = data.user
+    }
   } else {
-    const existing = await resolvePendingUser(admin, email, purpose)
-    if (!existing) return json(200, { ok: true })
-    generated = { user: { id: existing.id } }
+    user = await findAuthUserByEmail(admin, email)
+    if (!user) return json(200, { ok: true })
   }
-
-  const code = generateVerificationCode()
-  const state = await sealPayload({
-    email,
-    purpose: purpose as CodePayload['purpose'],
-    code,
-    userId: generated.user.id,
-    attempts: 0,
-    expiresAt: Date.now() + CODE_TTL_SECONDS * 1000,
-  }, serviceRoleKey)
+  if (!user?.id) return json(502, { error: 'Could not prepare email verification. Please try again.' })
 
   try {
-    await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender, lovableKey })
-    return json(200, { ok: true, state })
+    const otpType = await issueNativeOtp(admin, {
+      email,
+      purpose,
+      userId: user.id,
+      apiKey: resendApiKey,
+      from: sender,
+      password: action === 'signup' ? password : '',
+    })
+    return json(200, { ok: true, otpType })
   } catch (error) {
     return json(502, {
       error: (error as Error).message,
