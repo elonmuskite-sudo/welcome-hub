@@ -104,14 +104,18 @@ function codeMatches(provided: unknown, expected: string) {
   return a.length === 6 && expected.length === 6 && a === expected
 }
 
-async function sendWithResend({ email, code, purpose, apiKey, from }: {
-  email: string; code: string; purpose: string; apiKey: string; from: string
+async function sendWithResend({ email, code, purpose, apiKey, from, lovableKey }: {
+  email: string; code: string; purpose: string; apiKey: string; from: string; lovableKey: string
 }) {
   const subject = purpose === 'signup' ? 'Verify your Nexus Chat email' : 'Reset your Nexus Chat password'
   const action = purpose === 'signup' ? 'verify your email address' : 'reset your password'
-  const response = await fetch('https://api.resend.com/emails', {
+  const response = await fetch('https://connector-gateway.lovable.dev/resend/emails', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': `Bearer ${lovableKey}`,
+      'X-Connection-Api-Key': apiKey,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
       from,
       to: [email],
