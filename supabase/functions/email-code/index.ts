@@ -170,8 +170,9 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const resendApiKey = Deno.env.get('RESEND_API_KEY')
+  const lovableKey = Deno.env.get('LOVABLE_API_KEY')
   const sender = Deno.env.get('RESEND_FROM') || 'Nexus Chat <onboarding@resend.dev>'
-  if (!supabaseUrl || !serviceRoleKey || !resendApiKey) {
+  if (!supabaseUrl || !serviceRoleKey || !resendApiKey || !lovableKey) {
     return json(503, { error: 'Email verification is not configured on the server.' })
   }
 
@@ -221,7 +222,7 @@ Deno.serve(async (req) => {
     }
 
     try {
-      await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender })
+      await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender, lovableKey })
       const state = await sealPayload(payload, serviceRoleKey)
       return json(200, { ok: true, state })
     } catch (error) {
@@ -320,7 +321,7 @@ Deno.serve(async (req) => {
   }, serviceRoleKey)
 
   try {
-    await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender })
+    await sendWithResend({ email, code, purpose, apiKey: resendApiKey, from: sender, lovableKey })
     return json(200, { ok: true, state })
   } catch (error) {
     return json(502, {
