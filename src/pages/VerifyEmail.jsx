@@ -1,3 +1,4 @@
+import ChatButton from '../components/chat/ChatButton'
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import AuthShell from '../components/AuthShell'
@@ -123,35 +124,35 @@ export default function VerifyEmail() {
   if (appwriteProvider) {
     return (
       <AuthShell title="Verify your email" subtitle="Open the verification link Appwrite sent to your inbox." compact>
-        <div className="mx-auto w-full max-w-md rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-sm">
+        <div className="mx-auto w-full max-w-md text-foreground">
           {verifying && <p role="status" className="text-sm text-muted-foreground">Verifying your email...</p>}
           {!verifying && !error && (
             <>
               <p className="text-sm text-muted-foreground">
                 {email ? `A verification link was sent to ${email}.` : 'Check your inbox for the verification link.'}
               </p>
-              {message && <p role="status" className="mt-3 text-sm text-emerald-600">{message}</p>}
-              <button
+              {message && <p role="status" className="mt-3 text-sm text-primary">{message}</p>}
+              <ChatButton
                 type="button"
                 onClick={handleResend}
                 disabled={resending || resendCooldown > 0}
                 className="mt-5 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {resending ? 'Sending...' : resendCooldown ? `Resend in ${resendCooldown}s` : 'Resend verification link'}
-              </button>
+              </ChatButton>
             </>
           )}
           {error && (
             <>
               <p role="alert" className="text-sm text-destructive">{error}</p>
-              <button
+              <ChatButton
                 type="button"
                 onClick={handleResend}
                 disabled={resending || resendCooldown > 0}
                 className="mt-5 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {resending ? 'Sending...' : 'Request a new verification link'}
-              </button>
+              </ChatButton>
             </>
           )}
         </div>
@@ -168,7 +169,7 @@ export default function VerifyEmail() {
       compact
     >
       {email ? (
-        <div className="mx-auto w-full max-w-md rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-sm">
+        <div className="mx-auto w-full max-w-md text-foreground">
           <form onSubmit={handleVerify} className="space-y-5">
             <div>
               <label htmlFor="verification-code" className="mb-2 block text-sm font-medium">Verification code</label>
@@ -193,27 +194,27 @@ export default function VerifyEmail() {
             </div>
 
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-            {message && <p role="status" className="text-sm text-emerald-600">{message}</p>}
+            {message && <p role="status" className="text-sm text-primary">{message}</p>}
 
-            <button
+            <ChatButton
               type="submit"
               disabled={verifying || code.length < 4}
               className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {verifying ? 'Verifying...' : purpose === 'recovery' ? 'Verify recovery code' : 'Verify email'}
-            </button>
+            </ChatButton>
           </form>
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm">
             <span className="text-muted-foreground">Didn’t receive the code?</span>
-            <button
+            <ChatButton
               type="button"
               onClick={handleResend}
               disabled={resending || resendCooldown > 0}
               className="font-medium text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
             >
               {resending ? 'Sending...' : resendCooldown ? `Resend in ${resendCooldown}s` : 'Resend code'}
-            </button>
+            </ChatButton>
           </div>
         </div>
       ) : (

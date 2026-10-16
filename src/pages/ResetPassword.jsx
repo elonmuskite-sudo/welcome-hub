@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react'
+import ChatButton from '../components/chat/ChatButton'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
 import AuthShell from '../components/AuthShell'
-import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../lib/AuthContext'
 
 export default function ResetPassword() {
@@ -13,20 +13,9 @@ export default function ResetPassword() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
-  const { theme } = useTheme()
   const { resetPassword } = useAuth()
 
-  const themeClasses = useMemo(() => theme === 'dark'
-    ? {
-        muted: 'text-slate-300',
-        input: 'border-slate-700 bg-slate-800 text-white focus:border-primary focus:ring-primary',
-        button: 'bg-primary text-white hover:bg-primary/90'
-      }
-    : {
-        muted: 'text-slate-600',
-        input: 'border-slate-300 bg-white text-slate-900 focus:border-primary focus:ring-primary',
-        button: 'bg-primary text-white hover:bg-primary/90'
-      }, [theme])
+  const themeClasses = { muted: 'text-muted-foreground', input: 'border-input bg-background text-foreground focus:border-primary focus:ring-primary', button: 'bg-primary text-primary-foreground hover:bg-primary/90' }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -66,7 +55,8 @@ export default function ResetPassword() {
             </label>
             <div className="relative">
               <input
-                type={passwordVisible ? 'text' : 'password'}
+                id="password"
+                  type={passwordVisible ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -75,7 +65,7 @@ export default function ResetPassword() {
                 className={`w-full rounded-lg border px-4 py-3 pr-12 text-sm outline-none transition ${themeClasses.input}`}
                 placeholder="••••••••"
               />
-              <button
+              <ChatButton
                 type="button"
                 onClick={() => setPasswordVisible((visible) => !visible)}
                 aria-label={passwordVisible ? 'Hide password' : 'Show password'}
@@ -84,7 +74,7 @@ export default function ResetPassword() {
                 className={`absolute inset-y-0 right-0 flex w-12 items-center justify-center ${themeClasses.muted}`}
               >
                 {passwordVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
+              </ChatButton>
             </div>
             <p className={`mt-2 text-xs ${themeClasses.muted}`}>
               We check against known breached passwords using a partial hash; your password is not sent to the checker.
@@ -105,7 +95,7 @@ export default function ResetPassword() {
                 className={`w-full rounded-lg border px-4 py-3 pr-12 text-sm outline-none transition ${themeClasses.input}`}
                 placeholder="••••••••"
               />
-              <button
+              <ChatButton
                 type="button"
                 onClick={() => setConfirmPasswordVisible((visible) => !visible)}
                 aria-label={confirmPasswordVisible ? 'Hide password' : 'Show password'}
@@ -114,17 +104,17 @@ export default function ResetPassword() {
                 className={`absolute inset-y-0 right-0 flex w-12 items-center justify-center ${themeClasses.muted}`}
               >
                 {confirmPasswordVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
+              </ChatButton>
             </div>
           </div>
           {error && <p className="text-center text-sm text-destructive">{error}</p>}
-          <button
+          <ChatButton
             type="submit"
             disabled={loading}
-            className={`w-full rounded-lg px-4 py-3 font-semibold transition-colors disabled:cursor-not-allowed ${themeClasses.button} disabled:bg-slate-400`}
+            className={`w-full rounded-lg px-4 py-3 font-semibold transition-colors disabled:cursor-not-allowed ${themeClasses.button} disabled:opacity-50`}
           >
             {loading ? 'Resetting...' : 'Reset Password'}
-          </button>
+          </ChatButton>
         </form>
         <p className={`mt-6 text-center text-sm ${themeClasses.muted}`}>
             Remember your password?{' '}

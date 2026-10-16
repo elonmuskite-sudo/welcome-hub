@@ -1,28 +1,17 @@
-import { useState, useMemo } from 'react'
+import ChatButton from '../components/chat/ChatButton'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import AuthShell from '../components/AuthShell'
-import { useTheme } from '../hooks/useTheme'
 import { useAuth } from '../lib/AuthContext'
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const { theme } = useTheme()
   const { requestPasswordReset } = useAuth()
   const navigate = useNavigate()
 
-  const themeClasses = useMemo(() => theme === 'dark'
-    ? {
-        muted: 'text-slate-300',
-        input: 'border-slate-700 bg-slate-800 text-white focus:border-primary focus:ring-primary',
-        button: 'bg-primary text-white hover:bg-primary/90'
-      }
-    : {
-        muted: 'text-slate-600',
-        input: 'border-slate-300 bg-white text-slate-900 focus:border-primary focus:ring-primary',
-        button: 'bg-primary text-white hover:bg-primary/90'
-      }, [theme])
+  const themeClasses = { muted: 'text-muted-foreground', input: 'border-input bg-background text-foreground focus:border-primary focus:ring-primary', button: 'bg-primary text-primary-foreground hover:bg-primary/90' }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -49,15 +38,16 @@ export default function ForgotPassword() {
   }
 
   return (
-    <AuthShell title="Forgot your password?" subtitle="Enter your account email and we’ll send a 6-digit recovery code." compact>
+    <AuthShell title="Forgot your password?" subtitle="Enter your account email and we’ll send a recovery code." compact>
       <div className="mx-auto w-full max-w-md">
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className={`mb-2 block text-sm font-medium ${themeClasses.muted}`}>
+            <label htmlFor="email" className={`mb-2 block text-sm font-medium ${themeClasses.muted}`}>
               Email address
             </label>
             <input
-              type="email"
+              id="email"
+                type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -67,13 +57,13 @@ export default function ForgotPassword() {
             />
           </div>
           {error && <p className="text-center text-sm text-destructive">{error}</p>}
-          <button
+          <ChatButton
             type="submit"
             disabled={loading}
-            className={`w-full rounded-lg px-4 py-3 font-semibold transition-colors disabled:cursor-not-allowed ${themeClasses.button} disabled:bg-slate-400`}
+            className={`w-full rounded-lg px-4 py-3 font-semibold transition-colors disabled:cursor-not-allowed ${themeClasses.button} disabled:opacity-50`}
           >
             {loading ? 'Sending...' : 'Send Recovery Code'}
-          </button>
+          </ChatButton>
         </form>
         <p className={`mt-6 text-center text-sm ${themeClasses.muted}`}>
             Remember your password?{' '}
