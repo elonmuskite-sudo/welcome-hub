@@ -13,6 +13,7 @@ const sentEmails = []
 const authRequests = []
 const testUserId = 'f9c2e2dd-f11f-43d4-ad07-c94269e5141d'
 let rateLimitAllowed = true
+let otpSequence = 100000
 
 globalThis.fetch = async (request, options = {}) => {
   const url = new URL(request instanceof Request ? request.url : request)
