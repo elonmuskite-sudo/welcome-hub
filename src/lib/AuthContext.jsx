@@ -19,11 +19,9 @@ import {
 } from './supabase'
 import {
   completeAppwriteRecovery,
-  createAppwriteAccount,
   getAppwriteProfile,
   isAppwriteAuthEnabled,
   rememberAppwriteRecoveryCode,
-  resendAppwriteVerification,
 } from './appwrite'
 
 const noopAsync = async () => { throw new Error('Account services are still loading. Please try again.') }
@@ -167,8 +165,7 @@ export function AuthProvider({ children }) {
 
   const verifyEmailCode = useCallback(async (email, token, purpose = 'signup', password = '') => {
     if (!isSupabaseConfigured()) throw new Error('Email verification is not configured.')
-    if (isAppwriteAuthEnabled()) {
-      if (purpose !== 'recovery') throw new Error('Use the verification link sent to your email to verify this account.')
+    if (isAppwriteAuthEnabled() && purpose === 'recovery') {
       rememberAppwriteRecoveryCode(token)
       return { ok: true }
     }
@@ -194,12 +191,8 @@ export function AuthProvider({ children }) {
 
   const resendVerificationCode = useCallback(async (email, purpose = 'signup') => {
     if (!isSupabaseConfigured()) throw new Error('Email verification is not configured.')
-    if (isAppwriteAuthEnabled()) {
-      if (purpose === 'recovery') {
-        await startPasswordRecoveryCode(email)
-      } else {
-        await resendAppwriteVerification()
-      }
+    if (isAppwriteAuthEnabled() && purpose === 'recovery') {
+      await startPasswordRecoveryCode(email)
       return
     }
     await resendEmailCode(email, purpose)
@@ -218,15 +211,6 @@ export function AuthProvider({ children }) {
     const cleanPassword = String(password || '')
     if (!normalizedEmail) throw new Error('Email is required.')
     if (cleanPassword.length < 8) throw new Error('Password must be at least 8 characters.')
-    if (isAppwriteAuthEnabled()) {
-      await createAppwriteAccount({
-        email: normalizedEmail,
-        password: cleanPassword,
-        firstName: normalizedFirstName,
-        lastName: normalizedLastName,
-      })
-      return { user: null, email: normalizedEmail, needsEmailConfirmation: true, verificationMethod: 'link' }
-    }
     const nexusId = generateNexusId()
     await startSignupEmailCode({
       email: normalizedEmail,

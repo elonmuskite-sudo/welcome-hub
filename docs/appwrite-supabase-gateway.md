@@ -6,8 +6,9 @@ against Appwrite before it can act for a user in Supabase.
 ## Migrated paths
 
 When `VITE_AUTH_PROVIDER=appwrite`, the client uses Appwrite for email/password
-sign-in, verified-email signup, verification links, and OTP password recovery.
-After Appwrite confirms the email, the gateway creates a Supabase Auth identity
+sign-in and OTP password recovery. Email verification is not link-based: signup
+codes are delivered as six-digit OTPs through Resend, never as verification links.
+After Appwrite confirms the session, the gateway creates a Supabase Auth identity
 with a random inaccessible password for new accounts, relying on the existing
 auth trigger to create the corresponding member profile. Existing Supabase
 accounts are linked only when their email is confirmed and matches.

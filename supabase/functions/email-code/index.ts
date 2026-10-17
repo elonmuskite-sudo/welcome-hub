@@ -1,6 +1,6 @@
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 import { createClient } from 'npm:@supabase/supabase-js@2'
-import { otpEmail } from '../_shared/otp-email.js'
+import { otpEmail, resolveResendFrom } from '../_shared/otp-email.js'
 
 const RATE_LIMIT_WINDOW_SECONDS = 60
 const RATE_LIMIT_PER_WINDOW = 3
@@ -97,7 +97,7 @@ async function sendWithResend({
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
     console.error('Resend delivery failed', response.status, detail)
-    throw new Error('Email delivery failed. Check the Resend API key and verified sender domain.')
+    throw new Error('Email delivery failed. Check the Resend API key and verified sender domain nexus-chat-world.com.')
   }
 }
 
@@ -154,8 +154,8 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const resendApiKey = Deno.env.get('RESEND_API_KEY')
-  const sender = Deno.env.get('RESEND_FROM')
-  if (!supabaseUrl || !serviceRoleKey || !resendApiKey || !sender) {
+  const sender = resolveResendFrom(Deno.env.get('RESEND_FROM'))
+  if (!supabaseUrl || !serviceRoleKey || !resendApiKey) {
     return json(503, { error: 'Email verification is not configured on the server.' })
   }
 

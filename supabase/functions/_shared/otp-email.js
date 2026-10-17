@@ -1,3 +1,6 @@
+export const VERIFIED_RESEND_DOMAIN = 'nexus-chat-world.com'
+export const DEFAULT_RESEND_FROM = `Nexus Chat <admin@${VERIFIED_RESEND_DOMAIN}>`
+
 const PURPOSE_COPY = {
   signup: {
     subject: 'Your Nexus Chat verification code',
@@ -11,6 +14,13 @@ const PURPOSE_COPY = {
     subject: 'Your Nexus Chat sign-in code',
     action: 'sign in',
   },
+}
+
+export function resolveResendFrom(value) {
+  const raw = String(value || '').trim()
+  const address = (raw.match(/<([^>]+)>/)?.[1] || raw).trim().toLowerCase()
+  const host = address.split('@')[1] || ''
+  return host === VERIFIED_RESEND_DOMAIN ? raw : DEFAULT_RESEND_FROM
 }
 
 export function otpEmail({ code, purpose }) {

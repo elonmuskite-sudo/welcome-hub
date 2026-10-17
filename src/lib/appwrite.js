@@ -1,4 +1,4 @@
-import { Account, Client, ID } from 'appwrite'
+import { Account, Client } from 'appwrite'
 import { isPasswordPwned } from './pwnedPasswords'
 
 const endpoint = import.meta.env.VITE_APPWRITE_ENDPOINT || ''
@@ -48,39 +48,9 @@ export async function getAppwriteProfile() {
   return { ...profile, email: account.email, email_verified: true }
 }
 
-export async function createAppwriteAccount({ email, password, firstName, lastName }) {
-  if (!appwriteAccount) throw new Error('Appwrite Auth is not configured.')
-  if (await isPasswordPwned(password)) {
-    throw new Error('This password has appeared in known data breaches. Choose a different password.')
-  }
-  const name = `${firstName} ${lastName}`.trim()
-  await appwriteAccount.create(ID.unique(), email, password, name)
-  await appwriteAccount.createEmailPasswordSession(email, password)
-  const verificationUrl = new URL('/verify-email?provider=appwrite', window.location.origin).toString()
-  try {
-    await appwriteAccount.createVerification(verificationUrl)
-  } catch (verificationError) {
-    const error = new Error(verificationError?.message || 'The account was created, but its verification email could not be sent.')
-    error.verificationPending = true
-    throw error
-  }
-}
-
 export function createAppwriteRecovery(email) {
   if (!appwriteAccount) throw new Error('Appwrite Auth is not configured.')
   return appwriteAccount.createRecoveryOTP(email, false)
-}
-
-export async function completeAppwriteVerification(userId, secret) {
-  if (!appwriteAccount) throw new Error('Appwrite Auth is not configured.')
-  if (!userId || !secret) throw new Error('The Appwrite verification link is incomplete.')
-  await appwriteAccount.updateVerification(userId, secret)
-}
-
-export async function resendAppwriteVerification() {
-  if (!appwriteAccount) throw new Error('Appwrite Auth is not configured.')
-  const verificationUrl = new URL('/verify-email?provider=appwrite', window.location.origin).toString()
-  await appwriteAccount.createVerification(verificationUrl)
 }
 
 export function rememberAppwriteRecoveryCode(code) {

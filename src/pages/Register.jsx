@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
-import { isAppwriteAuthEnabled } from '../lib/appwrite'
 import AuthShell from '../components/AuthShell'
 
 export default function Register() {
@@ -40,24 +39,16 @@ export default function Register() {
         } catch {
           // Route state still carries the address for this verification visit.
         }
-        navigate(
-          result.verificationMethod === 'link' ? '/verify-email?provider=appwrite' : '/verify-email',
-          {
-            replace: true,
-            state: {
-              email: result.email,
-              purpose: 'signup',
-
-            },
-          },
-        )
+        navigate('/verify-email', {
+          replace: true,
+          state: { email: result.email, purpose: 'signup' },
+        })
       } else {
         navigate('/app', { replace: true })
       }
     } catch (err) {
       if (err.verificationPending) {
         const pendingEmail = email.trim().toLowerCase()
-        const appwriteMode = isAppwriteAuthEnabled()
         try {
           sessionStorage.setItem('nexus-pending-verification-email', pendingEmail)
           sessionStorage.setItem('nexus-pending-verification-purpose', 'signup')
@@ -65,12 +56,11 @@ export default function Register() {
         } catch {
           // Route state carries the address for this visit.
         }
-        navigate(appwriteMode ? '/verify-email?provider=appwrite' : '/verify-email', {
+        navigate('/verify-email', {
           replace: true,
           state: {
             email: pendingEmail,
             purpose: 'signup',
-
             notice: 'Your account was created, but email delivery failed. Wait briefly, then request another verification message.',
           },
         })

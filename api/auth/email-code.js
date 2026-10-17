@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
-import { otpEmail } from '../../supabase/functions/_shared/otp-email.js'
+import { otpEmail, resolveResendFrom } from '../../supabase/functions/_shared/otp-email.js'
 
 const RATE_LIMIT_WINDOW_SECONDS = 60
 const RATE_LIMIT_PER_WINDOW = 3
@@ -88,7 +88,11 @@ async function sendWithResend({ email, code, purpose, apiKey, from, idempotencyK
     }),
   })
 
-  if (!response.ok) throw new Error('Email delivery failed. Check the Resend API key and verified sender domain.')
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '')
+    console.error('Resend delivery failed', response.status, detail)
+    throw new Error('Email delivery failed. Check the Resend API key and verified sender domain nexus-chat-world.com.')
+  }
 }
 
 function fallbackOtpType(purpose) {
@@ -145,8 +149,8 @@ export default async function handler(req, res) {
   const supabaseUrl = process.env.SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   const resendApiKey = process.env.RESEND_API_KEY
-  const sender = process.env.RESEND_FROM
-  if (!supabaseUrl || !serviceRoleKey || !resendApiKey || !sender) {
+  const sender = resolveResendFrom(process.env.RESEND_FROM)
+  if (!supabaseUrl || !serviceRoleKey || !resendApiKey) {
     return json(res, 503, { error: 'Email verification is not configured on the server.' })
   }
 
