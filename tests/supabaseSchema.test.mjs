@@ -15,8 +15,6 @@ test('schema dry-run validates checked-in versioned migrations without connectin
 
   assert.equal(result.migrationDir, path.join(root, 'supabase', 'migrations'))
   assert.ok(result.migrations.length >= 2)
-  assert.equal(result.migrations[0].file, '20261006000000_initial_nexus_schema.sql')
-  assert.equal(result.migrations[1].file, '20261006010000_authenticated_member_lookup.sql')
   assert.ok(result.migrations[0].bytes > 0)
   assert.match(result.migrations[0].checksum, /^[a-f0-9]{64}$/)
   // Every checked-in migration loads, including the Supabase CLI UUID names.

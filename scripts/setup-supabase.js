@@ -40,12 +40,20 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || fileValues.SUPAB
 const databaseUrl = process.env.SUPABASE_DB_URL || fileValues.SUPABASE_DB_URL || ''
 
 try {
-  const credentialCheck = await verifySupabaseApiCredentials({
-    supabaseUrl,
-    anonKey,
-    serviceRoleKey,
-  })
-  for (const check of credentialCheck.checks) console.log(`[supabase-auth] ${check.name}: ready`)
+  // The API credential probe needs both keys. When neither is configured (as on
+  // this workspace, which only stores SUPABASE_DB_URL), skip it and let the
+  // schema verification below run against the database directly instead of
+  // failing the whole command on a check the caller did not ask for.
+  if (anonKey && serviceRoleKey) {
+    const credentialCheck = await verifySupabaseApiCredentials({
+      supabaseUrl,
+      anonKey,
+      serviceRoleKey,
+    })
+    for (const check of credentialCheck.checks) console.log(`[supabase-auth] ${check.name}: ready`)
+  } else {
+    console.log('[supabase-auth] skipped: SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are not configured.')
+  }
 
   if (dryRun) {
     const preview = inspectSupabaseSchema({ databaseUrl, root })

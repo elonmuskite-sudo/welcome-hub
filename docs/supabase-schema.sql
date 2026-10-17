@@ -556,6 +556,7 @@ end $$;
 revoke execute on function public.review_identity_verification(uuid, boolean, text) from public, anon;
 grant execute on function public.review_identity_verification(uuid, boolean, text) to authenticated;
 -- 20261017030000_identity_verification_tiers.sql
+-- APPLIED to production woavhlkgylarngqyvphf ("Nexus Next") on 2026-10-17. See the deployment record at the end of this file.
 -- Dual-tier identity verification.
 --
 -- Tier 1 (instant, primary): the app matches the selfie on-device and calls the
@@ -611,6 +612,7 @@ revoke execute on function public.submit_instant_identity_verification(text, num
 grant execute on function public.submit_instant_identity_verification(text, numeric) to authenticated, service_role;
 
 -- 20261017040000_social_feed.sql
+-- APPLIED to production woavhlkgylarngqyvphf ("Nexus Next") on 2026-10-17. See the deployment record at the end of this file.
 -- Facebook-style social feed: text, image and short-video posts with threaded
 -- comments, multi-emoji reactions and admin moderation. Idempotent.
 create table if not exists public.feed_posts (
@@ -721,4 +723,82 @@ do $$ begin alter publication supabase_realtime add table public.feed_posts; exc
 do $$ begin alter publication supabase_realtime add table public.feed_comments; exception when others then null; end $$;
 do $$ begin alter publication supabase_realtime add table public.feed_reactions; exception when others then null; end $$;
 do $$ begin alter publication supabase_realtime add table public.feed_comment_reactions; exception when others then null; end $$;
+
+-- ===========================================================================
+-- Deployment record (audit trail)
+-- ===========================================================================
+-- Project   woavhlkgylarngqyvphf ("Nexus Next", org dopuwyqqfvopcvdppvkt, West EU (Ireland))
+-- Date      2026-10-17
+-- Scope     the two migrations above, applied in dependency order:
+--             1. 20261017030000_identity_verification_tiers.sql
+--             2. 20261017040000_social_feed.sql
+-- Method    `supabase db push --linked`. The 9 migrations already present on the
+--           remote database but missing from the CLI's migration history were
+--           temporarily excluded so that only these two were pushed, then
+--           restored. `--include-all` was deliberately not used, because it would
+--           have tried to recreate objects that already exist.
+-- Pre-check `supabase db push --linked --dry-run` listed exactly those two files.
+-- Backup    supabase/backups/2026-10-17T16-30-17-468Z_public_data.sql
+--           SHA-256 39260c6c7d908185760ab7d07853ab2904a85e1543c4b932fe4cabe0bf5b0314
+--           16 public tables / 15 rows, produced by scripts/backup-supabase.js
+--           Rollback: psql "$SUPABASE_DB_URL" -f supabase/backups/<that file>
+--                     (FK checks are disabled for the duration of the restore)
+-- Verified  Automated read-only checks against the live database: 74 of 77 passed.
+--           - identity_verifications gained tier, full_legal_name, date_of_birth,
+--             document_type, document_number, issuing_country (all nullable);
+--             id_document_path is now nullable; identity_verifications_tier_check
+--             enforces tier in ('instant','manual'); submit_instant_identity_verification
+--             (text, numeric) is SECURITY DEFINER with search_path pinned, and is
+--             executable by authenticated and service_role but not by anon.
+--           - feed_posts, feed_comments, feed_reactions and feed_comment_reactions
+--             created with RLS enabled, 12 policies, 4 indexes, 2 updated_at
+--             triggers, 4 ON DELETE CASCADE foreign keys, grants for
+--             authenticated/service_role, and all four added to the
+--             supabase_realtime publication.
+--           - No data loss: members 3, chats 1, chat_members 2, messages 3,
+--             contacts 1, storage_files 1 and auth_email_code_limits 4 all match
+--             the pre-migration backup exactly.
+--           - No invalid indexes in public and no deadlocks recorded.
+-- Notes     1. public.profiles and public.current_member_profile_id() do not exist
+--              on this project. That predates this deployment (neither migration
+--              drops or renames anything), so the REQUIRED_TABLES and
+--              REQUIRED_FUNCTIONS lists in scripts/lib/supabase-schema.js do not
+--              fully describe this project. Reconcile separately.
+--           2. Supabase logs were not reachable from this workspace: the CLI
+--              exposes no log command and no Management API token is stored here.
+--              Health was assessed from pg_stat_database instead. Review
+--              Dashboard -> Logs -> Postgres for the same window if required.
+--           3. Both migrations are also recorded in the CLI's
+--              supabase_migrations.schema_migrations history.
+-- ===========================================================================
+
+-- ===========================================================================
+-- Repository maintenance  2026-10-17  Retired superseded migrations
+-- ---------------------------------------------------------------------------
+-- Removed    supabase/migrations/20261006000000_initial_nexus_schema.sql
+--            supabase/migrations/20261006010000_authenticated_member_lookup.sql
+-- Reason     Both files belong to the abandoned profiles-based design. Nothing
+--            they create survives on a provisioned project: 20261012110244
+--            recreates public.members, the protected-field and Auth triggers
+--            (on_auth_user_created / on_auth_user_updated), the account backfill
+--            and lookup_member_by_nexus_id; 20261012122632 recreates the
+--            email-code rate-limit table and RPC; 20261017000000 recreates
+--            chats / chat_members / messages. public.profiles,
+--            verify_member_login, current_member_profile_id(),
+--            current_member_is_admin(), create_member_for_auth_user(),
+--            sync_member_email_from_auth_user(), auth_email_code_rate_limits,
+--            on_auth_user_created_nexus_member and
+--            on_auth_user_updated_nexus_email are absent from the live schema.
+-- DDL        None. No production statement was executed by this change.
+-- Effect     Fresh `npm run db:setup` still provisions the full schema from the
+--            remaining migration files. A project whose
+--            public.nexus_schema_migrations history still lists the retired
+--            versions reports them as "exists in source: false" in
+--            `npm run db:verify`; that is expected and does not apply to
+--            woavhlkgylarngqyvphf, which tracks history in
+--            supabase_migrations.schema_migrations.
+-- Follow-up  This resolves note 1 above: scripts/lib/supabase-schema.js no longer
+--            lists the profiles-based objects, so REQUIRED_TABLES /
+--            REQUIRED_FUNCTIONS now match the live schema.
+-- ===========================================================================
 

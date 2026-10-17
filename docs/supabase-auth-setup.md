@@ -4,11 +4,13 @@ The application uses Supabase Auth for credentials and recovery, Supabase `membe
 
 ## 1. Apply the database migration
 
-Schema changes are versioned SQL files under `supabase/migrations/`. Builds and browser-facing code never apply SQL. An operator explicitly runs `npm run db:setup:dry` to review migration files, then `npm run db:setup` to apply pending migrations. The CLI applies each migration in a transaction, takes an advisory lock, records its version and SHA-256 checksum in `public.nexus_schema_migrations`, and verifies the required tables, functions, and Auth triggers. Editing an already-applied migration is rejected; create a new timestamped migration instead. The baseline migration provisions member/profile rows for Supabase Auth users, applies RLS, removes public access to the legacy password column, and installs the persistent email-code rate-limit RPC required by the Vercel email endpoint.
+Schema changes are versioned SQL files under `supabase/migrations/`. Builds and browser-facing code never apply SQL. An operator explicitly runs `npm run db:setup:dry` to review migration files, then `npm run db:setup` to apply pending migrations. The CLI applies each migration in a transaction, takes an advisory lock, records its version and SHA-256 checksum in `public.nexus_schema_migrations`, and verifies the required tables, functions, and Auth triggers. Editing an already-applied migration is rejected; create a new timestamped migration instead. The earliest remaining migration, `20261012110244_880a9c2a-16c5-4d14-8803-b9bf93c0faab.sql`, creates `public.members` for Supabase Auth users, applies RLS and the protected-field trigger, installs the `on_auth_user_created`/`on_auth_user_updated` Auth triggers and the `lookup_member_by_nexus_id` function, and backfills existing accounts; `20261012122632_31486d60-08f7-48ec-a6e7-0d32384bd185.sql` then installs the persistent email-code rate-limit RPC and its `public.auth_email_code_limits` table required by the Vercel email endpoint.
+
+The superseded `20261006000000_initial_nexus_schema.sql` and `20261006010000_authenticated_member_lookup.sql` migrations were retired from this directory. They belonged to the abandoned `profiles`-based design (`public.profiles`, `verify_member_login`, `current_member_profile_id`, `current_member_is_admin`, `create_member_for_auth_user`, `sync_member_email_from_auth_user`, `auth_email_code_rate_limits`, and the `on_auth_user_created_nexus_member`/`on_auth_user_updated_nexus_email` triggers), and every object they created is re-created by the later migrations above. Do not re-add them. A project whose `public.nexus_schema_migrations` history still lists those versions will report them as "exists in source: false" in `npm run db:verify`; that is expected and does not apply to the live project, which tracks history in `supabase_migrations.schema_migrations`.
 
 Set `SUPABASE_DB_URL` locally in ignored `.env.local` to a PostgreSQL connection string from Supabase (prefer the Session pooler connection string when the operator machine cannot connect directly). It is a highly privileged secret. The Supabase anon and service-role API keys cannot execute arbitrary DDL; the CLI checks them against Supabase Auth endpoints, but only the explicit migration command uses the database URL to apply checked-in migration files. Do not upload `SUPABASE_DB_URL` to Vercel, expose it to browser code, or run migrations from a browser bot or build hook.
 
-The migration retains the old nullable `members.password` column temporarily to avoid silently destroying legacy data. New accounts do not write to it. Existing browser/Appwrite accounts without verified email addresses cannot be automatically linked safely; have those users register with an email and follow a supervised recovery/relink process. After legacy account disposition, remove the old column with:
+Projects provisioned before the superseded migrations were retired may still carry the legacy nullable `members.password` column; no current migration creates it. New accounts never write to it. Existing browser/Appwrite accounts without verified email addresses cannot be automatically linked safely; have those users register with an email and follow a supervised recovery/relink process. After legacy account disposition, remove the old column with:
 
 ```sql
 alter table public.members drop column if exists password;
@@ -36,7 +38,7 @@ Keep **Confirm email** enabled in **Authentication → Providers → Email**. Ap
 
 ## 3. Configure Resend API
 
-In Resend, use the verified domain `nexus-chat-world.com` and create an API key with send-only permissions. The server function sends through `https://api.resend.com/emails` using these Vercel Production variables:
+`nexus-chat-world.com` is registered in Resend and reported as **verified** with sending **enabled** (confirmed against `GET https://api.resend.com/domains` on 2026-10-17; domain id `4346b5a9-7004-470b-95ca-047171b0673c`, region `us-east-1`). Create or reuse an API key with send-only permissions. The server function sends through `https://api.resend.com/emails` using these Vercel Production variables:
 
 - `RESEND_API_KEY` (encrypted server variable)
 - `RESEND_FROM=Nexus Chat <admin@nexus-chat-world.com>`
@@ -44,6 +46,21 @@ In Resend, use the verified domain `nexus-chat-world.com` and create an API key 
 - `SUPABASE_SERVICE_ROLE_KEY` (encrypted server variable)
 
 The Supabase service-role key is used only by the Vercel function to generate OTPs; never prefix it with `VITE_`.
+
+### Resend domain DNS records
+
+Outgoing mail is sent `From: Nexus Chat <admin@nexus-chat-world.com>`. Resend signs it with DKIM on the apex domain and uses the `send` subdomain as the envelope (bounce) domain, so relaxed SPF and DKIM alignment both pass once DMARC is published. `nexus-chat-world.com` is delegated to Vercel (`ns1.vercel-dns.com`, `ns2.vercel-dns.com`), so records are added in **Vercel → Project → Settings → Domains → nexus-chat-world.com → DNS Records** (or at whichever provider holds the nameservers), using the exact values from **Resend → Domains → nexus-chat-world.com**.
+
+Resend manages three records and reports all three as **verified**; DMARC is not part of Resend's record set and must be maintained separately:
+
+| Host | Type | Value | Purpose | State (checked 2026-10-17) |
+| --- | --- | --- | --- | --- |
+| `send` | MX, priority 10 | `feedback-smtp.eu-west-1.amazonses.com` | Return-path/bounce handling | Published — Resend reports verified |
+| `send` | TXT | `v=spf1 include:amazonses.com ~all` | SPF for the Resend envelope domain | Published — Resend reports verified |
+| `resend._domainkey` | TXT | `p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCpCVO2OQMfD9agOu1Ir+6Kt4vEf5RU30z8qwLGCuD9VExXFfHIVh75N47/eOqB5hqorBoT2cquvEzfy3wfV4qmMsINJrvNmG20ccy/22USQEjlwI58xOoiNd0lXbMUVqh9lHjfpJuwh/dGI6g6QoOyjBwY08zzfWX0DuCAjVgaMQIDAQAB` | DKIM signing for `d=nexus-chat-world.com` | Published — Resend reports verified |
+| `_dmarc` | TXT | `v=DMARC1; p=none; rua=mailto:dmarc@nexus-chat-world.com` | DMARC policy and aggregate reports | **Missing — add this** |
+
+Observations from the 2026-10-17 probe: the live `send` MX points at the `eu-west-1` SES feedback endpoint while the Resend domain record advertises the `us-east-1` endpoint (`feedback-smtp.us-east-1.amazonses.com`). Only `resend._domainkey.nexus-chat-world.com` and `_dmarc.nexus-chat-world.com` live on the apex; the apex itself intentionally has no SPF TXT, because only the `send` subdomain carries the envelope sender. DMARC sits outside Resend's verification, so adding it does not change the domain's verified status — it is still required to complete SPF/DKIM/DMARC alignment. Tighten `p=none` to `p=quarantine` and then `p=reject` once the aggregate reports show only your own senders.
 
 ## 4. Vercel environment
 

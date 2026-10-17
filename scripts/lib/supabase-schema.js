@@ -6,21 +6,26 @@ import pg from 'pg'
 
 const { Pool } = pg
 const DEFAULT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+// Objects every provisioned project must have. Keep these in step with
+// docs/supabase-schema.sql: `public.profiles`, `public.current_member_profile_id()`
+// and `public.current_member_is_admin()` used to be listed here but belong to the
+// superseded profiles-based design and do not exist on any provisioned project.
 const REQUIRED_TABLES = [
   'public.members',
-  'public.profiles',
   'public.chats',
   'public.chat_members',
   'public.messages',
-  'public.auth_email_code_rate_limits',
+  'public.auth_email_code_limits',
 ]
 const REQUIRED_FUNCTIONS = [
-  'public.current_member_profile_id()',
-  'public.current_member_is_admin()',
   'public.consume_auth_email_code_limit(text,integer,integer)',
   'public.lookup_member_by_nexus_id(text)',
 ]
+const REQUIRED_AUTH_TRIGGERS = ['on_auth_user_created', 'on_auth_user_updated']
 const MIGRATION_TABLE = 'public.nexus_schema_migrations'
+// The Supabase CLI (`db push`) and the production workflow (`psql -f
+// docs/supabase-schema.sql`) record applied versions here instead.
+const CLI_MIGRATION_TABLE = 'supabase_migrations.schema_migrations'
 
 function normalizeSupabaseUrl(supabaseUrl) {
   if (!supabaseUrl) throw new Error('SUPABASE_URL or VITE_SUPABASE_URL is required.')
@@ -111,13 +116,23 @@ function loadMigrations(root) {
 }
 
 function createPool(databaseUrl) {
-  return new Pool({
-    connectionString: normalizeDatabaseUrl(databaseUrl),
+  const parsed = new URL(normalizeDatabaseUrl(databaseUrl))
+  const sslmode = (parsed.searchParams.get('sslmode') || '').toLowerCase()
+  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)
+  // Supabase's pooler presents a certificate chain that Node's bundled CA store
+  // does not verify, so sslmode=require fails with "self-signed certificate in
+  // certificate chain". Drop the parameter and hand pg an explicit ssl config:
+  // verify the chain only when the caller explicitly asked for verify-full.
+  parsed.searchParams.delete('sslmode')
+  const config = {
+    connectionString: parsed.toString(),
     max: 1,
     connectionTimeoutMillis: 15000,
     idleTimeoutMillis: 1000,
     application_name: 'nexus-chat-schema-provisioner',
-  })
+  }
+  if (!isLocal) config.ssl = { rejectUnauthorized: sslmode === 'verify-full' }
+  return new Pool(config)
 }
 
 async function collectSchemaChecks(client) {
@@ -135,10 +150,10 @@ async function collectSchemaChecks(client) {
     from information_schema.triggers
     where event_object_schema = 'auth'
       and event_object_table = 'users'
-      and trigger_name in ('on_auth_user_created_nexus_member', 'on_auth_user_updated_nexus_email')
-  `)
+      and trigger_name = any($1::text[])
+  `, [REQUIRED_AUTH_TRIGGERS])
   const triggerNames = new Set(triggers.map((row) => row.trigger_name))
-  for (const name of ['on_auth_user_created_nexus_member', 'on_auth_user_updated_nexus_email']) {
+  for (const name of REQUIRED_AUTH_TRIGGERS) {
     checks.push({ name: `trigger ${name}`, pass: triggerNames.has(name) })
   }
   return { ok: checks.every((check) => check.pass), checks }
@@ -226,10 +241,13 @@ export async function verifySupabaseSchema({ databaseUrl, root = DEFAULT_ROOT })
     const client = await pool.connect()
     try {
       const verification = await collectSchemaChecks(client)
-      const { rows: migrationTable } = await client.query('select to_regclass($1) as object_name', [MIGRATION_TABLE])
-      const migrationsTableExists = Boolean(migrationTable[0]?.object_name)
-      verification.checks.push({ name: 'migration history table', pass: migrationsTableExists })
-      if (migrationsTableExists) {
+      const { rows: runnerRows } = await client.query('select to_regclass($1) as object_name', [MIGRATION_TABLE])
+      const runnerExists = Boolean(runnerRows[0]?.object_name)
+      const { rows: cliRows } = await client.query('select to_regclass($1) as object_name', [CLI_MIGRATION_TABLE])
+      const cliExists = Boolean(cliRows[0]?.object_name)
+
+      if (runnerExists) {
+        verification.checks.push({ name: 'migration history table', pass: true })
         const { rows } = await client.query(`select version, name from ${MIGRATION_TABLE} order by version`)
         verification.appliedMigrations = rows
         const applied = new Map(rows.map((row) => [row.version, row]))
@@ -253,7 +271,17 @@ export async function verifySupabaseSchema({ databaseUrl, root = DEFAULT_ROOT })
             verification.checks.push({ name: `migration ${row.version}_${row.name} exists in source`, pass: false })
           }
         }
+      } else if (cliExists) {
+        // Externally provisioned projects (Supabase CLI / `psql -f
+        // docs/supabase-schema.sql`) never create the bundled runner's table, so
+        // its per-file applied/checksum contract does not apply. The object
+        // checks above already prove the applied schema; report the CLI history
+        // for visibility without gating on it.
+        verification.checks.push({ name: 'migration history table (supabase CLI)', pass: true })
+        const { rows } = await client.query(`select version, name from ${CLI_MIGRATION_TABLE} order by version`)
+        verification.appliedMigrations = rows
       } else {
+        verification.checks.push({ name: 'migration history table', pass: false })
         verification.appliedMigrations = []
       }
       verification.ok = verification.checks.every((check) => check.pass)

@@ -1,6 +1,5 @@
-<<<<<<< HEAD
 # dependencies
-/node_modules
+node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
@@ -14,7 +13,7 @@
 
 # production
 /build
-/dist
+dist
 dist-ssr
 .output
 .vinxi
@@ -31,10 +30,7 @@ dist-ssr
 *.sln
 *.sw?
 
-# debug
-=======
 # Logs
->>>>>>> 39c3019adaf9289486d7b06780a3e0f5c054d086
 logs
 *.log
 npm-debug.log*
@@ -43,7 +39,6 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-<<<<<<< HEAD
 # local env files
 .env
 .env.*
@@ -73,32 +68,11 @@ android/gradle/wrapper/
 .wrangler/
 .dev.vars*
 !.dev.vars.example
-!.env.example
-=======
-node_modules
-dist
-dist-ssr
-.output
-.vinxi
-.tanstack/**
-.nitro
-*.local
-
-# Wrangler / Cloudflare
-.wrangler/
-.dev.vars
->>>>>>> 39c3019adaf9289486d7b06780a3e0f5c054d086
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
-<<<<<<< HEAD
-=======
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
->>>>>>> 39c3019adaf9289486d7b06780a3e0f5c054d086
+
+# Database backups — contain member data (names, chat titles, UUIDs). Never commit.
+supabase/backups/

@@ -34,13 +34,32 @@ function resolveDbUrl() {
 
 const quoteIdent = (name) => `"${String(name).replace(/"/g, '""')}"`
 
+// Supabase's pooler presents a certificate chain that Node's bundled CA store
+// does not verify, so sslmode=require fails with "self-signed certificate in
+// certificate chain". Parse the mode here and hand pg an explicit ssl config
+// instead: full verification only when the caller asked for verify-full,
+// otherwise encrypt the connection without pinning the chain.
+function buildClientConfig(url) {
+  const parsed = new URL(url)
+  const sslmode = (parsed.searchParams.get('sslmode') || '').toLowerCase()
+  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)
+  parsed.searchParams.delete('sslmode')
+
+  const config = {
+    connectionString: parsed.toString(),
+    application_name: 'nexus-backup',
+  }
+  if (!isLocal) config.ssl = { rejectUnauthorized: sslmode === 'verify-full' }
+  return config
+}
+
 async function main() {
   const url = resolveDbUrl()
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   fs.mkdirSync(OUT_DIR, { recursive: true })
   const outFile = path.join(OUT_DIR, `${stamp}_public_data.sql`)
 
-  const client = new Client({ connectionString: url, application_name: 'nexus-backup' })
+  const client = new Client(buildClientConfig(url))
   await client.connect()
   try {
     const { rows: tables } = await client.query(`
@@ -79,7 +98,7 @@ async function main() {
       try {
         const { rows } = await client.query(
           `select format('insert into %I.%I select * from jsonb_populate_record(null::%I.%I, %L);',
-                         'public', $1, 'public', $1, to_jsonb(t)) as stmt
+                         'public', $1::text, 'public', $1::text, to_jsonb(t)) as stmt
            from public.${ident} t`,
           [table_name],
         )

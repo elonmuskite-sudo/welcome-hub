@@ -114,10 +114,11 @@ this environment; listed so they can be run before release):
 
 - **Supabase MCP** `integrated_web-dev` returns `Forbidden (500000)`; migration work
   was done with the Supabase CLI instead.
-- **`.env` two-project mismatch:** the CLI is linked to `woavhlkgylarngqyvphf`
-  ("Nexus Next") while client `VITE_*` vars point to `mshlnazxyfoqvaxiplnp`. The
-  `participant_names` migration was applied to **woav…**; confirm which project is
-  authoritative.
+- **`.env` project alignment (resolved):** `woavhlkgylarngqyvphf` ("Nexus Next") is
+  authoritative — it holds the applied schema and the CLI link
+  (`supabase/.temp/linked-project.json`, `supabase/config.toml`). The `VITE_SUPABASE_URL`,
+  `VITE_SUPABASE_PROJECT_ID`, and anon-key values in `.env`/`.env.production` now point at
+  it too, so the browser client and `/api` functions cannot split across projects.
 - **`scripts/lib/supabase-schema.js`** bootstrap expects a different schema model
   (`members.profile_id`, `current_member_profile_id()`, `nexus_schema_migrations`) and
   is unreconciled with the live schema.
