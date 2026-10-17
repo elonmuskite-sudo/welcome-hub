@@ -15,6 +15,11 @@ const testUserId = 'f9c2e2dd-f11f-43d4-ad07-c94269e5141d'
 let rateLimitAllowed = true
 let otpSequence = 100000
 
+function nextOtp() {
+  otpSequence += 1
+  return String(otpSequence)
+}
+
 globalThis.fetch = async (request, options = {}) => {
   const url = new URL(request instanceof Request ? request.url : request)
   if (url.hostname === 'api.resend.com') {
@@ -38,33 +43,21 @@ globalThis.fetch = async (request, options = {}) => {
       { id: testUserId, email: 'reset-user@example.test' },
       { id: testUserId, email: 'rate-limited@example.test' },
       { id: testUserId, email: 'new-user@example.test' },
+      { id: testUserId, email: 'code-user@example.test' },
     ] }), { status: 200 })
-  }
-
-  if (url.pathname.endsWith(`/auth/v1/admin/users/${testUserId}`) && options.method === 'PUT') {
-    const body = JSON.parse(options.body)
-    authRequests.push({ action: 'updateUser', body })
-    return new Response(JSON.stringify({ id: testUserId, email: 'test@example.test', email_confirmed_at: '2026-10-03T00:00:00Z' }), { status: 200 })
   }
 
   if (url.pathname.endsWith('/auth/v1/admin/generate_link')) {
     const body = JSON.parse(options.body)
-    authRequests.push({ action: 'generateLink', body })
+    const emailOtp = nextOtp()
+    authRequests.push({ action: 'generateLink', body, emailOtp })
     return new Response(JSON.stringify({
-      action_link: 'https://auth.example.test/action',
-      hashed_token: 'mock-supabase-token-hash',
+      action_link: `https://auth.example.test/verify?token=${emailOtp}`,
+      email_otp: emailOtp,
+      hashed_token: `hash-${emailOtp}`,
       verification_type: body.type,
       user: { id: testUserId, email: body.email },
     }), { status: 200 })
-  }
-
-  if (url.pathname.endsWith('/auth/v1/admin/users/by-email') && options.method === 'GET') {
-    authRequests.push({ action: 'getUserByEmail', query: url.searchParams.get('email') })
-    return new Response(JSON.stringify({ user: { id: testUserId, email: 'expired-user@example.test' } }), { status: 200 })
-  }
-
-  if (url.pathname.endsWith('/rest/v1/members')) {
-    return new Response(JSON.stringify({ auth_user_id: testUserId }), { status: 200 })
   }
 
   if (url.pathname.endsWith('/rest/v1/rpc/consume_auth_email_code_limit')) {
@@ -95,6 +88,22 @@ function request(body, headers = {}) {
   }
 }
 
+function assertResendOtp(email, { purposeSubject } = {}) {
+  const sent = sentEmails.at(-1)
+  assert.equal(sent.to[0], email)
+  assert.match(sent.from, /@nexus-chat-world\.com>?$/)
+  assert.equal(sent.from.includes('example.test'), false)
+  assert.match(sent.text, /code is \d{6}/)
+  assert.match(sent.html, />\d{6}</)
+  assert.equal(/https?:\/\//i.test(sent.text), false)
+  assert.equal(/https?:\/\//i.test(sent.html), false)
+  assert.equal(/href=/i.test(sent.html), false)
+  if (purposeSubject) assert.match(sent.subject, purposeSubject)
+  const code = sent.text.match(/code is (\d{6})/)[1]
+  assert.equal(JSON.stringify(sentEmails.at(-1)).includes('action_link'), false)
+  return code
+}
+
 before(() => {
   Date.now = () => 1_000_000
 })
@@ -104,7 +113,7 @@ after(() => {
   Date.now = originalNow
 })
 
-test('signup creates an unconfirmed Supabase user and sends a six-digit code through Resend', async () => {
+test('signup creates an unconfirmed user and sends a Resend OTP from nexus-chat-world.com', async () => {
   const res = responseRecorder()
   await handler(request({
     action: 'signup',
@@ -117,20 +126,19 @@ test('signup creates an unconfirmed Supabase user and sends a six-digit code thr
   }), res)
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, { ok: true })
-  assert.match(res.headers['Set-Cookie'], /HttpOnly/)
-  assert.match(res.headers['Set-Cookie'], /Secure/)
-  assert.equal(authRequests.at(-1).action, 'createUser')
-  assert.equal(authRequests.at(-1).body.email_confirm, false)
-  assert.equal(authRequests.at(-1).body.user_metadata.member_id, '1012345678')
-  assert.equal(sentEmails.at(-1).to[0], 'new-user@example.test')
-  assert.match(sentEmails.at(-1).text, /code is \d{6}/)
-  const code = sentEmails.at(-1).text.match(/code is (\d{6})/)[1]
-  assert.equal(res.headers['Set-Cookie'].includes(code), false)
+  assert.equal(res.body.ok, true)
+  assert.equal(res.body.otpType, 'signup')
+  assert.equal(res.headers['Set-Cookie'], undefined)
+  const createUser = authRequests.find((item) => item.action === 'createUser')
+  assert.equal(createUser.body.email_confirm, false)
+  assert.equal(createUser.body.user_metadata.member_id, '1012345678')
+  const generateLink = authRequests.filter((item) => item.action === 'generateLink').at(-1)
+  assert.equal(generateLink.body.type, 'signup')
+  const code = assertResendOtp('new-user@example.test', { purposeSubject: /verification code/ })
   assert.equal(JSON.stringify(res.body).includes(code), false)
 })
 
-test('resend generates a fresh code and updates the pending cookie', async () => {
+test('resend issues a fresh Resend OTP without using a verification link', async () => {
   const signupResponse = responseRecorder()
   await handler(request({
     action: 'signup',
@@ -143,19 +151,17 @@ test('resend generates a fresh code and updates the pending cookie', async () =>
   }), signupResponse)
 
   const originalCode = sentEmails.at(-1).text.match(/code is (\d{6})/)[1]
-  const cookie = signupResponse.headers['Set-Cookie'].split(';')[0]
-  Date.now = () => 1_061_000
   const res = responseRecorder()
-  await handler(request({ action: 'resend', purpose: 'signup', email: 'resend-user@example.test' }, { cookie }), res)
+  await handler(request({ action: 'resend', purpose: 'signup', email: 'resend-user@example.test' }), res)
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, { ok: true })
-  const nextCode = sentEmails.at(-1).text.match(/code is (\d{6})/)[1]
+  assert.equal(res.body.ok, true)
+  const nextCode = assertResendOtp('resend-user@example.test')
   assert.notEqual(nextCode, originalCode)
+  assert.equal(authRequests.filter((item) => item.action === 'generateLink').at(-1).body.type, 'magiclink')
 })
 
-test('password recovery generates and sends a recovery OTP through Resend', async () => {
-  Date.now = () => 1_122_000
+test('password recovery sends a recovery OTP through Resend', async () => {
   const res = responseRecorder()
   await handler(request({
     action: 'recovery',
@@ -164,77 +170,36 @@ test('password recovery generates and sends a recovery OTP through Resend', asyn
   }), res)
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, { ok: true })
-  assert.equal(sentEmails.at(-1).to[0], 'recover-user@example.test')
-  assert.match(sentEmails.at(-1).text, /code is \d{6}/)
+  assert.equal(res.body.ok, true)
+  assert.equal(res.body.otpType, 'recovery')
+  assertResendOtp('recover-user@example.test', { purposeSubject: /password reset code/ })
+  assert.equal(authRequests.filter((item) => item.action === 'generateLink').at(-1).body.type, 'recovery')
 })
 
-test('resend regenerates a fresh code when a stale cookie is missing or expired', async () => {
-  const email = 'expired-user@example.test'
-  const signupResponse = responseRecorder()
-  await handler(request({
-    action: 'signup',
-    purpose: 'signup',
-    email,
-    password: 'Secure-test-password-123',
-    firstName: 'Expired',
-    lastName: 'User',
-    memberId: '1012349876',
-  }), signupResponse)
-
-  const firstCode = sentEmails.at(-1).text.match(/code is (\d{6})/)[1]
-  const cookie = signupResponse.headers['Set-Cookie'].split(';')[0]
-  Date.now = () => 2_000_000
+test('email sign-in sends a Resend OTP from the verified domain', async () => {
   const res = responseRecorder()
-  await handler(request({ action: 'resend', purpose: 'signup', email }, { cookie }), res)
+  await handler(request({
+    action: 'email',
+    purpose: 'email',
+    email: 'code-user@example.test',
+  }), res)
 
   assert.equal(res.statusCode, 200)
-  assert.deepEqual(res.body, { ok: true })
-  const nextCode = sentEmails.at(-1).text.match(/code is (\d{6})/)[1]
-  assert.notEqual(nextCode, firstCode)
-  assert.ok(res.headers['Set-Cookie'])
+  assert.equal(res.body.ok, true)
+  assertResendOtp('code-user@example.test', { purposeSubject: /sign-in code/ })
 })
 
-test('signup code verification confirms the user and returns a Supabase sign-in token hash', async () => {
-  Date.now = () => 1_153_000
-  const signupResponse = responseRecorder()
+test('verify action rejects link-based completion', async () => {
+  const res = responseRecorder()
   await handler(request({
-    action: 'signup',
+    action: 'verify',
     purpose: 'signup',
     email: 'verify-user@example.test',
-    password: 'Secure-test-password-123',
-    firstName: 'Verify',
-    lastName: 'User',
-    memberId: '1012123434',
-  }), signupResponse)
+    code: '123456',
+  }), res)
 
-  const code = sentEmails.at(-1).text.match(/code is (\d{6})/)[1]
-  const cookie = signupResponse.headers['Set-Cookie'].split(';')[0]
-  const res = responseRecorder()
-  await handler(request({ action: 'verify', purpose: 'signup', email: 'verify-user@example.test', code }, { cookie }), res)
-
-  assert.equal(res.statusCode, 200)
-  assert.equal(res.body.tokenHash, 'mock-supabase-token-hash')
-  assert.equal(authRequests.at(-2).action, 'updateUser')
-  assert.equal(authRequests.at(-2).body.email_confirm, true)
-  assert.equal(authRequests.at(-1).action, 'generateLink')
-  assert.equal(authRequests.at(-1).body.type, 'magiclink')
-  assert.match(res.headers['Set-Cookie'], /Max-Age=0/)
-})
-
-test('recovery code verification returns a Supabase recovery token hash', async () => {
-  Date.now = () => 1_183_000
-  const recoveryResponse = responseRecorder()
-  await handler(request({ action: 'recovery', purpose: 'recovery', email: 'reset-user@example.test' }), recoveryResponse)
-
-  const code = sentEmails.at(-1).text.match(/code is (\d{6})/)[1]
-  const cookie = recoveryResponse.headers['Set-Cookie'].split(';')[0]
-  const res = responseRecorder()
-  await handler(request({ action: 'verify', purpose: 'recovery', email: 'reset-user@example.test', code }, { cookie }), res)
-
-  assert.equal(res.statusCode, 200)
-  assert.equal(res.body.tokenHash, 'mock-supabase-token-hash')
-  assert.equal(authRequests.at(-1).body.type, 'recovery')
+  assert.equal(res.statusCode, 400)
+  assert.match(res.body.error, /Verification links are not used/)
 })
 
 test('rejects requests from a different origin before calling providers', async () => {

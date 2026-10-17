@@ -39,7 +39,7 @@ Keep **Confirm email** enabled in **Authentication → Providers → Email**. Ap
 In Resend, use the verified domain `nexus-chat-world.com` and create an API key with send-only permissions. The server function sends through `https://api.resend.com/emails` using these Vercel Production variables:
 
 - `RESEND_API_KEY` (encrypted server variable)
-- `RESEND_FROM=admin@nexus-chat-world.com`
+- `RESEND_FROM=Nexus Chat <admin@nexus-chat-world.com>`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` (encrypted server variable)
 
