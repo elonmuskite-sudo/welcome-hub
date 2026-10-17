@@ -44,7 +44,10 @@ export default function AppBottomNav({ tabs: tabsProp, activeTab: activeTabProp,
   }
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-border bg-card shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+    <div
+      data-chat-bottom-nav
+      className="fixed inset-x-0 bottom-0 z-40 md:hidden border-t border-border bg-card shadow-[0_-4px_12px_rgba(0,0,0,0.05)]"
+    >
       <div className="flex justify-around">
         {tabs.map((tab) => {
           const Icon = tab.icon

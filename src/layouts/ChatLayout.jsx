@@ -7,10 +7,12 @@ import NotificationStack from '../components/chat/NotificationStack'
 import Header from '../components/Header'
 import { requestNotificationPermission, showSystemNotification } from '../lib/notifications'
 import { startRealtimeListeners, stopRealtimeListeners } from '../lib/persistence'
+import { useViewportInsets } from '../hooks/useViewportInsets'
 
 export default function ChatLayout() {
   const location = useLocation()
   const navigate = useNavigate()
+  useViewportInsets()
 
   useEffect(() => {
     async function initNotifications() {
@@ -47,7 +49,7 @@ export default function ChatLayout() {
         <AppTopNav variant="user" />
       </Header>
 
-      <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden pb-[76px] md:pb-0">
+      <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden pb-[var(--chat-bottom-offset,84px)] md:pb-0">
         <div className="hidden md:flex md:w-96 flex-col bg-card border-r border-border">
           <ChatSidebar activeTab={activeTab} onTabChange={handleTabChange} />
         </div>

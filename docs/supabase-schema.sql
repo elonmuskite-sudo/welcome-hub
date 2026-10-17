@@ -425,3 +425,300 @@ begin
 end $$;
 revoke execute on function public.review_identity_verification(uuid,boolean,text) from public, anon;
 grant execute on function public.review_identity_verification(uuid,boolean,text) to authenticated;
+-- 20261017020000_premium_member_badges.sql
+-- Premium Member badges (blue) are granted ONLY by an admin through the admin
+-- panel. KYC (gold) badges are granted ONLY when an admin approves an ID check.
+-- Nothing is auto-assigned at signup, and every grant/revoke/review is recorded
+-- in an admin audit log so badge assignments are traceable to an admin action.
+create table if not exists public.premium_members (
+  user_id uuid primary key,
+  granted_by uuid,
+  granted_at timestamptz not null default now(),
+  note text
+);
+revoke all on public.premium_members from public, anon;
+grant select on public.premium_members to authenticated;
+grant all on public.premium_members to service_role;
+alter table public.premium_members enable row level security;
+drop policy if exists "Own or admin read premium" on public.premium_members;
+create policy "Own or admin read premium" on public.premium_members
+  for select to authenticated
+  using (user_id = auth.uid() or public.has_role(auth.uid(), 'admin'));
+
+create table if not exists public.admin_audit_log (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid,
+  action text not null,
+  target_user_id uuid,
+  details jsonb,
+  created_at timestamptz not null default now()
+);
+revoke all on public.admin_audit_log from public, anon;
+grant select on public.admin_audit_log to authenticated;
+grant all on public.admin_audit_log to service_role;
+alter table public.admin_audit_log enable row level security;
+drop policy if exists "Admins read audit log" on public.admin_audit_log;
+create policy "Admins read audit log" on public.admin_audit_log
+  for select to authenticated
+  using (public.has_role(auth.uid(), 'admin'));
+
+create or replace function private.admin_set_premium_member(_user_id uuid, _grant boolean, _note text default null)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not public.has_role(auth.uid(), 'admin') then raise exception 'Admins only'; end if;
+  if _user_id is null then raise exception 'A member is required'; end if;
+
+  if _grant then
+    insert into public.premium_members (user_id, granted_by, granted_at, note)
+    values (_user_id, auth.uid(), now(), nullif(left(trim(coalesce(_note, '')), 500), ''))
+    on conflict (user_id) do update
+      set granted_by = excluded.granted_by, granted_at = excluded.granted_at, note = excluded.note;
+  else
+    delete from public.premium_members where user_id = _user_id;
+  end if;
+
+  insert into public.admin_audit_log (actor_id, action, target_user_id, details)
+  values (
+    auth.uid(),
+    case when _grant then 'premium_member.granted' else 'premium_member.revoked' end,
+    _user_id,
+    jsonb_build_object('note', nullif(left(trim(coalesce(_note, '')), 500), ''))
+  );
+end $$;
+grant execute on function private.admin_set_premium_member(uuid, boolean, text) to authenticated;
+
+create or replace function public.admin_set_premium_member(_user_id uuid, _grant boolean, _note text default null)
+returns void language sql security invoker set search_path = public as $$
+  select private.admin_set_premium_member(_user_id, _grant, _note)
+$$;
+revoke all on function public.admin_set_premium_member(uuid, boolean, text) from public, anon;
+grant execute on function public.admin_set_premium_member(uuid, boolean, text) to authenticated;
+
+-- Badge levels: 'premium' (blue, admin-granted) > 'authenticated' (blue, either
+-- identity-verification tier approved) > 'none'. A confirmed email never grants a badge.
+create or replace function private.get_verification_badge(_user_id uuid)
+returns text language sql stable security definer set search_path = public as $$
+  select case
+    when exists (select 1 from public.premium_members where user_id = _user_id) then 'premium'
+    when exists (select 1 from public.identity_verifications where user_id = _user_id and status = 'approved') then 'authenticated'
+    else 'none' end $$;
+grant execute on function private.get_verification_badge(uuid) to authenticated;
+
+create or replace function public.get_verification_badge(_user_id uuid)
+returns text language sql stable security invoker set search_path = public as $$
+  select private.get_verification_badge(_user_id)
+$$;
+revoke execute on function public.get_verification_badge(uuid) from public, anon;
+grant execute on function public.get_verification_badge(uuid) to authenticated;
+
+-- Batch lookup so user directories (contacts) resolve every badge in one call.
+create or replace function private.get_verification_badges(_member_ids text[])
+returns table(member_id text, badge text) language sql stable security definer set search_path = public as $$
+  select m.member_id,
+    case
+      when exists (select 1 from public.premium_members p where p.user_id = m.id) then 'premium'
+      when exists (select 1 from public.identity_verifications v where v.user_id = m.id and v.status = 'approved') then 'authenticated'
+      else 'none' end
+  from public.members m
+  where m.member_id = any(_member_ids)
+  limit 500 $$;
+revoke execute on function private.get_verification_badges(text[]) from public, anon;
+grant execute on function private.get_verification_badges(text[]) to authenticated;
+
+create or replace function public.get_verification_badges(_member_ids text[])
+returns table(member_id text, badge text) language sql stable security invoker set search_path = public as $$
+  select * from private.get_verification_badges(_member_ids)
+$$;
+revoke execute on function public.get_verification_badges(text[]) from public, anon;
+grant execute on function public.get_verification_badges(text[]) to authenticated;
+
+create or replace function public.review_identity_verification(_id uuid, _approve boolean, _note text default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare _user_id uuid;
+begin
+  if not public.has_role(auth.uid(), 'admin') then raise exception 'Admins only'; end if;
+  update public.identity_verifications
+    set status = case when _approve then 'approved' else 'rejected' end,
+        reviewer_note = case when _approve then null else nullif(left(trim(coalesce(_note, '')), 500), '') end,
+        reviewed_by = auth.uid(), reviewed_at = now()
+    where id = _id and status = 'pending'
+    returning user_id into _user_id;
+  if _user_id is null then raise exception 'This ID check is no longer waiting for review'; end if;
+
+  insert into public.admin_audit_log (actor_id, action, target_user_id, details)
+  values (
+    auth.uid(),
+    case when _approve then 'kyc.approved' else 'kyc.rejected' end,
+    _user_id,
+    jsonb_build_object('verification_id', _id, 'note', nullif(left(trim(coalesce(_note, '')), 500), ''))
+  );
+end $$;
+revoke execute on function public.review_identity_verification(uuid, boolean, text) from public, anon;
+grant execute on function public.review_identity_verification(uuid, boolean, text) to authenticated;
+-- 20261017030000_identity_verification_tiers.sql
+-- Dual-tier identity verification.
+--
+-- Tier 1 (instant, primary): the app matches the selfie on-device and calls the
+--   security-definer RPC below, which records an already-approved row for the
+--   caller only. The blue verified badge is shown as soon as this succeeds.
+-- Tier 2 (manual, secondary): the member completes a structured form and uploads
+--   a government ID plus a selfie; the row stays 'pending' until an admin
+--   approves it through review_identity_verification.
+--
+-- Both tiers resolve to the same blue verified badge. Email confirmation never
+-- grants any badge, and only this RPC (not the browser) can self-approve.
+alter table public.identity_verifications
+  add column if not exists tier text,
+  add column if not exists full_legal_name text,
+  add column if not exists date_of_birth date,
+  add column if not exists document_type text,
+  add column if not exists document_number text,
+  add column if not exists issuing_country text;
+
+-- Rows created before this migration are treated as manual submissions.
+update public.identity_verifications set tier = 'manual' where tier is null;
+
+-- The instant tier has no government document, so the ID path becomes optional.
+alter table public.identity_verifications alter column id_document_path drop not null;
+
+do $$ begin
+  alter table public.identity_verifications
+    add constraint identity_verifications_tier_check check (tier in ('instant', 'manual'));
+exception when duplicate_object then null; end $$;
+
+-- Instant automated verification. security definer so the member cannot mark
+-- arbitrary rows approved: the function only ever writes the caller's own row.
+create or replace function public.submit_instant_identity_verification(_selfie_path text, _match_score numeric default null)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'Sign in to verify your identity'; end if;
+  if coalesce(trim(_selfie_path), '') = '' then raise exception 'A selfie is required for instant verification'; end if;
+
+  insert into public.identity_verifications (user_id, status, tier, match_score, selfie_path, id_document_path, reviewed_at)
+  values (auth.uid(), 'approved', 'instant', _match_score, _selfie_path, null, now())
+  on conflict (user_id) do update
+    set status = 'approved',
+        tier = 'instant',
+        match_score = excluded.match_score,
+        selfie_path = excluded.selfie_path,
+        id_document_path = null,
+        reviewer_note = null,
+        reviewed_by = null,
+        reviewed_at = now(),
+        updated_at = now();
+end $$;
+revoke execute on function public.submit_instant_identity_verification(text, numeric) from public, anon;
+grant execute on function public.submit_instant_identity_verification(text, numeric) to authenticated, service_role;
+
+-- 20261017040000_social_feed.sql
+-- Facebook-style social feed: text, image and short-video posts with threaded
+-- comments, multi-emoji reactions and admin moderation. Idempotent.
+create table if not exists public.feed_posts (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null,
+  content text not null default '' check (char_length(content) <= 5000),
+  media jsonb not null default '[]'::jsonb,
+  is_admin_post boolean not null default false,
+  status text not null default 'active' check (status in ('active', 'hidden', 'removed')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_feed_posts_created on public.feed_posts(created_at desc);
+create index if not exists idx_feed_posts_author on public.feed_posts(author_id);
+
+create table if not exists public.feed_comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.feed_posts(id) on delete cascade,
+  author_id uuid not null,
+  parent_id uuid references public.feed_comments(id) on delete cascade,
+  content text not null check (char_length(content) between 1 and 3000),
+  status text not null default 'active' check (status in ('active', 'hidden', 'removed')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_feed_comments_post on public.feed_comments(post_id, created_at);
+create index if not exists idx_feed_comments_parent on public.feed_comments(parent_id);
+
+create table if not exists public.feed_reactions (
+  post_id uuid not null references public.feed_posts(id) on delete cascade,
+  user_id uuid not null,
+  reaction text not null,
+  created_at timestamptz not null default now(),
+  primary key (post_id, user_id)
+);
+
+create table if not exists public.feed_comment_reactions (
+  comment_id uuid not null references public.feed_comments(id) on delete cascade,
+  user_id uuid not null,
+  reaction text not null,
+  created_at timestamptz not null default now(),
+  primary key (comment_id, user_id)
+);
+
+grant select, insert, update, delete on public.feed_posts, public.feed_comments to authenticated;
+grant select, insert, update, delete on public.feed_reactions, public.feed_comment_reactions to authenticated;
+grant all on public.feed_posts, public.feed_comments to service_role;
+grant all on public.feed_reactions, public.feed_comment_reactions to service_role;
+
+alter table public.feed_posts enable row level security;
+alter table public.feed_comments enable row level security;
+alter table public.feed_reactions enable row level security;
+alter table public.feed_comment_reactions enable row level security;
+
+drop trigger if exists trg_feed_posts_updated on public.feed_posts;
+create trigger trg_feed_posts_updated before update on public.feed_posts
+  for each row execute function public.update_updated_at_column();
+drop trigger if exists trg_feed_comments_updated on public.feed_comments;
+create trigger trg_feed_comments_updated before update on public.feed_comments
+  for each row execute function public.update_updated_at_column();
+
+-- Posts: everyone signed in can read active posts; authors manage their own;
+-- admins can moderate any post.
+drop policy if exists "Read feed posts" on public.feed_posts;
+create policy "Read feed posts" on public.feed_posts for select to authenticated
+  using (status = 'active' or author_id = auth.uid() or public.has_role(auth.uid(), 'admin'));
+drop policy if exists "Create own feed posts" on public.feed_posts;
+create policy "Create own feed posts" on public.feed_posts for insert to authenticated
+  with check (author_id = auth.uid());
+drop policy if exists "Manage own feed posts" on public.feed_posts;
+create policy "Manage own feed posts" on public.feed_posts for update to authenticated
+  using (author_id = auth.uid() or public.has_role(auth.uid(), 'admin'))
+  with check (author_id = auth.uid() or public.has_role(auth.uid(), 'admin'));
+drop policy if exists "Delete own feed posts" on public.feed_posts;
+create policy "Delete own feed posts" on public.feed_posts for delete to authenticated
+  using (author_id = auth.uid() or public.has_role(auth.uid(), 'admin'));
+
+-- Comments: readable with the post; authors edit/delete their own; admins moderate.
+drop policy if exists "Read feed comments" on public.feed_comments;
+create policy "Read feed comments" on public.feed_comments for select to authenticated
+  using (status = 'active' or author_id = auth.uid() or public.has_role(auth.uid(), 'admin'));
+drop policy if exists "Create own feed comments" on public.feed_comments;
+create policy "Create own feed comments" on public.feed_comments for insert to authenticated
+  with check (author_id = auth.uid());
+drop policy if exists "Manage own feed comments" on public.feed_comments;
+create policy "Manage own feed comments" on public.feed_comments for update to authenticated
+  using (author_id = auth.uid() or public.has_role(auth.uid(), 'admin'))
+  with check (author_id = auth.uid() or public.has_role(auth.uid(), 'admin'));
+drop policy if exists "Delete own feed comments" on public.feed_comments;
+create policy "Delete own feed comments" on public.feed_comments for delete to authenticated
+  using (author_id = auth.uid() or public.has_role(auth.uid(), 'admin'));
+
+-- Reactions: readable by all signed-in members; each member owns their own row.
+drop policy if exists "Read post reactions" on public.feed_reactions;
+create policy "Read post reactions" on public.feed_reactions for select to authenticated using (true);
+drop policy if exists "Manage own post reactions" on public.feed_reactions;
+create policy "Manage own post reactions" on public.feed_reactions for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists "Read comment reactions" on public.feed_comment_reactions;
+create policy "Read comment reactions" on public.feed_comment_reactions for select to authenticated using (true);
+drop policy if exists "Manage own comment reactions" on public.feed_comment_reactions;
+create policy "Manage own comment reactions" on public.feed_comment_reactions for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Live feed updates across users and admins.
+do $$ begin alter publication supabase_realtime add table public.feed_posts; exception when others then null; end $$;
+do $$ begin alter publication supabase_realtime add table public.feed_comments; exception when others then null; end $$;
+do $$ begin alter publication supabase_realtime add table public.feed_reactions; exception when others then null; end $$;
+do $$ begin alter publication supabase_realtime add table public.feed_comment_reactions; exception when others then null; end $$;
+

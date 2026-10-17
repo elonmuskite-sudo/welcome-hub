@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { appwriteData, isAppwriteAuthEnabled } from '../lib/appwrite'
+import { clearVerificationBadgeCache } from './chat/VerificationBadge'
 
 export default function IdentityReviewQueue() {
   const [rows, setRows] = useState([])
@@ -18,8 +19,8 @@ export default function IdentityReviewQueue() {
         if (queryError) throw queryError
         const signed = await Promise.all((data || []).map(async (row) => {
           const [selfie, document] = await Promise.all([
-            supabase.storage.from('identity-docs').createSignedUrl(row.selfie_path, 600),
-            supabase.storage.from('identity-docs').createSignedUrl(row.id_document_path, 600),
+            row.selfie_path ? supabase.storage.from('identity-docs').createSignedUrl(row.selfie_path, 600) : Promise.resolve({ data: null }),
+            row.id_document_path ? supabase.storage.from('identity-docs').createSignedUrl(row.id_document_path, 600) : Promise.resolve({ data: null }),
           ])
           return { ...row, selfieUrl: selfie.data?.signedUrl || null, idUrl: document.data?.signedUrl || null }
         }))
@@ -41,7 +42,8 @@ export default function IdentityReviewQueue() {
     return undefined
   }, [load])
 
-  const decide = async (id, status) => {
+  const decide = async (row, status) => {
+    const { id, user_id: userId } = row
     try {
       if (isAppwriteAuthEnabled()) {
         await appwriteData('verification.admin.review', { id, status, note: notes[id] || null })
@@ -51,6 +53,7 @@ export default function IdentityReviewQueue() {
         })
         if (updateError) throw updateError
       }
+      clearVerificationBadgeCache(userId)
       setRows((r) => r.filter((x) => x.id !== id))
       setError('')
     } catch (reviewError) {
@@ -61,13 +64,28 @@ export default function IdentityReviewQueue() {
   return (
     <section className="mt-8 rounded-[24px] border border-border bg-card p-6">
       <h2 className="text-xl font-semibold text-foreground">ID checks waiting for review</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Faces already matched on the person's device. Confirm the ID looks genuine before approving.</p>
+      <p className="mt-1 text-sm text-muted-foreground">Manual submissions are held until an admin confirms the government ID matches the selfie. Instant checks are automated and never appear here.</p>
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
       {!rows.length && !error && <p className="mt-4 text-sm text-muted-foreground">Nothing to review.</p>}
       <div className="mt-4 space-y-4">
         {rows.map((r) => (
           <div key={r.id} className="rounded-2xl border border-border bg-muted/30 p-4 space-y-3">
-            <p className="text-sm text-muted-foreground">Match score {Number(r.match_score || 0).toFixed(2)} · {new Date(r.created_at).toLocaleString()}</p>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                {r.tier === 'instant' ? 'Instant' : 'Manual'}
+              </span>
+              <span>Match score {r.match_score == null ? 'n/a' : Number(r.match_score).toFixed(2)}</span>
+              <span>· {new Date(r.created_at).toLocaleString()}</span>
+            </div>
+            {(r.full_legal_name || r.date_of_birth || r.document_type || r.document_number || r.issuing_country) && (
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                {r.full_legal_name && <><dt className="text-muted-foreground">Legal name</dt><dd className="text-foreground">{r.full_legal_name}</dd></>}
+                {r.date_of_birth && <><dt className="text-muted-foreground">Date of birth</dt><dd className="text-foreground">{r.date_of_birth}</dd></>}
+                {r.document_type && <><dt className="text-muted-foreground">Document</dt><dd className="text-foreground capitalize">{String(r.document_type).replace(/_/g, ' ')}</dd></>}
+                {r.document_number && <><dt className="text-muted-foreground">Number</dt><dd className="text-foreground">{r.document_number}</dd></>}
+                {r.issuing_country && <><dt className="text-muted-foreground">Issuing country</dt><dd className="text-foreground">{r.issuing_country}</dd></>}
+              </dl>
+            )}
             <div className="grid grid-cols-2 gap-3">
               {r.selfieUrl && <img src={r.selfieUrl} alt="Selfie" className="w-full rounded-xl" />}
               {r.idUrl && <img src={r.idUrl} alt="Government ID" className="w-full rounded-xl" />}
@@ -76,8 +94,8 @@ export default function IdentityReviewQueue() {
               onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })}
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" />
             <div className="flex gap-2">
-              <button onClick={() => decide(r.id, 'approved')} className="rounded-full bg-primary px-4 py-2 text-sm text-primary-foreground">Approve</button>
-              <button onClick={() => decide(r.id, 'rejected')} className="rounded-full border border-border px-4 py-2 text-sm text-destructive">Reject</button>
+              <button onClick={() => decide(r, 'approved')} className="rounded-full bg-primary px-4 py-2 text-sm text-primary-foreground">Approve</button>
+              <button onClick={() => decide(r, 'rejected')} className="rounded-full border border-border px-4 py-2 text-sm text-destructive">Reject</button>
             </div>
           </div>
         ))}

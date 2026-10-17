@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { IdentityLinkError, linkAppwriteIdentity, verifyAppwriteSession } from './appwriteIdentity.js'
 import { createDatabasePool, withAuthenticatedDatabaseTransaction } from './appwriteDatabase.js'
+import { isFileScanConfigured, scanFileBuffer, unavailableScan } from './fileScan.js'
 
 let poolPromise
 const FIRST_VALID_UUID = '00000000-0000-1000-8000-000000000000'
@@ -242,15 +243,6 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       )
       return { contact: rows[0] }
     }
-    case 'contacts.delete': {
-      const contactId = requiredString(body.contactId, 'Contact ID', 64)
-      if (!validUuid(contactId)) throw new GatewayError('Contact ID is invalid.')
-      const { rowCount } = await client.query(
-        `delete from public.contacts where user_id = $1 and id = $2`,
-        [supabaseUserId, contactId],
-      )
-      return { deleted: rowCount === 1 }
-    }
     case 'storage.usage': {
       const { rows: files } = await client.query(
         `select id, chat_id, file_name, file_type, mime_type, size_bytes, duration_seconds,
@@ -331,7 +323,7 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       const fileId = requiredString(body.fileId, 'File ID', 64)
       if (!validUuid(fileId)) throw new GatewayError('File ID is invalid.')
       const { rows } = await client.query(
-        `select id, storage_path, size_bytes, mime_type from public.storage_files where id = $1`,
+        `select id, storage_path, size_bytes, mime_type, file_name from public.storage_files where id = $1`,
         [fileId],
       )
       if (!rows[0]) throw new GatewayError('The uploaded file is unavailable.', 404)
@@ -342,9 +334,29 @@ export async function executeUserDataOperation(client, identity, body, admin) {
         || actualMime !== String(rows[0].mime_type || '').toLowerCase()) {
         throw new GatewayError('The uploaded file did not match its reserved type and size.', 400)
       }
+      // Pluggable scan hook: only runs when a provider is configured. A flagged
+      // file is removed and never gets a link; otherwise the status is reported
+      // so clients can show an honest "not scanned" state.
+      let scan = unavailableScan()
+      if (isFileScanConfigured()) {
+        const { data: objectBlob, error: downloadError } = await admin.storage.from('chat-files').download(rows[0].storage_path)
+        if (downloadError || !objectBlob) {
+          scan = { status: 'error', detail: 'The uploaded file could not be read for scanning.' }
+        } else {
+          scan = await scanFileBuffer(await objectBlob.arrayBuffer(), {
+            fileName: rows[0].file_name || 'file',
+            mimeType: rows[0].mime_type || 'application/octet-stream',
+          })
+        }
+        if (scan.status === 'infected') {
+          await admin.storage.from('chat-files').remove([rows[0].storage_path])
+          await client.query('delete from public.storage_files where id = $1', [fileId])
+          throw new GatewayError('This file was rejected because the virus scan flagged it as unsafe.', 422)
+        }
+      }
       const { data, error } = await admin.storage.from('chat-files').createSignedUrl(rows[0].storage_path, 60 * 60 * 24 * 365)
       if (error || !data?.signedUrl) throw new GatewayError('Could not create a secure file link.', 503)
-      return { fileUrl: data.signedUrl }
+      return { fileUrl: data.signedUrl, scanStatus: scan.status }
     }
     case 'storage.upload.cancel': {
       const fileId = requiredString(body.fileId, 'File ID', 64)
@@ -404,7 +416,7 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       await requireAdmin(client, supabaseUserId)
       const term = String(body.query || '').trim().slice(0, 100)
       const pattern = `%${term.replace(/[\\%_]/g, '\\$&')}%`
-      const [{ rows: members }, { rows: admins }] = await Promise.all([
+      const [{ rows: members }, { rows: admins }, { rows: premium }] = await Promise.all([
         client.query(
           `select id, member_id, first_name, last_name, full_name, email, email_verified, bio, created_at
              from public.members
@@ -414,8 +426,9 @@ export async function executeUserDataOperation(client, identity, body, admin) {
           [term, pattern],
         ),
         client.query(`select user_id from public.admin_list_admins()`),
+        client.query(`select user_id from public.premium_members`),
       ])
-      return { members, admins }
+      return { members, admins, premium }
     }
     case 'admin.member.update': {
       const memberId = requiredString(body.memberId, 'Member ID', 64)
@@ -435,6 +448,17 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       await client.query(
         `select public.admin_set_admin_role($1, $2)`,
         [memberId, body.grant === true],
+      )
+      return { ok: true }
+    }
+    case 'admin.premium.set': {
+      await requireAdmin(client, supabaseUserId)
+      const memberId = requiredString(body.memberId, 'Member ID', 64)
+      if (!validUuid(memberId)) throw new GatewayError('Member ID is invalid.')
+      const note = optionalString(body.note, 'Note', 500)
+      await client.query(
+        `select public.admin_set_premium_member($1, $2, $3)`,
+        [memberId, body.grant === true, note],
       )
       return { ok: true }
     }
@@ -561,13 +585,46 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       )
       return { badge: rows[0]?.badge || 'none' }
     }
+    case 'verification.badges': {
+      const memberIds = Array.isArray(body.memberIds)
+        ? body.memberIds.slice(0, 500).map((id) => String(id).replace(/\D/g, '')).filter(Boolean)
+        : []
+      if (!memberIds.length) return { badges: [] }
+      const { rows } = await client.query(
+        `select member_id, badge from public.get_verification_badges($1::text[])`,
+        [memberIds],
+      )
+      return { badges: rows }
+    }
     case 'verification.get': {
       const { rows } = await client.query(
-        `select status, match_score, reviewer_note, created_at
+        `select status, tier, match_score, reviewer_note, created_at
            from public.identity_verifications where user_id = $1`,
         [supabaseUserId],
       )
       return { record: rows[0] || null }
+    }
+    case 'verification.instant': {
+      const selfiePath = requiredString(body.selfiePath, 'Selfie path', 255)
+      if (!selfiePath.startsWith(`${supabaseUserId}/`)) {
+        throw new GatewayError('Identity document paths are invalid.')
+      }
+      const score = Number(body.matchScore)
+      if (!Number.isFinite(score) || score < 0 || score > 1) throw new GatewayError('Face match score is invalid.')
+      const selfie = await admin.storage.from('identity-docs').info(selfiePath)
+      const selfieSize = Number(selfie.data?.size ?? selfie.data?.metadata?.size)
+      const selfieType = String(selfie.data?.content_type || selfie.data?.metadata?.mimetype || '').toLowerCase()
+      if (selfie.error || !Number.isSafeInteger(selfieSize) || selfieSize < 1 || selfieSize > 15 * 1024 * 1024
+        || !['image/jpeg', 'image/png', 'image/webp'].includes(selfieType)) {
+        throw new GatewayError('The uploaded selfie is invalid or exceeds 15 MB.')
+      }
+      // Routed through the security-definer RPC so only the caller's own row can
+      // be auto-approved, exactly like the Supabase path.
+      await client.query(
+        `select public.submit_instant_identity_verification($1, $2)`,
+        [selfiePath, Number(score.toFixed(3))],
+      )
+      return { record: { status: 'approved', tier: 'instant', match_score: Number(score.toFixed(3)) } }
     }
     case 'verification.submit': {
       const selfiePath = requiredString(body.selfiePath, 'Selfie path', 255)
@@ -577,6 +634,12 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       }
       const score = Number(body.matchScore)
       if (!Number.isFinite(score) || score < 0 || score > 1) throw new GatewayError('Face match score is invalid.')
+      const fullLegalName = requiredString(body.fullLegalName, 'Full legal name', 200)
+      const dateOfBirth = requiredString(body.dateOfBirth, 'Date of birth', 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) throw new GatewayError('Date of birth is invalid.')
+      const documentType = requiredString(body.documentType, 'Document type', 40)
+      const documentNumber = requiredString(body.documentNumber, 'Document number', 120)
+      const issuingCountry = requiredString(body.issuingCountry, 'Issuing country', 120)
       const [selfie, document] = await Promise.all([
         admin.storage.from('identity-docs').info(selfiePath),
         admin.storage.from('identity-docs').info(idPath),
@@ -584,30 +647,36 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       const selfieSize = Number(selfie.data?.size ?? selfie.data?.metadata?.size)
       const documentSize = Number(document.data?.size ?? document.data?.metadata?.size)
       const selfieType = String(selfie.data?.content_type || selfie.data?.metadata?.mimetype || '').toLowerCase()
-      const documentType = String(document.data?.content_type || document.data?.metadata?.mimetype || '').toLowerCase()
+      const documentType2 = String(document.data?.content_type || document.data?.metadata?.mimetype || '').toLowerCase()
       const acceptedTypes = ['image/jpeg', 'image/png', 'image/webp']
       if (selfie.error || document.error || !Number.isSafeInteger(selfieSize) || selfieSize < 1
         || selfieSize > 15 * 1024 * 1024 || !Number.isSafeInteger(documentSize) || documentSize < 1
         || documentSize > 15 * 1024 * 1024 || !acceptedTypes.includes(selfieType)
-        || !acceptedTypes.includes(documentType)) {
+        || !acceptedTypes.includes(documentType2)) {
         throw new GatewayError('The uploaded identity images are invalid or exceed 15 MB.')
       }
       const { rows } = await client.query(
         `insert into public.identity_verifications
-          (user_id, status, match_score, selfie_path, id_document_path, reviewer_note, reviewed_by, reviewed_at)
-         values ($1, 'pending', $2, $3, $4, null, null, null)
-         on conflict (user_id) do update set status = 'pending', match_score = excluded.match_score,
+          (user_id, status, tier, match_score, selfie_path, id_document_path,
+           full_legal_name, date_of_birth, document_type, document_number, issuing_country,
+           reviewer_note, reviewed_by, reviewed_at)
+         values ($1, 'pending', 'manual', $2, $3, $4, $5, $6, $7, $8, $9, null, null, null)
+         on conflict (user_id) do update set status = 'pending', tier = 'manual', match_score = excluded.match_score,
            selfie_path = excluded.selfie_path, id_document_path = excluded.id_document_path,
+           full_legal_name = excluded.full_legal_name, date_of_birth = excluded.date_of_birth,
+           document_type = excluded.document_type, document_number = excluded.document_number,
+           issuing_country = excluded.issuing_country,
            reviewer_note = null, reviewed_by = null, reviewed_at = null
-         returning status, match_score, reviewer_note, created_at`,
-        [supabaseUserId, Number(score.toFixed(3)), selfiePath, idPath],
+         returning status, tier, match_score, reviewer_note, created_at`,
+        [supabaseUserId, Number(score.toFixed(3)), selfiePath, idPath, fullLegalName, dateOfBirth, documentType, documentNumber, issuingCountry],
       )
       return { record: rows[0] }
     }
     case 'verification.admin.queue': {
       await requireAdmin(client, supabaseUserId)
       const { rows } = await client.query(
-        `select id, user_id, status, match_score, selfie_path, id_document_path,
+        `select id, user_id, status, tier, match_score, selfie_path, id_document_path,
+                full_legal_name, date_of_birth, document_type, document_number, issuing_country,
                 reviewer_note, created_at
            from public.identity_verifications
           where status = 'pending'
@@ -615,11 +684,11 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       )
       const signedRows = await Promise.all(rows.map(async (row) => {
         const [selfie, document] = await Promise.all([
-          admin.storage.from('identity-docs').createSignedUrl(row.selfie_path, 600),
-          admin.storage.from('identity-docs').createSignedUrl(row.id_document_path, 600),
+          row.selfie_path ? admin.storage.from('identity-docs').createSignedUrl(row.selfie_path, 600) : Promise.resolve({ data: null }),
+          row.id_document_path ? admin.storage.from('identity-docs').createSignedUrl(row.id_document_path, 600) : Promise.resolve({ data: null }),
         ])
         if (selfie.error || document.error) throw new GatewayError('Could not create a secure review link.', 503)
-        return { ...row, selfieUrl: selfie.data.signedUrl, idUrl: document.data.signedUrl }
+        return { ...row, selfieUrl: selfie.data?.signedUrl || null, idUrl: document.data?.signedUrl || null }
       }))
       return { verifications: signedRows }
     }
@@ -630,14 +699,12 @@ export async function executeUserDataOperation(client, identity, body, admin) {
         throw new GatewayError('Verification review details are invalid.')
       }
       const note = optionalString(body.note, 'Reviewer note', 2000)
-      const { rows } = await client.query(
-        `update public.identity_verifications
-            set status = $2, reviewer_note = $3, reviewed_by = $4, reviewed_at = now()
-          where id = $1 and status = 'pending'
-          returning id`,
-        [id, body.status, note, supabaseUserId],
+      // Route through the audited RPC so an Appwrite-auth deployment records the
+      // same admin audit-log entry as the Supabase path.
+      await client.query(
+        `select public.review_identity_verification($1, $2, $3)`,
+        [id, body.status === 'approved', note],
       )
-      if (!rows[0]) throw new GatewayError('This verification is no longer pending.', 409)
       return { ok: true }
     }
     case 'verification.upload.prepare': {

@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.nexus.chat.app">
 
+    <!-- Voice notes: required for navigator.mediaDevices.getUserMedia audio capture.
+         File attachments use the system document picker (SAF/ACTION_GET_CONTENT),
+         which needs no storage permission. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

@@ -56,7 +56,7 @@ function SettingsMenu() {
     {
       id: 'verification',
       label: 'Identity verification',
-      description: 'Get the gold Authenticated badge',
+      description: 'Get the blue verified check',
       icon: <UserCircle className="w-5 h-5" />,
     },
   ]

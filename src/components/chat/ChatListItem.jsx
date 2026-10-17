@@ -12,9 +12,20 @@ export function peerIdOf(chat, myId) {
   return ids.length === 1 ? ids[0] : null
 }
 
+// Resolves the conversation name from the viewer's perspective: a 1:1 chat is
+// shown as the *other* participant. Falls back to the stored title for groups
+// or chats created before participant names were recorded.
+export function chatDisplayName(chat, viewerId) {
+  const names = chat?.participant_names
+  const peerId = peerIdOf(chat, viewerId)
+  if (peerId && names && names[peerId]) return names[peerId]
+  return chat?.title || 'Chat'
+}
+
 function ChatListItem({ chat, selected, onClick }) {
   const { user } = useAuth()
   const peerId = peerIdOf(chat, user?.id)
+  const displayName = chatDisplayName(chat, user?.id)
   const timeLabel = useMemo(() => {
     if (!chat.last_message_time) return null
     try {
@@ -31,12 +42,12 @@ function ChatListItem({ chat, selected, onClick }) {
         selected ? 'bg-primary/10 border-l-2 border-primary' : 'border-l-2 border-transparent'
       }`}
     >
-      <Avatar src={chat.avatar_url} alt={chat.title} />
+      <Avatar src={chat.avatar_url} alt={displayName} />
       <div className="ml-3 flex-1 min-w-0">
         <div className="flex justify-between items-baseline">
           <div className="flex items-center gap-1 min-w-0">
             <h3 className="text-sm font-semibold text-foreground truncate">
-              {chat.title}
+              {displayName}
             </h3>
             {peerId && <VerificationBadge userId={peerId} className="w-3.5 h-3.5 flex-shrink-0" />}
             {chat.encrypted && (
@@ -68,6 +79,7 @@ export default memo(ChatListItem, (prev, next) => {
   return (
     prev.chat.id === next.chat.id &&
     prev.chat.title === next.chat.title &&
+    prev.chat.participant_names === next.chat.participant_names &&
     prev.chat.last_message === next.chat.last_message &&
     prev.chat.last_message_time === next.chat.last_message_time &&
     prev.chat.unread_count === next.chat.unread_count &&

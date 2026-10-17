@@ -27,4 +27,4 @@
 - [ ] Run schema + push Vercel env via GitHub Action "Set up production" — waiting on user's repo secrets
 
 # GitHub sync
-- [x] Verify project syncs to a connected GitHub repository — confirmed: private repo `elonmuskite-sudo/connect-hub`, tracked branch `main`; a commit made in Lovable landed on `main` within seconds, and app files verified present there.
+- [x] Verify project syncs to a connected GitHub repository — confirmed: private repo `elonmuskite-sudo/connect-hub`, tracked branch `main`; a commit landed on `main` within seconds, and app files verified present there.

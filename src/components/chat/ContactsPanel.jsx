@@ -1,19 +1,27 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChatBubbleLeftIcon, UserGroupIcon, PlusIcon, XMarkIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ChatBubbleLeftIcon, UserGroupIcon, PlusIcon, XMarkIcon, PhoneIcon, UserPlusIcon } from '@heroicons/react/24/solid'
 import Avatar from './Avatar'
+import UnsavedContactPrompt from './UnsavedContactPrompt'
 import { useAuth } from '../../lib/AuthContext'
-import { createChat, getChats, getContacts, addContact, deleteContact, formatNexusId, searchUserByNexusId } from '../../lib/persistence'
+import { createChat, getChats, getContacts, addContact, formatNexusId, searchUserByNexusId, isContactSaved } from '../../lib/persistence'
+import { VerificationBadgeIcon, fetchVerificationBadges, BADGE_REFRESH_EVENT } from './VerificationBadge'
+
+const nexusDigits = (value) => String(value || '').replace(/\D/g, '')
 
 export default function ContactsPanel() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [contacts, setContacts] = useState([])
+  const [badges, setBadges] = useState({})
   const [chatError, setChatError] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [match, setMatch] = useState(null)
+  const [matchBadge, setMatchBadge] = useState('none')
   const [lookupState, setLookupState] = useState('')
   const [newContactNexusId, setNewContactNexusId] = useState('')
+  const [promptAction, setPromptAction] = useState(null)
+  const [promptBusy, setPromptBusy] = useState(false)
 
   useEffect(() => {
     const loadContacts = async () => {
@@ -27,50 +35,67 @@ export default function ContactsPanel() {
     return () => window.removeEventListener('nexus-contacts:updated', handleUpdate)
   }, [])
 
+  const memberIds = contacts.map((contact) => nexusDigits(contact.nexusId)).filter(Boolean).join(',')
+  useEffect(() => {
+    let active = true
+    const loadBadges = () => fetchVerificationBadges(memberIds ? memberIds.split(',') : [])
+      .then((map) => { if (active) setBadges(Object.fromEntries(map)) })
+      .catch(() => { if (active) setBadges({}) })
+    loadBadges()
+    window.addEventListener(BADGE_REFRESH_EVENT, loadBadges)
+    return () => { active = false; window.removeEventListener(BADGE_REFRESH_EVENT, loadBadges) }
+  }, [memberIds])
+
+  const resolveChatId = async (recipient, fallbackTitle) => {
+    if (!user?.id) throw new Error('Sign in to start a conversation.')
+    if (String(recipient.id) === String(user.id)) throw new Error('You cannot start a private chat with yourself.')
+    const chats = await getChats(user.id)
+    const participants = [String(user.id), String(recipient.id)].sort()
+    const existing = chats.find((chat) => {
+      const ids = (chat.participant_ids || []).map(String).sort()
+      return ids.length === participants.length && ids.every((id, index) => id === participants[index])
+    })
+    if (existing) return existing.id
+    const newChat = await createChat({
+      title: recipient.fullName || fallbackTitle,
+      type: 'private',
+      avatar_url: recipient.avatarUrl || null,
+      owner_id: user.id,
+      participantIds: participants,
+    })
+    return newChat.id
+  }
+
   const handleStartChat = async (contact) => {
     setChatError('')
     try {
-      if (!user?.id) throw new Error('Sign in to start a conversation.')
       const recipient = await searchUserByNexusId(contact.nexusId)
       if (!recipient) throw new Error('This Nexus ID is not linked to a registered account.')
-      if (String(recipient.id) === String(user.id)) throw new Error('You cannot start a private chat with yourself.')
-      const chats = await getChats(user.id)
-      const participants = [String(user.id), String(recipient.id)].sort()
-      const existing = chats.find((chat) => {
-        const ids = (chat.participant_ids || []).map(String).sort()
-        return ids.length === participants.length && ids.every((id, index) => id === participants[index])
-      })
-      if (existing) {
-        navigate(`/app/chat/${existing.id}`)
-        return
-      }
-      const newChat = await createChat({
-        title: recipient.fullName || contact.name,
-        type: 'private',
-        avatar_url: recipient.avatarUrl || null,
-        owner_id: user.id,
-        participantIds: participants,
-      })
-      navigate(`/app/chat/${newChat.id}`)
+      const id = await resolveChatId(recipient, contact.name)
+      navigate(`/app/chat/${id}`)
     } catch (error) {
       setChatError(error?.message || 'Could not start the conversation.')
     }
   }
 
-  useEffect(() => {
-    const digits = newContactNexusId.replace(/\D/g, '')
-    setMatch(null)
-    if (digits.length !== 10) { setLookupState(''); return }
-    let active = true
-    setLookupState('searching')
-    searchUserByNexusId(digits)
-      .then((found) => { if (active) { setMatch(found); setLookupState(found ? 'found' : 'missing') } })
-      .catch(() => { if (active) setLookupState('missing') })
-    return () => { active = false }
-  }, [newContactNexusId])
+  // Run the selected lookup action ("call" or "message") on a resolved match.
+  const runLookupAction = async (action, recipient) => {
+    setChatError('')
+    try {
+      const id = await resolveChatId(recipient, match?.fullName)
+      setNewContactNexusId('')
+      setShowAddModal(false)
+      if (action === 'call') {
+        navigate(`/app/chat/${id}`, { state: { autoStartCall: true } })
+      } else {
+        navigate(`/app/chat/${id}`)
+      }
+    } catch (error) {
+      setChatError(error?.message || 'Could not start the conversation.')
+    }
+  }
 
-  const handleAddContact = async (e) => {
-    e.preventDefault()
+  const saveMatchContact = async () => {
     if (!match) return
     await addContact({
       name: match.fullName || 'Nexus user',
@@ -81,10 +106,70 @@ export default function ContactsPanel() {
     setShowAddModal(false)
   }
 
-  const handleDeleteContact = async (contactId) => {
-    if (confirm('Are you sure you want to delete this contact?')) {
-      await deleteContact(contactId)
+  // Guarded entry point: unsaved lookups must confirm before calling or messaging.
+  const requestLookupAction = async (action) => {
+    if (!match) return
+    const saved = await isContactSaved(match.nexusId)
+    if (saved) {
+      await runLookupAction(action, match)
+      return
     }
+    setPromptAction(action)
+  }
+
+  const handlePromptSaveFirst = async () => {
+    if (!match || !promptAction) return
+    setPromptBusy(true)
+    const action = promptAction
+    try {
+      await addContact({
+        name: match.fullName || 'Nexus user',
+        nexusId: formatNexusId(newContactNexusId),
+        avatarUrl: match.avatarUrl || null,
+      })
+      setPromptAction(null)
+      await runLookupAction(action, match)
+    } catch (error) {
+      setChatError(error?.message || 'Could not save this contact.')
+      setPromptAction(null)
+    } finally {
+      setPromptBusy(false)
+    }
+  }
+
+  const handlePromptIgnore = async () => {
+    if (!match || !promptAction) return
+    const action = promptAction
+    setPromptAction(null)
+    await runLookupAction(action, match)
+  }
+
+  useEffect(() => {
+    const digits = newContactNexusId.replace(/\D/g, '')
+    setMatch(null)
+    setMatchBadge('none')
+    if (digits.length !== 10) { setLookupState(''); return }
+    let active = true
+    setLookupState('searching')
+    searchUserByNexusId(digits)
+      .then((found) => { if (active) { setMatch(found); setLookupState(found ? 'found' : 'missing') } })
+      .catch(() => { if (active) setLookupState('missing') })
+    return () => { active = false }
+  }, [newContactNexusId])
+
+  useEffect(() => {
+    if (!match) return
+    let active = true
+    fetchVerificationBadges([nexusDigits(match.nexusId)])
+      .then((map) => { if (active) setMatchBadge(map.get(nexusDigits(match.nexusId)) || 'none') })
+      .catch(() => { if (active) setMatchBadge('none') })
+    return () => { active = false }
+  }, [match])
+
+  const handleAddContact = async (e) => {
+    e.preventDefault()
+    if (!match) return
+    await saveMatchContact()
   }
 
   return (
@@ -129,8 +214,11 @@ export default function ContactsPanel() {
               >
                 <div className="flex items-center gap-4">
                   <Avatar src={contact.avatarUrl} alt={contact.name} size="md" />
-                  <div>
-                    <h3 className="font-bold text-foreground leading-tight">{contact.name}</h3>
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-foreground leading-tight flex items-center gap-1.5">
+                      <span className="truncate">{contact.name}</span>
+                      <VerificationBadgeIcon level={badges[nexusDigits(contact.nexusId)] || 'none'} className="w-4 h-4 flex-shrink-0" />
+                    </h3>
                     <p className="text-xs text-muted-foreground mt-0.5">ID: {contact.nexusId}</p>
                   </div>
                 </div>
@@ -141,13 +229,6 @@ export default function ContactsPanel() {
                   >
                     <ChatBubbleLeftIcon className="w-4 h-4" />
                     Chat
-                  </button>
-                  <button
-                    onClick={() => handleDeleteContact(contact.id)}
-                    className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition duration-200"
-                    title="Delete Contact"
-                  >
-                    <TrashIcon className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -190,11 +271,42 @@ export default function ContactsPanel() {
                 {lookupState === 'searching' && <p className="text-xs text-muted-foreground mt-2">Looking up…</p>}
                 {lookupState === 'missing' && <p className="text-xs text-destructive mt-2">No account found for this Nexus ID.</p>}
                 {match && (
-                  <div className="mt-3 flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/10 p-3 animate-in fade-in zoom-in-95 duration-200">
-                    <Avatar src={match.avatarUrl} alt={match.fullName} size="md" />
-                    <div className="min-w-0">
-                      <p className="font-semibold text-foreground truncate">{match.fullName || 'Nexus user'}</p>
-                      <p className="text-xs text-muted-foreground">{formatNexusId(newContactNexusId)}</p>
+                  <div className="mt-3 rounded-xl border border-primary/30 bg-primary/10 p-3 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="flex items-center gap-3">
+                      <Avatar src={match.avatarUrl} alt={match.fullName} size="md" />
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground truncate flex items-center gap-1.5">
+                          <span className="truncate">{match.fullName || 'Nexus user'}</span>
+                          <VerificationBadgeIcon level={matchBadge} className="w-4 h-4 flex-shrink-0" />
+                        </p>
+                        <p className="text-xs text-muted-foreground">{formatNexusId(newContactNexusId)}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => requestLookupAction('message')}
+                        className="flex items-center justify-center gap-1.5 rounded-lg bg-primary px-2 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 transition"
+                      >
+                        <ChatBubbleLeftIcon className="w-4 h-4" />
+                        Message
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => requestLookupAction('call')}
+                        className="flex items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-2 py-2 text-xs font-semibold text-foreground hover:bg-muted transition"
+                      >
+                        <PhoneIcon className="w-4 h-4" />
+                        Call
+                      </button>
+                      <button
+                        type="button"
+                        onClick={saveMatchContact}
+                        className="flex items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-2 py-2 text-xs font-semibold text-foreground hover:bg-muted transition"
+                      >
+                        <UserPlusIcon className="w-4 h-4" />
+                        Save
+                      </button>
                     </div>
                   </div>
                 )}
@@ -218,6 +330,16 @@ export default function ContactsPanel() {
           </div>
         </div>
       )}
+
+      <UnsavedContactPrompt
+        open={Boolean(match && promptAction)}
+        contact={{ name: match?.fullName }}
+        action={promptAction || 'message'}
+        busy={promptBusy}
+        onSaveFirst={handlePromptSaveFirst}
+        onIgnore={handlePromptIgnore}
+        onClose={() => setPromptAction(null)}
+      />
     </div>
   )
 }

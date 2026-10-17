@@ -94,7 +94,9 @@ function loadMigrations(root) {
   if (!files.length) throw new Error('No versioned Supabase SQL migrations were found.')
 
   return files.map((file) => {
-    const match = file.match(/^(\d{14})_([a-z0-9_]+)\.sql$/)
+    // Supabase CLI also emits UUID names (20261012012428_a2ec3535-....sql), so the
+    // name segment may contain hyphens. Renaming those would rewrite applied history.
+    const match = file.match(/^(\d{14})_([a-z0-9_-]+)\.sql$/)
     if (!match) throw new Error(`Invalid migration filename: ${file}. Expected YYYYMMDDHHMMSS_name.sql.`)
     const sql = fs.readFileSync(path.join(migrationDir, file), 'utf8').trim()
     if (!sql) throw new Error(`Migration ${file} is empty.`)

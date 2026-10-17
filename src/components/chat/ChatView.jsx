@@ -15,11 +15,11 @@ import { useAuth } from '../../lib/AuthContext'
 import { Search, X, MessageCircle } from 'lucide-react'
 import ChatButton from './ChatButton'
 import VerificationBadge from './VerificationBadge'
-import { peerIdOf } from './ChatListItem'
+import { peerIdOf, chatDisplayName } from './ChatListItem'
 import { resolveMessages, decodeContent, encodeReply } from '../../lib/chatProtocol'
 
 // eslint-disable-next-line react/prop-types
-export default function ChatView({ chat, onBack }) {
+export default function ChatView({ chat, onBack, autoStartCall = false }) {
   const [messages, setMessages] = useState(chat?.messages || [])
   const [decryptedMessages, setDecryptedMessages] = useState({})
   const [sendError, setSendError] = useState('')
@@ -33,6 +33,15 @@ export default function ChatView({ chat, onBack }) {
 
   const voiceCall = useVoiceCall(chat.id)
   const { user } = useAuth()
+  const didAutoStartCall = useRef(false)
+
+  // The number-lookup "Call" action arrives with autoStartCall; fire the call once.
+  useEffect(() => {
+    if (!autoStartCall || didAutoStartCall.current) return
+    didAutoStartCall.current = true
+    voiceCall.initiateCall()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartCall])
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'end' })
@@ -45,6 +54,14 @@ export default function ChatView({ chat, onBack }) {
   useEffect(() => {
     scrollToBottom()
   }, [messages, scrollToBottom])
+
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (!viewport) return
+    const onResize = () => scrollToBottom()
+    viewport.addEventListener('resize', onResize)
+    return () => viewport.removeEventListener('resize', onResize)
+  }, [scrollToBottom])
 
   useEffect(() => {
     if (!isE2EEEnabled()) return
@@ -171,11 +188,11 @@ export default function ChatView({ chat, onBack }) {
             <ArrowLeftIcon className="w-5 h-5" />
           </ChatButton>
           <div className="flex-shrink-0">
-            <Avatar src={chat.avatar_url} alt={chat.title} size="sm" />
+            <Avatar src={chat.avatar_url} alt={chatDisplayName(chat, user?.id)} size="sm" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1 min-w-0">
-              <h2 className="font-bold text-foreground truncate text-sm sm:text-base">{chat.title}</h2>
+              <h2 className="font-bold text-foreground truncate text-sm sm:text-base">{chatDisplayName(chat, user?.id)}</h2>
               {peerIdOf(chat, user?.id) && <VerificationBadge userId={peerIdOf(chat, user?.id)} className="w-4 h-4 flex-shrink-0" />}
               {chat.encrypted && (
                 <LockClosedIcon className="w-3.5 h-3.5 text-primary flex-shrink-0" title="End-to-end encrypted" />

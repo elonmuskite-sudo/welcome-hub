@@ -165,7 +165,7 @@ test('chat upload completion verifies Storage’s actual object size and content
     fileId,
   }, admin)
 
-  assert.deepEqual(result, { fileUrl: 'https://storage.example/signed-file' })
+  assert.deepEqual(result, { fileUrl: 'https://storage.example/signed-file', scanStatus: 'unavailable' })
 })
 
 test('admin dashboard rejects a non-admin before reading workspace data', async () => {
@@ -288,7 +288,7 @@ test('verification submission checks actual private object metadata before inser
   const idPath = `${userId}/identity.png`
   const client = makeClient((sql, values) => {
     assert.match(sql, /insert into public\.identity_verifications/)
-    assert.deepEqual(values, [userId, 0.9, selfiePath, idPath])
+    assert.deepEqual(values, [userId, 0.9, selfiePath, idPath, 'Ada Lovelace', '1990-01-01', 'passport', 'P1234567', 'United Kingdom'])
     return { rows: [{ status: 'pending', match_score: '0.9' }] }
   })
   const admin = {
@@ -315,6 +315,11 @@ test('verification submission checks actual private object metadata before inser
     selfiePath,
     idPath,
     matchScore: 0.9,
+    fullLegalName: 'Ada Lovelace',
+    dateOfBirth: '1990-01-01',
+    documentType: 'passport',
+    documentNumber: 'P1234567',
+    issuingCountry: 'United Kingdom',
   }, admin)
 
   assert.equal(record.status, 'pending')
@@ -335,5 +340,60 @@ test('identity review rejects non-admins before attempting a status update', asy
     }),
     { status: 403 },
   )
+  assert.equal(client.calls.length, 1)
+})
+
+test('premium member grants are admin-guarded and routed through the audited RPC', async () => {
+  const targetId = '123e4567-e89b-42d3-a456-426614174001'
+  const client = makeClient((sql, values) => {
+    if (sql.includes('public.has_role')) return { rows: [{ is_admin: true }] }
+    assert.match(sql, /public\.admin_set_premium_member/)
+    assert.deepEqual(values, [targetId, true, null])
+    return { rows: [] }
+  })
+
+  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
+    action: 'admin.premium.set',
+    memberId: targetId,
+    grant: true,
+  })
+
+  assert.deepEqual(result, { ok: true })
+  assert.equal(client.calls.length, 2)
+})
+
+test('premium member grants reject a non-admin before granting the badge', async () => {
+  const client = makeClient((sql) => {
+    assert.match(sql, /public\.has_role/)
+    return { rows: [{ is_admin: false }] }
+  })
+
+  await assert.rejects(
+    executeUserDataOperation(client, { supabaseUserId: userId }, {
+      action: 'admin.premium.set',
+      memberId: '123e4567-e89b-42d3-a456-426614174001',
+      grant: true,
+    }),
+    { status: 403 },
+  )
+  assert.equal(client.calls.length, 1)
+})
+
+test('batch verification badges resolve every directory member in one query', async () => {
+  const client = makeClient((sql, values) => {
+    assert.match(sql, /public\.get_verification_badges/)
+    assert.deepEqual(values, [['1012345678', '1098765432']])
+    return { rows: [{ member_id: '1012345678', badge: 'premium' }, { member_id: '1098765432', badge: 'none' }] }
+  })
+
+  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
+    action: 'verification.badges',
+    memberIds: ['1012345678', '1098765432'],
+  })
+
+  assert.deepEqual(result.badges, [
+    { member_id: '1012345678', badge: 'premium' },
+    { member_id: '1098765432', badge: 'none' },
+  ])
   assert.equal(client.calls.length, 1)
 })

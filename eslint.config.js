@@ -37,7 +37,7 @@ export default [
     },
   },
   {
-    files: ['api/**/*.js', 'scripts/**/*.js', 'tests/**/*.mjs', '*.config.js', 'test-npm.mjs'],
+    files: ['api/**/*.js', 'scripts/**/*.js', 'server/**/*.js', 'tests/**/*.mjs', '*.config.js', 'test-npm.mjs'],
     languageOptions: {
       globals: globals.node,
     },

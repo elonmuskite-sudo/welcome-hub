@@ -42,6 +42,12 @@
     --font-color-secondary: #4b5563;
     --font-color-accent: #0084ff;
     --font-color-muted: #9ca3af;
+
+    /* Chat layout metrics (kept in sync by useViewportInsets) */
+    --chat-gap: 8px;
+    --bottom-nav-height: 64px;
+    --keyboard-inset: 0px;
+    --chat-bottom-offset: 72px;
   }
 
   /* Dark theme (Telegram-style) */
@@ -211,6 +217,45 @@
   .chat-surface { box-shadow: 0 4px 20px hsl(var(--foreground) / 0.06); }
   .chat-enter { animation: chat-enter 220ms ease-out both; }
   .chat-button:active:not(:disabled) { transform: scale(0.96); }
+  /* Composer keeps an 8px rhythm and respects landscape/notch safe areas. */
+  .chat-composer {
+    padding: var(--chat-gap) max(var(--chat-gap), env(safe-area-inset-right))
+      var(--chat-gap) max(var(--chat-gap), env(safe-area-inset-left));
+  }
+  /* Textarea auto-grows; the JS hook mirrors scrollHeight while this cap keeps
+     the composer from ever exceeding the available viewport. */
+  .chat-textarea {
+    max-height: min(40vh, 180px);
+  }
+  /* emoji-mart renders an <em-emoji-picker> custom element. Constrain it to the
+     composer width and cap its height so it stays inside small viewports, and
+     let our card colours show through instead of the picker's own background. */
+  .chat-emoji-picker {
+    @apply mb-2 w-full overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground;
+    box-shadow: 0 4px 20px hsl(var(--foreground) / 0.06);
+  }
+  .chat-emoji-picker em-emoji-picker {
+    display: block;
+    width: 100%;
+    height: min(45vh, 320px);
+    --em-rgb-background: transparent;
+    --em-rgb-input: hsl(var(--muted) / 1);
+  }
+  /* Upload progress bar shown while an attachment is being transferred. */
+  .chat-upload-progress {
+    height: 4px;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 9999px;
+    background: hsl(var(--muted));
+  }
+  .chat-upload-progress > span {
+    display: block;
+    height: 100%;
+    border-radius: 9999px;
+    background: hsl(var(--primary));
+    transition: width 160ms ease-out;
+  }
 }
 @keyframes chat-enter {
   from { opacity: 0; transform: translateY(8px); }

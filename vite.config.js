@@ -4,13 +4,6 @@ import { fileURLToPath, URL } from "node:url";
 
 import { cloudflare } from "@cloudflare/vite-plugin";
 
-const hasBase44Proxy = Boolean(process.env.VITE_BASE44_APP_BASE_URL);
-
-let base44Plugin = null;
-if (hasBase44Proxy) {
-  base44Plugin = (await import("@base44/vite-plugin")).default;
-}
-
 // The browser client must target the same Supabase project as the /api functions,
 // which use the integration-managed SUPABASE_URL. Prefer those values over any
 // stale VITE_SUPABASE_* overrides so sign-in and email-code flows never split.
@@ -48,7 +41,6 @@ export default defineConfig(({ mode }) => {
   },
   plugins: [
     react(),
-    ...(base44Plugin ? [base44Plugin()] : []),
     cloudflare(),
   ],
   resolve: {
@@ -73,7 +65,6 @@ export default defineConfig(({ mode }) => {
             if (id.includes('@heroicons') || id.includes('lucide-react')) return 'icons'
             if (id.includes('react-hook-form') || id.includes('@hookform') || id.includes('zod') || id.includes('input-otp')) return 'forms'
             if (id.includes('date-fns') || id.includes('class-variance-authority') || id.includes('clsx') || id.includes('tailwind-merge') || id.includes('react-markdown')) return 'util'
-            if (id.includes('@base44')) return 'base44'
             if (id.includes('@radix-ui')) return 'radix'
           }
         },

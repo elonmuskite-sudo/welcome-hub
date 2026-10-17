@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import ChatView from '../components/chat/ChatView'
 import { getChatById } from '../data/mockChats'
@@ -7,10 +7,22 @@ import { useAuth } from '../lib/AuthContext'
 export default function ChatPage() {
   const { chatId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const [chat, setChat] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // Capture once: the lookup "Call" action navigates here with a transient flag
+  // that should start the call a single time and must not replay on history nav.
+  const [autoStartCall] = useState(() => Boolean(location.state?.autoStartCall))
+
+  useEffect(() => {
+    if (location.state?.autoStartCall) {
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // Only needs to strip the transient flag on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -85,6 +97,7 @@ export default function ChatPage() {
     <ChatView
       key={chat.id}
       chat={chat}
+      autoStartCall={autoStartCall}
       onBack={() => navigate('/app')}
     />
   )

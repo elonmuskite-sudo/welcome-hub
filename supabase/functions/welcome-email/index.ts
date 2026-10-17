@@ -22,14 +22,13 @@ Deno.serve(async (req) => {
     if (!user.email || !user.email_confirmed_at) return json(403, { error: 'Confirm your email first' })
     if (user.app_metadata?.nexus_welcome_sent_at || Date.parse(user.created_at) < welcomeEnabledAt) return json(200, { skipped: true })
     const apiKey = Deno.env.get('RESEND_API_KEY')
-    const lovableKey = Deno.env.get('LOVABLE_API_KEY')
     const from = Deno.env.get('RESEND_FROM')
     const appUrl = Deno.env.get('APP_URL')
-    if (!apiKey || !lovableKey || !from || !appUrl) return json(503, { error: 'Welcome email needs a verified Resend sender and APP_URL' })
+    if (!apiKey || !from || !appUrl) return json(503, { error: 'Welcome email needs a verified Resend sender and APP_URL' })
     const template = welcomeTemplate({ name: user.user_metadata?.first_name || '', appUrl })
-    const response = await fetch('https://connector-gateway.lovable.dev/resend/emails', {
+    const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${lovableKey}`, 'X-Connection-Api-Key': apiKey, 'Content-Type': 'application/json', 'Idempotency-Key': `nexus-welcome-${user.id}` },
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'Idempotency-Key': `nexus-welcome-${user.id}` },
       body: JSON.stringify({ from, to: [user.email], ...template }),
     })
     if (!response.ok) {

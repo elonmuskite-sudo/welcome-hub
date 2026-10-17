@@ -143,7 +143,7 @@ export async function readChats(userId) {
     try {
       const { data, error } = await supabase
         .from('chats')
-        .select('id, title, type, avatar_url, encrypted, owner_id, created_at, chat_members(profile_id)')
+        .select('id, title, type, avatar_url, encrypted, owner_id, created_at, participant_names, chat_members(profile_id)')
         .order('created_at', { ascending: false })
         .limit(500)
       if (error) throw error
@@ -260,7 +260,7 @@ export async function getChatById(chatId, userId) {
   }
   if (supabase && UUID_REGEX.test(String(chatId))) {
     const { data: chatData, error } = await supabase
-      .from('chats').select('id, title, type, avatar_url, encrypted, owner_id, created_at, chat_members(profile_id)')
+      .from('chats').select('id, title, type, avatar_url, encrypted, owner_id, created_at, participant_names, chat_members(profile_id)')
       .eq('id', chatId).maybeSingle()
     if (error) throw new Error(error.message || 'Could not load this conversation. Please try again.')
     if (!chatData) return null
@@ -290,6 +290,7 @@ export async function createChat(chatData) {
     avatar_url: chatData.avatar_url || null, last_message: chatData.last_message || 'New conversation',
     last_message_time: new Date().toISOString(), unread_count: 0, encrypted: Boolean(chatData.encrypted),
     owner_id: chatData.owner_id ? String(chatData.owner_id) : null, participant_ids: participantIds,
+    participant_names: chatData.participantNames || null,
     messages: chatData.messages || [], created_at: new Date().toISOString(),
   }
 
@@ -309,6 +310,7 @@ export async function createChat(chatData) {
     const { error } = await supabase.from('chats').insert({
       id: newChat.id, title: newChat.title, type: newChat.type, avatar_url: newChat.avatar_url,
       encrypted: newChat.encrypted, owner_id: newChat.owner_id, created_at: newChat.created_at,
+      participant_names: newChat.participant_names,
     })
     if (error) throw new Error(error.message || 'Could not create the conversation.')
     const memberIds = [...new Set([newChat.owner_id, ...participantIds])]
@@ -443,18 +445,11 @@ export async function addContact(contactData) {
   return newContact
 }
 
-export async function deleteContact(contactId) {
-  const userId = await getSessionUserId()
-  if (isAppwriteAuthEnabled()) {
-    await appwriteData('contacts.delete', { contactId: String(contactId) })
-  } else if (userId && supabase) {
-    await supabase.from('contacts').delete().eq('user_id', userId).eq('id', contactId)
-  }
-  const contacts = readLocalContacts()
-  const updatedContacts = contacts.filter(c => c.id !== contactId)
-  await writeLocalContacts(updatedContacts)
-  notifyContactsUpdate()
-  return updatedContacts
+export async function isContactSaved(nexusId) {
+  const digits = String(nexusId || '').replace(/\D/g, '')
+  if (!digits) return false
+  const contacts = await getContacts()
+  return contacts.some((contact) => String(contact.nexusId || '').replace(/\D/g, '') === digits)
 }
 
 export function formatNexusId(raw) {

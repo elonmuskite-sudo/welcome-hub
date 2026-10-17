@@ -64,14 +64,14 @@ Deno.serve(async (req) => {
     let emailErr: string | undefined
     try {
       const { data: { user } } = await admin.auth.admin.getUserById(purchase.user_id)
-      const lovableKey = Deno.env.get('LOVABLE_API_KEY'); const resendKey = Deno.env.get('RESEND_API_KEY')
-      if (!user?.email || !lovableKey || !resendKey) emailErr = 'Receipt email skipped (missing email or keys)'
+      const resendKey = Deno.env.get('RESEND_API_KEY')
+      if (!user?.email || !resendKey) emailErr = 'Receipt email skipped (missing email or keys)'
       else {
         const amount = (purchase.amount_cents / 100).toFixed(2)
         const added = purchase.added_bytes >= 1000 * GB ? '1 TB' : `${Math.round(purchase.added_bytes / GB)} GB`
-        const r = await fetch('https://connector-gateway.lovable.dev/resend/emails', {
+        const r = await fetch('https://api.resend.com/emails', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${lovableKey}`, 'X-Connection-Api-Key': resendKey, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             from: Deno.env.get('RECEIPT_FROM_EMAIL') || 'Receipts <onboarding@resend.dev>',
             to: [user.email],

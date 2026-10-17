@@ -14,11 +14,20 @@ test('schema dry-run validates checked-in versioned migrations without connectin
   })
 
   assert.equal(result.migrationDir, path.join(root, 'supabase', 'migrations'))
-  assert.equal(result.migrations.length, 2)
+  assert.ok(result.migrations.length >= 2)
   assert.equal(result.migrations[0].file, '20261006000000_initial_nexus_schema.sql')
   assert.equal(result.migrations[1].file, '20261006010000_authenticated_member_lookup.sql')
   assert.ok(result.migrations[0].bytes > 0)
   assert.match(result.migrations[0].checksum, /^[a-f0-9]{64}$/)
+  // Every checked-in migration loads, including the Supabase CLI UUID names.
+  for (const migration of result.migrations) {
+    assert.ok(migration.bytes > 0, `${migration.file} should not be empty`)
+    assert.match(migration.checksum, /^[a-f0-9]{64}$/)
+  }
+  assert.ok(
+    result.migrations.some((migration) => /^20261012012428_[0-9a-f-]+\.sql$/.test(migration.file)),
+    'expected the Supabase CLI UUID-named migration to load',
+  )
 })
 
 test('self-service admin claim is removed from the canonical schema and existing databases', () => {

@@ -6,7 +6,6 @@ import { BadgeCheck, Check, Image } from 'lucide-react'
 export default function AppearanceSettings() {
   const [chatWallpaper, setChatWallpaper] = useSetting('chatWallpaper', 'nature')
   const [badgeBlue, setBadgeBlue] = useSetting('badgeBlue', null)
-  const [badgeGold, setBadgeGold] = useSetting('badgeGold', null)
 
   return (
     <div className="space-y-6">
@@ -67,9 +66,9 @@ export default function AppearanceSettings() {
       </SettingsRow>
 
       <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-        <p className="font-semibold text-foreground">Verification badge colors</p>
-        <p className="text-sm text-muted-foreground">Blue = email verified. Gold = ID authenticated.</p>
-        {[['Verified (blue)', badgeBlue, setBadgeBlue, '#0A9CFF', 'fill-badge-blue'], ['Authenticated (gold)', badgeGold, setBadgeGold, '#F5B819', 'fill-badge-gold']].map(([label, val, set, def, fill]) => (
+        <p className="font-semibold text-foreground">Verification badge color</p>
+        <p className="text-sm text-muted-foreground">The blue verified check is shown for Premium Members (granted by an admin) and for members who verified their identity.</p>
+        {[['Verified badge (blue)', badgeBlue, setBadgeBlue, '#0A9CFF', 'fill-badge-blue']].map(([label, val, set, def, fill]) => (
           <div key={label} className="flex items-center gap-3">
             <BadgeCheck className={`w-6 h-6 ${fill} text-background`} />
             <span className="flex-1 text-sm text-foreground">{label}</span>

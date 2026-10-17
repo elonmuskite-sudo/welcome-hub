@@ -14,18 +14,18 @@ Help members with: finding people by their 10-digit Nexus ID (format 10-XXXX-XXX
 starting private chats, saving contacts, calls, profile and password settings, and general app questions.
 Keep replies short (1-4 sentences), friendly and practical. Never invent account details.
 Set "handoff" to true when the member asks for a human/admin/agent, reports a billing, safety, abuse, account-locked or data problem,
-or when you cannot resolve the issue after a clear attempt. When handing off, tell them a live admin will join this chat.`;
+or when you cannot resolve the issue after a clear attempt. When handing off, tell them a live admin will join this chat.
+Always answer with JSON only: {"reply": string, "handoff": boolean, "reason": string|null}`;
 
-const schema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["reply", "handoff", "reason"],
-  properties: {
-    reply: { type: "string" },
-    handoff: { type: "boolean" },
-    reason: { type: ["string", "null"] },
-  },
-};
+// The AI provider is configured through environment variables so this function
+// is not tied to any single vendor.
+function aiConfiguration() {
+  const baseUrl = (Deno.env.get("AI_API_URL") || "").replace(/\/+$/, "");
+  const key = Deno.env.get("AI_API_KEY");
+  const model = Deno.env.get("AI_MODEL") || "gpt-4o-mini";
+  if (!baseUrl || !key) return null;
+  return { baseUrl, key, model };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
@@ -33,8 +33,8 @@ Deno.serve(async (req) => {
     const url = Deno.env.get("SUPABASE_URL")!;
     const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!apiKey) return json({ error: "The support assistant is not configured." }, 500);
+    const ai = aiConfiguration();
+    if (!ai) return json({ error: "The support assistant is not configured." }, 500);
 
     const authHeader = req.headers.get("Authorization") ?? "";
     const userClient = createClient(url, anon, { global: { headers: { Authorization: authHeader } } });
@@ -55,56 +55,30 @@ Deno.serve(async (req) => {
       .filter((m) => m.type === "text" && (m.sender_kind === "user" || m.sender_kind === "bot"))
       .map((m) => ({ role: m.sender_kind === "bot" ? "assistant" : "user", content: m.content }));
 
-    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
+    const aiRes = await fetch(`${ai.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "Lovable-API-Key": apiKey,
-        "X-Lovable-AIG-SDK": "fetch",
+        Authorization: `Bearer ${ai.key}`,
       },
       body: JSON.stringify({
-        model: "openai/gpt-6-astra",
-        stream: true,
-        store: false,
-        reasoning: { effort: "low" },
-        instructions: INSTRUCTIONS,
-        input,
-        text: { format: { type: "json_schema", name: "support_reply", strict: true, schema } },
+        model: ai.model,
+        stream: false,
+        response_format: { type: "json_object" },
+        messages: [{ role: "system", content: INSTRUCTIONS }, ...input],
       }),
     });
 
-    if (!aiRes.ok || !aiRes.body) {
+    if (!aiRes.ok) {
       const detail = await aiRes.text().catch(() => "");
-      console.error("AI gateway error", aiRes.status, detail);
+      console.error("AI provider error", aiRes.status, detail);
       const message = aiRes.status === 429 ? "The assistant is busy right now. Try again in a moment, or tap Talk to a person."
-        : aiRes.status === 402 ? "The assistant is out of AI credits. Tap Talk to a person to reach an admin."
         : "The assistant couldn't answer. Tap Talk to a person to reach an admin.";
-      return json({ error: message }, aiRes.status === 429 || aiRes.status === 402 ? aiRes.status : 502);
+      return json({ error: message }, aiRes.status === 429 ? aiRes.status : 502);
     }
 
-    // Consume the SSE stream and collect the final text.
-    const reader = aiRes.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "", text = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (!data || data === "[DONE]") continue;
-        try {
-          const evt = JSON.parse(data);
-          if (evt.type === "response.output_text.delta") text += evt.delta ?? "";
-        } catch { /* partial line */ }
-      }
-    }
-
+    const payload = await aiRes.json().catch(() => null);
+    const text = String(payload?.choices?.[0]?.message?.content || "");
     let parsed: { reply: string; handoff: boolean; reason: string | null };
     try { parsed = JSON.parse(text); } catch { parsed = { reply: text || "Sorry, I didn't catch that.", handoff: false, reason: null }; }
 

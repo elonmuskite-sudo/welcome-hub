@@ -18,7 +18,7 @@ Debugging and optimizing Nexus Chat application performance. Focus areas: bundle
 |----|-----------|--------|----------|
 | H1 | AuthContext value recreation → cascading re-renders | ✅ CONFIRMED & FIXED | `value` was inline object → now `useMemo`; all handlers wrapped in `useCallback` |
 | H2 | Missing React.memo → O(n) list re-renders | ✅ CONFIRMED & FIXED | MessageBubble + ChatListItem now `memo()` with custom `areEqual` comparators |
-| H3 | 517KB bundle → no code splitting | ✅ CONFIRMED & FIXED | `vite.config.js` now has 10 manual chunk groups (vendor, query, supabase, ui, icons, forms, util, base44, radix) |
+| H3 | 517KB bundle → no code splitting | ✅ CONFIRMED & FIXED | `vite.config.js` now has 8 manual chunk groups (vendor, query, supabase, ui, icons, forms, util, radix) |
 | H4 | useSetting N independent reads | ✅ CONFIRMED & FIXED | New `SettingsContext.jsx` with single shared store; old hook re-exports |
 | H5 | checkAuth LIMIT 1 arbitrary user | ✅ CONFIRMED & FIXED | Session now rehydrates correct user via `.eq('member_id', storedNexusId)` with fallback to local cache |
 

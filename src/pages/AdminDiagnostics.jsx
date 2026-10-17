@@ -21,7 +21,7 @@ async function loadVercel() {
   try {
     const res = await fetch('/api/admin/diagnostics', { headers: await authHeader() })
     const body = await res.json().catch(() => null)
-    if (!body) return { error: 'Vercel server functions are not reachable from this site (this is expected in the Lovable preview).' }
+    if (!body) return { error: 'Vercel server functions are not reachable from this site (this is expected in local preview).' }
     return body
   } catch {
     return { error: 'Vercel server functions are not reachable from this site.' }

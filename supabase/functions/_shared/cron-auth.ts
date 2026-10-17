@@ -2,8 +2,8 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 
 export function authenticateCronRequest(request: Request): Response | null {
-  const currentSecret = Deno.env.get('LOVABLE_CRON_SECRET')
-  const previousSecret = Deno.env.get('LOVABLE_CRON_SECRET_PREVIOUS')
+  const currentSecret = Deno.env.get('CRON_SECRET')
+  const previousSecret = Deno.env.get('CRON_SECRET_PREVIOUS')
 
   if (!currentSecret) {
     return new Response('Server configuration error', { status: 500 })
