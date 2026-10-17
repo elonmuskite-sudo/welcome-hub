@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PhotoIcon, VideoCameraIcon, XMarkIcon } from '@heroicons/react/24/solid'
 import { useAuth } from '../lib/AuthContext'
+import { useNow } from '../lib/useNow'
 import {
   listFeed,
   createFeedPost,
@@ -10,6 +11,7 @@ import {
   subscribeFeed,
   isFeedAvailable,
   formatTimeAgo,
+  formatExactTime,
 } from '../lib/feeds'
 
 const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.avi'
@@ -27,6 +29,8 @@ export default function AdminFeedManager() {
   const [progress, setProgress] = useState(null)
   const fileInputRef = useRef(null)
   const feedAvailable = isFeedAvailable()
+  // Shared clock so the post ages shown to admins refresh in real time.
+  const now = useNow()
 
   const load = useCallback(async () => {
     if (!feedAvailable) return
@@ -207,7 +211,9 @@ export default function AdminFeedManager() {
                       {post.isAdminPost && <span className="ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">Admin</span>}
                       {post.status !== 'active' && <span className="ml-2 rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">{post.status}</span>}
                     </p>
-                    <p className="text-xs text-muted-foreground">{formatTimeAgo(post.createdAt)} · {post.media?.length || 0} media · {post.comments.length} comments</p>
+                    <p className="text-xs text-muted-foreground" title={`Posted ${formatExactTime(post.createdAt)}`}>
+                      {formatTimeAgo(post.createdAt, now)} · {formatExactTime(post.createdAt)} · {post.media?.length || 0} media · {post.comments.length} comments
+                    </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {post.status === 'active' ? (

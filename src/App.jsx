@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./lib/AuthContext.jsx";
 import { SettingsProvider } from "./lib/SettingsContext.jsx";
+import { CallProvider } from "./lib/CallContext.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import AuthGuard from "./components/AuthGuard.jsx";
 import AdminGuard from "./components/AdminGuard.jsx";
@@ -13,7 +14,9 @@ import ContactsPanel from "./components/chat/ContactsPanel.jsx";
 import FeedsPage from "./pages/FeedsPage.jsx";
 import PaymentStatusPage from "./pages/PaymentStatusPage.jsx";
 import InvoicePage from "./pages/InvoicePage.jsx";
+const AdminLogin = lazy(() => import("./pages/AdminLogin.jsx"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard.jsx"));
+const AdminUsers = lazy(() => import("./pages/AdminUsers.jsx"));
 const AdminDiagnostics = lazy(() => import("./pages/AdminDiagnostics.jsx"));
 import AuthLanding from "./pages/AuthLanding.jsx";
 import Login from "./pages/Login.jsx";
@@ -28,9 +31,10 @@ function App() {
   return (
     <SettingsProvider>
       <AuthProvider>
-        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <ScrollToTop />
-          <Routes>
+        <CallProvider>
+          <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <ScrollToTop />
+            <Routes>
             <Route path="/" element={<AuthGuard><AuthLanding /></AuthGuard>} />
             <Route path="/login" element={<AuthGuard><Login /></AuthGuard>} />
             <Route path="/register" element={<AuthGuard><Register /></AuthGuard>} />
@@ -54,11 +58,24 @@ function App() {
               <Route path="payment/:purchaseId" element={<PaymentStatusPage />} />
               <Route path="invoice/:purchaseId" element={<InvoicePage />} />
             </Route>
+            <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
             <Route
-              path="/admin"
+              path="/admin/login"
+              element={<Suspense fallback={null}><AdminLogin /></Suspense>}
+            />
+            <Route
+              path="/admin/dashboard"
               element={
                 <AdminGuard>
                   <Suspense fallback={null}><AdminDashboard /></Suspense>
+                </AdminGuard>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <AdminGuard>
+                  <Suspense fallback={null}><AdminUsers /></Suspense>
                 </AdminGuard>
               }
             />
@@ -66,7 +83,8 @@ function App() {
             <Route path="/default-path" element={<Navigate to="/" replace />} />
             <Route path="*" element={<PageNotFound />} />
           </Routes>
-        </Router>
+          </Router>
+        </CallProvider>
       </AuthProvider>
     </SettingsProvider>
   );

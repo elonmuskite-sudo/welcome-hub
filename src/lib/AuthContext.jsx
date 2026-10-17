@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useMemo, useCallback } 
 export function isAdminRole(role) {
   return role === 'admin' || role === 'supabase_admin'
 }
+import { clearAdminSession } from './adminSession'
 import {
   getMemberProfile,
   sendWelcomeEmail,
@@ -199,6 +200,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   const logout = useCallback(async () => {
+    await clearAdminSession()
     await signOutFromSupabase()
     setUser(null)
   }, [])
@@ -243,6 +245,7 @@ export function AuthProvider({ children }) {
     } else {
       await updateAuthenticatedPassword(newPassword)
     }
+    await clearAdminSession()
     await signOutFromSupabase()
     sessionStorage.removeItem(RECOVERY_SESSION_KEY)
     setUser(null)

@@ -5,6 +5,15 @@
 
 import { supabase, isSupabaseConfigured } from './supabase'
 import { uploadChatFile } from './storageManager'
+import {
+  FEED_COMMENT_MAX_LENGTH,
+  FEED_POST_MAX_LENGTH,
+  feedVisibilityFilter,
+  normalizeFeedMedia,
+  sanitizeFeedText,
+} from './feedContent'
+
+export { formatTimeAgo, formatExactTime } from './relativeTime'
 
 const POST_COLUMNS = 'id, author_id, content, media, is_admin_post, status, created_at, updated_at'
 const COMMENT_COLUMNS = 'id, post_id, author_id, parent_id, content, status, created_at, updated_at'
@@ -19,16 +28,27 @@ function requireFeed() {
   if (!supabase) throw new Error('The feed is unavailable because the database is not connected.')
 }
 
-function normalizeMedia(media) {
-  if (!Array.isArray(media)) return []
-  return media
-    .filter((item) => item && item.url)
-    .map((item) => ({
-      url: String(item.url),
-      type: item.type === 'video' ? 'video' : 'image',
-      name: item.name ? String(item.name) : null,
-    }))
-    .slice(0, 10)
+// Role lookups are cached briefly because the feed reloads on every realtime
+// change and each reload needs to know whether the viewer is an admin.
+const ADMIN_LOOKUP_TTL_MS = 60000
+let adminLookup = { userId: null, isAdmin: false, checkedAt: 0 }
+
+async function viewerIsAdmin(userId) {
+  if (!userId) return false
+  const now = Date.now()
+  if (adminLookup.userId === userId && now - adminLookup.checkedAt < ADMIN_LOOKUP_TTL_MS) {
+    return adminLookup.isAdmin
+  }
+  let isAdmin = false
+  try {
+    const { data, error } = await supabase.rpc('has_role', { _user_id: userId, _role: 'admin' })
+    if (error) throw error
+    isAdmin = data === true
+  } catch {
+    isAdmin = false
+  }
+  adminLookup = { userId, isAdmin, checkedAt: now }
+  return isAdmin
 }
 
 function toTime(value) {
@@ -87,8 +107,16 @@ function buildCommentTree(rows, reactionMap) {
 
 export async function listFeed() {
   requireFeed()
-  const { data: posts, error } = await supabase.from('feed_posts')
-    .select(POST_COLUMNS)
+  // Every signed-in member reads all public posts; authors additionally keep
+  // their own moderated posts and admins read the whole table. Row level
+  // security enforces the same rule, so this filter keeps the UI in step with it.
+  const { data: auth } = await supabase.auth.getUser()
+  const viewerId = auth?.user?.id ? String(auth.user.id) : null
+  const visibility = feedVisibilityFilter({ viewerId, isAdmin: await viewerIsAdmin(viewerId) })
+
+  let query = supabase.from('feed_posts').select(POST_COLUMNS)
+  if (visibility) query = query.or(visibility)
+  const { data: posts, error } = await query
     .order('created_at', { ascending: false })
     .limit(100)
   if (error) throw new Error(error.message || 'The feed could not be loaded.')
@@ -166,8 +194,8 @@ export async function listFeed() {
 
 export async function createFeedPost({ content = '', media = [], isAdmin = false }) {
   requireFeed()
-  const text = String(content || '').trim()
-  const normalized = normalizeMedia(media)
+  const text = sanitizeFeedText(content, FEED_POST_MAX_LENGTH, 'post')
+  const normalized = normalizeFeedMedia(media)
   if (!text && !normalized.length) throw new Error('Add text or media before posting.')
   const { data: auth } = await supabase.auth.getUser()
   const authorId = auth?.user?.id
@@ -181,8 +209,8 @@ export async function createFeedPost({ content = '', media = [], isAdmin = false
 
 export async function updateFeedPost({ id, content = '', media = [] }) {
   requireFeed()
-  const text = String(content || '').trim()
-  const normalized = normalizeMedia(media)
+  const text = sanitizeFeedText(content, FEED_POST_MAX_LENGTH, 'post')
+  const normalized = normalizeFeedMedia(media)
   if (!text && !normalized.length) throw new Error('A post needs text or media.')
   const { error } = await supabase.from('feed_posts')
     .update({ content: text, media: normalized })
@@ -204,7 +232,7 @@ export async function setFeedPostStatus({ id, status }) {
 
 export async function createFeedComment({ postId, content, parentId = null }) {
   requireFeed()
-  const text = String(content || '').trim()
+  const text = sanitizeFeedText(content, FEED_COMMENT_MAX_LENGTH, 'comment')
   if (!text) throw new Error('Write a comment before sending.')
   const { data: auth } = await supabase.auth.getUser()
   const authorId = auth?.user?.id
@@ -216,7 +244,7 @@ export async function createFeedComment({ postId, content, parentId = null }) {
 
 export async function updateFeedComment({ id, content }) {
   requireFeed()
-  const text = String(content || '').trim()
+  const text = sanitizeFeedText(content, FEED_COMMENT_MAX_LENGTH, 'comment')
   if (!text) throw new Error('A comment cannot be empty.')
   const { error } = await supabase.from('feed_comments').update({ content: text }).eq('id', id)
   if (error) throw new Error(error.message || 'The comment could not be updated.')
@@ -280,17 +308,4 @@ export function subscribeFeed(onChange) {
     if (timer) clearTimeout(timer)
     supabase.removeChannel(channel)
   }
-}
-
-export function formatTimeAgo(dateString) {
-  const date = new Date(dateString)
-  const diff = Date.now() - date.getTime()
-  const minutes = Math.floor(diff / 60000)
-  const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
-  if (minutes < 1) return 'Just now'
-  if (minutes < 60) return `${minutes}m`
-  if (hours < 24) return `${hours}h`
-  if (days < 7) return `${days}d`
-  return date.toLocaleDateString()
 }

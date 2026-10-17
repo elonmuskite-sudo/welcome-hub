@@ -16,7 +16,9 @@ import {
   EllipsisHorizontalIcon,
 } from '@heroicons/react/24/solid'
 import Avatar from '../components/chat/Avatar'
+import FeedTimestamp from '../components/FeedTimestamp'
 import { useAuth } from '../lib/AuthContext'
+import { useNow } from '../lib/useNow'
 import { createChat, getChats, sendChatMessage, getContacts, searchUserByNexusId } from '../lib/persistence'
 import UniversalEmojiPicker from '../components/chat/UniversalEmojiPicker'
 import {
@@ -33,10 +35,10 @@ import {
   setFeedCommentStatus,
   uploadFeedMedia,
   subscribeFeed,
-  formatTimeAgo,
   FEED_REACTION_EMOJIS,
   isFeedAvailable,
 } from '../lib/feeds'
+import { FEED_COMMENT_MAX_LENGTH, FEED_POST_MAX_LENGTH } from '../lib/feedContent'
 
 const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.avi'
 const MAX_MEDIA = 10
@@ -79,6 +81,8 @@ export default function FeedsPage() {
   const navigate = useNavigate()
   const isAdmin = user?.role === 'admin'
   const feedAvailable = isFeedAvailable()
+  // Shared clock so every visible post/comment age refreshes in real time.
+  const now = useNow()
 
   const [feeds, setFeeds] = useState([])
   const [loading, setLoading] = useState(true)
@@ -366,6 +370,7 @@ export default function FeedsPage() {
                 value={editingComment.text}
                 onChange={(e) => setEditingComment({ id: comment.id, text: e.target.value })}
                 onKeyDown={(e) => { if (e.key === 'Enter') saveCommentEdit(comment.id) }}
+                maxLength={FEED_COMMENT_MAX_LENGTH}
                 className="flex-1 rounded-lg border border-border bg-background px-2 py-1 text-sm"
               />
               <button onClick={() => saveCommentEdit(comment.id)} className="text-xs font-semibold text-primary">Save</button>
@@ -379,7 +384,7 @@ export default function FeedsPage() {
         </div>
 
         <div className="ml-2 mt-1.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <span className="text-[10px]">{formatTimeAgo(comment.createdAt)}</span>
+          <FeedTimestamp createdAt={comment.createdAt} now={now} className="text-[10px] text-muted-foreground" />
 
           {comment.reactions && Object.values(comment.reactions).some((count) => count > 0) && (
             <span className="flex items-center gap-1">
@@ -442,6 +447,7 @@ export default function FeedsPage() {
               onChange={(e) => setReplyInputs((prev) => ({ ...prev, [comment.id]: e.target.value }))}
               onKeyDown={(e) => { if (e.key === 'Enter') addComment(feedId, comment.id) }}
               placeholder={`Reply to ${comment.userName}...`}
+              maxLength={FEED_COMMENT_MAX_LENGTH}
               className="flex-1 rounded-full border border-border bg-muted/60 px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
             />
             <button onClick={() => addComment(feedId, comment.id)} className="rounded-full bg-primary p-1.5 text-primary-foreground">
@@ -505,7 +511,7 @@ export default function FeedsPage() {
                         )}
                         {hidden && <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive">{feed.status}</span>}
                       </div>
-                      <span className="text-xs text-muted-foreground">{formatTimeAgo(feed.createdAt)}{feed.edited ? ' · edited' : ''}</span>
+                      <FeedTimestamp createdAt={feed.createdAt} now={now} className="text-xs text-muted-foreground" edited={feed.edited} />
                     </div>
                   </div>
                   {(isOwner || isAdmin) && (
@@ -594,7 +600,7 @@ export default function FeedsPage() {
                 value={composerText}
                 onChange={(e) => setComposerText(e.target.value)}
                 rows={4}
-                maxLength={5000}
+                maxLength={FEED_POST_MAX_LENGTH}
                 placeholder="What's on your mind?"
                 className="w-full resize-none rounded-xl border border-border bg-muted px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
@@ -679,6 +685,7 @@ export default function FeedsPage() {
                   onChange={(e) => setCommentInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') addComment(activeCommentFeed.id) }}
                   placeholder="Write a comment..."
+                  maxLength={FEED_COMMENT_MAX_LENGTH}
                   className="flex-1 rounded-full border border-border bg-muted px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
                 <button onClick={() => addComment(activeCommentFeed.id)} className="rounded-full bg-primary p-2.5 text-primary-foreground">

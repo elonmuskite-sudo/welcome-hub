@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { ShieldCheckIcon } from '@heroicons/react/24/solid'
 import { Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
+import { establishAdminSession } from '../lib/adminSession'
 import ChatButton from '../components/chat/ChatButton'
 import { startSignInEmailCode } from '../lib/supabase'
 import AuthShell from '../components/AuthShell'
@@ -19,9 +20,14 @@ export default function Login() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (user) {
-      navigate(user.role === 'admin' ? '/admin' : '/app', { replace: true })
+    if (!user) return
+    if (user.role !== 'admin') {
+      navigate('/app', { replace: true })
+      return
     }
+    // Admins land on the gated dashboard; the server session cookie has to exist
+    // before the middleware will serve any further /admin request.
+    establishAdminSession().finally(() => navigate('/admin/dashboard', { replace: true }))
   }, [user, navigate])
 
   const themeClasses = { muted: 'text-muted-foreground', input: 'border-input bg-background text-foreground focus:border-primary focus:ring-primary', button: 'bg-primary text-primary-foreground hover:bg-primary/90' }
@@ -40,8 +46,12 @@ export default function Login() {
         return
       }
       const result = await login(email, password)
-      const destination = result?.user?.role === 'admin' ? '/admin' : '/app'
-      navigate(destination)
+      if (result?.user?.role === 'admin') {
+        await establishAdminSession()
+        navigate('/admin/dashboard')
+        return
+      }
+      navigate('/app')
     } catch (err) {
       const pendingEmail = email.trim().toLowerCase()
       const unconfirmed = err?.code === 'email_not_confirmed' || /not confirmed/i.test(err.message || '')

@@ -18,6 +18,7 @@ and the composer always renders fully visible above the on-screen keyboard.
 | 3 | No keyboard handling existed anywhere | Soft keyboard covered the composer; typed text obscured | Added `useViewportInsets` (`visualViewport`-based) + composer autogrow |
 | 4 | `StickerPicker` was absolutely positioned (`absolute bottom-full … z-50`) | Picker could be clipped by the keyboard/nav or overlap the message list | Moved inline into the composer flow (`mb-2 w-full …`), height-capped and internally scrollable |
 | 5 | `chats.title` was always written as the recipient's name at creation | Sender saw the correct name; the recipient saw their **own** name | Added `chats.participant_names` (jsonb) + viewer-relative `chatDisplayName(chat, viewerId)` |
+| 6 | `ChatLayout` was pinned to `h-[100dvh]` (layout viewport) while the composer cleared `max(navHeight + 8, keyboardInset)` | On Android the keyboard shrinks the *visual* viewport only, so the inset stayed ~0 and the composer sat under the keyboard; on iOS the document scrolled and the box left the screen | Shell height now tracks `--vv-height` (`.chat-shell`) and `--chat-bottom-offset` is a single 8px gap while the keyboard is open |
 
 ---
 
@@ -25,8 +26,8 @@ and the composer always renders fully visible above the on-screen keyboard.
 
 | File | Change |
 |------|--------|
-| [src/hooks/useViewportInsets.js](file:///c:/Users/User$/Downloads/welcome-hub/src/hooks/useViewportInsets.js) | **New.** Publishes `--keyboard-inset`, `--bottom-nav-height`, `--chat-bottom-offset`. |
-| [src/layouts/ChatLayout.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/layouts/ChatLayout.jsx) | Calls the hook; content padding is now `pb-[var(--chat-bottom-offset,84px)] md:pb-0`. |
+| [src/hooks/useViewportInsets.js](file:///c:/Users/User$/Downloads/welcome-hub/src/hooks/useViewportInsets.js) | **New.** Publishes `--vv-height`, `--keyboard-inset`, `--bottom-nav-height`, `--chat-bottom-offset`, and toggles the `keyboard-open` class. |
+| [src/layouts/ChatLayout.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/layouts/ChatLayout.jsx) | Calls the hook; root is `.chat-shell`; content padding is `pb-[var(--chat-bottom-offset,84px)] md:pb-0`. |
 | [src/components/chat/AppBottomNav.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/AppBottomNav.jsx) | Adds `data-chat-bottom-nav` so the nav can be measured. |
 | [src/components/chat/MessageInput.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/MessageInput.jsx) | 8px gaps, uniform `w-11 h-11` buttons, textarea autogrow with `min(40vh,180px)` cap, `chat-composer` safe-area padding. |
 | [src/components/chat/StickerPicker.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/StickerPicker.jsx) | Inline in composer flow; `max-h-[min(40vh,220px)]` + internal scroll. |
@@ -46,16 +47,29 @@ CSS custom properties on `:root`, written by `useViewportInsets`:
 | Var | Meaning | Default |
 |-----|---------|---------|
 | `--chat-gap` | Standardized spacing unit | `8px` |
+| `--vv-height` | Height of the *visible* viewport; the mobile app shell height | `100dvh` |
 | `--bottom-nav-height` | Measured height of `[data-chat-bottom-nav]` | `64px` |
 | `--keyboard-inset` | px obscured by the on-screen keyboard | `0px` |
-| `--chat-bottom-offset` | `max(navHeight + 8, keyboardInset)` | `72px` |
+| `--chat-bottom-offset` | `navHeight + 8` while the keyboard is closed, `8` while it is open | `72px` |
 
+- **App shell height:** `.chat-shell` is `100dvh` on desktop and `var(--vv-height)`
+  on mobile, so the shell always ends at the visible bottom edge of the screen.
+  The composer is the last flex child, so it can never be pushed off-screen.
 - **Keyboard height** = `window.innerHeight - visualViewport.height - visualViewport.offsetTop`,
   clamped to `0` below a 24px threshold so mobile URL-bar show/hide jitter is not
-  mistaken for a keyboard.
+  mistaken for a keyboard (iOS keeps `innerHeight` and shrinks the visual viewport).
+- **Android keyboard detection:** Chrome resizes the layout viewport instead of
+  overlaying it, so there the difference above is ~0 and the keyboard is detected
+  as the viewport shrinking >140px below the tallest keyboard-free height seen for
+  the current orientation (the baseline is reset whenever the width changes).
+- **While typing (`keyboard-open` class on `<html>`):** the shell already ends at the
+  keyboard, so the composer only needs the 8px rhythm and the bottom navigation is
+  hidden — otherwise a fixed nav would sit on top of the composer.
 - **Recomputation triggers:** `visualViewport` `resize` + `scroll`, `window` `resize`,
   `orientationchange`, and a `ResizeObserver` on the bottom nav. All writes are
-  coalesced into a single `requestAnimationFrame`.
+  coalesced into a single `requestAnimationFrame`. The nav is hidden while typing,
+  which reports a 0 height; the last real measurement is kept so the
+  closed-keyboard offset stays correct.
 - **Composer bottom padding** therefore becomes `env(safe-area-inset-bottom)` via the
   content wrapper (`pb-[var(--chat-bottom-offset)]`), guaranteeing the 8px gap above the
   nav and that the composer jumps above the keyboard.
@@ -88,9 +102,17 @@ this environment; listed so they can be run before release):
 
 ## 5. Edge cases handled
 
-- **Keyboard on iOS vs Android:** both are detected via the same `visualViewport`
-  math; `offsetTop` covers iOS Safari's visual-viewport scroll behaviour.
-- **URL-bar jitter:** suppressed by the 24px minimum-inset threshold.
+- **Keyboard on iOS vs Android:** iOS is detected from the shrinking visual
+  viewport (+ `offsetTop` for its visual-viewport scroll), Android from the
+  layout-viewport shrink against the orientation's keyboard-free baseline.
+- **Composer off-screen:** impossible now that the shell height tracks the visible
+  viewport — the composer is the shell's last flex child, not a fixed element
+  positioned from the bottom of the document.
+- **URL-bar jitter:** suppressed by the 24px minimum-inset threshold and the 140px
+  shrink threshold.
+- **Bottom nav vs composer while typing:** the nav is hidden (`keyboard-open`) so it
+  cannot overlap the composer, and its measured height is preserved for the
+  closed-keyboard offset.
 - **Notch / home indicator / landscape cut-outs:** `env(safe-area-inset-*)` used on
   the composer's left/right padding and the nav's bottom spacer.
 - **Very small screens (320px):** 44px buttons + `gap-2` still leave the textarea

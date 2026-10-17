@@ -86,6 +86,21 @@ async function main() {
   if (missingRecommended.length) {
     console.warn(`[env:validate] Not set (sign-up emails will fail until added): ${missingRecommended.join(', ')}`)
   }
+  // Without this secret Edge Middleware fails closed, so every /admin* request
+  // would be redirected to the sign-in page.
+  if (isPlaceholder(getEnvValue('ADMIN_SESSION_SECRET'))) {
+    console.warn('[env:validate] ADMIN_SESSION_SECRET is not set: /admin* requests will be blocked in production until it is.')
+  }
+  // Voice calls relay over TURN when NAT traversal via STUN alone fails.
+  const hasTurnUrl = !isPlaceholder(getEnvValue('VITE_TURN_URL'))
+  const hasTurnUser = !isPlaceholder(getEnvValue('VITE_TURN_USERNAME'))
+  const hasTurnCredential = !isPlaceholder(getEnvValue('VITE_TURN_CREDENTIAL'))
+  if (!hasTurnUrl) {
+    console.warn('[env:validate] VITE_TURN_URL is not set: voice calls use STUN only and may fail behind strict NATs.')
+  }
+  if (hasTurnUser !== hasTurnCredential) {
+    console.warn('[env:validate] TURN username and credential must be set together; relay credentials will be ignored.')
+  }
   if (isStrictDeploy && missing.length) {
     console.error('[env:validate] Missing production env values before deploy:')
     for (const key of missing) console.error(` - ${key}`)

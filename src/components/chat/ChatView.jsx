@@ -4,11 +4,10 @@ import { ArrowLeftIcon, PhoneIcon, LockClosedIcon } from '@heroicons/react/24/so
 import Avatar from './Avatar'
 import MessageInput from './MessageInput'
 import MessageBubble from './MessageBubble'
-import VoiceCallOverlay from './VoiceCallOverlay'
 import { useSetting } from '../../hooks/useSetting'
 import { getWallpaperById } from '../../lib/wallpapers'
 import { encryptMessage, decryptMessage, isE2EEEnabled } from '../../lib/crypto/e2ee'
-import { useVoiceCall } from '../../hooks/useVoiceCall'
+import { useCall } from '../../lib/CallContext'
 import { sendChatMessage, toggleMessageReaction } from '../../lib/persistence'
 import { isChatServiceAvailable, newId } from '../../lib/persistence'
 import { useAuth } from '../../lib/AuthContext'
@@ -31,17 +30,27 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
   const [chatWallpaper] = useSetting('chatWallpaper', 'nature')
   const wallpaper = getWallpaperById(chatWallpaper)
 
-  const voiceCall = useVoiceCall(chat.id)
+  const { call, initiateCall } = useCall()
   const { user } = useAuth()
   const didAutoStartCall = useRef(false)
+  const peerId = peerIdOf(chat, user?.id)
+
+  const startCall = useCallback(() => {
+    if (!peerId) return
+    initiateCall({
+      chatId: chat.id,
+      peerId,
+      peerName: chatDisplayName(chat, user?.id),
+      peerAvatar: chat.avatar_url,
+    })
+  }, [chat, peerId, user?.id, initiateCall])
 
   // The number-lookup "Call" action arrives with autoStartCall; fire the call once.
   useEffect(() => {
     if (!autoStartCall || didAutoStartCall.current) return
     didAutoStartCall.current = true
-    voiceCall.initiateCall()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStartCall])
+    startCall()
+  }, [autoStartCall, startCall])
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'end' })
@@ -199,7 +208,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
               )}
             </div>
             <p className="text-xs sm:text-sm text-muted-foreground">
-              {voiceCall.callState === 'connected' ? 'On call' : chat.type === 'group' ? 'Group conversation' : 'Private conversation'}
+              {call?.state === 'connected' ? 'On call' : chat.type === 'group' ? 'Group conversation' : 'Private conversation'}
             </p>
           </div>
         </div>
@@ -207,10 +216,10 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           <ChatButton title="Search conversation" aria-expanded={showSearch} onClick={() => { setShowSearch(!showSearch); setSearch('') }} className="w-9"><Search className="w-5 h-5" /></ChatButton>
           <ChatButton
-            onClick={voiceCall.initiateCall}
-            disabled={voiceCall.callState !== 'idle'}
+            onClick={startCall}
+            disabled={!peerId || Boolean(call)}
             className="p-2 hover:bg-muted rounded-full text-foreground disabled:opacity-50 transition"
-            title="Start call"
+            title={peerId ? 'Start call' : 'Only available in one-to-one chats'}
           >
             <PhoneIcon className="w-5 h-5" />
           </ChatButton>
@@ -250,10 +259,6 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
 
       {sendError && <p role="alert" className="border-t border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">{sendError}</p>}
       <MessageInput onSendMessage={handleSendMessage} reply={reply} onCancelReply={() => setReply(null)} chatId={chat.id} />
-
-      <VoiceCallOverlay chat={chat} voiceCall={voiceCall} />
-
-      <audio id="remote-audio" autoPlay />
     </div>
   )
 }

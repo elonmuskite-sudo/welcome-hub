@@ -14,6 +14,7 @@
     "supabase:verify": "npm run env:generate && node scripts/setup-supabase.js --verify-only",
     "vercel:env:sync": "npm run env:generate && node scripts/sync-vercel-env.js",
     "vercel:env:dry": "npm run env:generate && node scripts/sync-vercel-env.js --dry-run",
+    "turn:credentials": "node scripts/fetch-turn-credentials.js",
     "prebuild": "npm run env:generate && npm run env:validate",
     "build": "vite build",
     "build:dev": "vite build --mode development",

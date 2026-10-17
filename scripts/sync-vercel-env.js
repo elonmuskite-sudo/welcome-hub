@@ -16,6 +16,7 @@ const REQUIRED_ENV_KEYS = [
   'SUPABASE_SERVICE_ROLE_KEY',
   'RESEND_API_KEY',
   'RESEND_FROM',
+  'ADMIN_SESSION_SECRET',
 ]
 
 const OPTIONAL_ENV_KEYS = [
@@ -24,6 +25,15 @@ const OPTIONAL_ENV_KEYS = [
   'APPWRITE_ENDPOINT',
   'APPWRITE_PROJECT_ID',
   'SUPABASE_POOLER_URL',
+]
+
+// Voice-call ICE config. These are browser-safe (they ship in the bundle) and
+// optional, so they are only synced when a real value is present.
+const OPTIONAL_PUBLIC_KEYS = [
+  'VITE_STUN_URL',
+  'VITE_TURN_URL',
+  'VITE_TURN_USERNAME',
+  'VITE_TURN_CREDENTIAL',
 ]
 
 const PUBLIC_KEYS = new Set([
@@ -37,6 +47,7 @@ const PUBLIC_KEYS = new Set([
   'APPWRITE_ENDPOINT',
   'APPWRITE_PROJECT_ID',
   'RESEND_FROM',
+  ...OPTIONAL_PUBLIC_KEYS,
 ])
 
 const LEGACY_PUBLIC_SECRETS = ['VITE_ADMIN_PASSWORD']
@@ -93,8 +104,14 @@ function loadValues() {
   if (missing.length) {
     throw new Error(`Missing or placeholder values in generated environment: ${missing.join(', ')}`)
   }
+  const optionalPublic = Object.fromEntries(
+    OPTIONAL_PUBLIC_KEYS
+      .filter((key) => !invalidValue(config[key]))
+      .map((key) => [key, String(config[key])])
+  )
   return {
     ...Object.fromEntries(requiredKeys.map((key) => [key, String(config[key])])),
+    ...optionalPublic,
     VITE_AUTH_PROVIDER: provider,
   }
 }

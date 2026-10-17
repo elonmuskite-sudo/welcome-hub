@@ -72,8 +72,9 @@ Set these in **Vercel → Project → Settings → Environment Variables** for P
 - `RESEND_FROM`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `ADMIN_SESSION_SECRET` (encrypted server variable — see §7)
 
-Do not add `SUPABASE_SERVICE_ROLE_KEY`, the Postgres connection string, or `RESEND_API_KEY` to frontend `VITE_` variables. The database connection string stays local to the operator's migration environment and is not required by the Vercel app. Redeploy after environment changes.
+Do not add `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_SESSION_SECRET`, the Postgres connection string, or `RESEND_API_KEY` to frontend `VITE_` variables. The database connection string stays local to the operator's migration environment and is not required by the Vercel app. Redeploy after environment changes.
 
 To configure Production and Preview from GitHub, add `VERCEL_TOKEN`, `VERCEL_PROJECT_ID`, `VERCEL_ORG_ID` (when using a team), `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, and `RESEND_FROM` as repository Actions secrets. Then run **Actions → Set up production** and provide the Supabase project URL and anon/publishable key. The workflow creates or updates the corresponding browser and server variables in Vercel, so it can be rerun after an interrupted setup; it requires the server-side email secrets rather than silently skipping them.
 
@@ -97,3 +98,32 @@ The workflow sends the two NOWPayments values to Supabase using the CLI; they ar
 3. Request password recovery; verify the recovery code is delivered by Resend.
 4. Verify the code, set a new password, and sign in with it.
 5. In Supabase SQL Editor, verify `members.password` is not selected by anon/authenticated roles and that a user can only select their own member row.
+
+## 7. Admin access control
+
+Admin surfaces live behind a small, fixed set of routes and a server-side gate:
+
+| Route | Access | Notes |
+| --- | --- | --- |
+| `/admin` | Redirect | Sends the visitor to `/admin/dashboard`. |
+| `/admin/login` | Public | Dedicated admin sign-in; never wrapped in `AdminGuard`. |
+| `/admin/dashboard` | Admin only | Overview plus links to the other admin modules. |
+| `/admin/users` | Admin only | Wraps `AdminMemberManager` (role and member administration). |
+| `/admin/diagnostics` | Admin only | Runtime/config diagnostics. |
+
+Client-side, every admin route except `/admin/login` renders inside `AdminGuard`, which verifies the signed-in user's role through `has_role` and redirects unauthenticated visitors to `/admin/login` with the original path in `location.state.from`. `public/robots.txt` disallows `/admin` so the paths are not indexed.
+
+Because the browser Supabase client stores its session in `localStorage`, Vercel Edge Middleware cannot read it. The server-side gate therefore uses a second, server-readable credential: a signed HttpOnly cookie.
+
+- `api/admin/session.js` (`POST`) reads the `Authorization: Bearer <access-token>` header, verifies it with `admin.auth.getUser(token)`, checks `has_role` via the service-role key, and — only for admins — sets the `nexus_admin_session` cookie. `DELETE` clears it. It returns `503` when `ADMIN_SESSION_SECRET` or the Supabase server settings are missing.
+- `server/adminSession.js` signs the cookie (`${userId}.${expiresAt}` plus an HMAC-SHA256 signature) with Web Crypto so the same module runs in both the Node function and the Edge runtime. The cookie is `HttpOnly; SameSite=Lax; Path=/`, gains `Secure` in production, and expires after 8 hours.
+- `middleware.js` (`matcher: ['/admin', '/admin/:path*']`) verifies the cookie for every `/admin*` request except `/admin/login`, redirecting (`307`) to `/admin/login?next=…` when it is absent or invalid. It fails closed: with no `ADMIN_SESSION_SECRET`, all admin paths redirect to the login page.
+- The client refreshes the cookie from `AdminGuard` and `Login` via `src/lib/adminSession.js`; `AuthContext.logout()` and the password-reset flow clear it.
+
+Generate `ADMIN_SESSION_SECRET` as 32 random bytes of hex and set it in the gitignored `.env.local` for local development and as a separate Production value in Vercel:
+
+```
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Do not reuse the local development value in production, and never expose the secret through a `VITE_` variable. `npm run env:validate` warns when it is unset because the gate fails closed, and `npm run vercel:env:sync` pushes it to Vercel as an encrypted Production variable.

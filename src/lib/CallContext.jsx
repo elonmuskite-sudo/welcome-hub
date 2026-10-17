@@ -1,0 +1,503 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { supabase } from './supabase'
+import { useAuth } from './AuthContext'
+import { ICE_SERVERS } from './callIce'
+import {
+  CALL_EVENTS,
+  buildRingPayload,
+  callChannelName,
+  createCallId,
+  inboxChannelName,
+  matchesCall,
+} from './callSignaling'
+
+const RING_TIMEOUT_MS = 45000
+const ENDED_DISMISS_MS = 2500
+const SUBSCRIBE_TIMEOUT_MS = 8000
+const SEND_LINGER_MS = 1500
+const AUDIO_ELEMENT_ID = 'nexus-remote-audio'
+
+const INACTIVE_CALL_API = {
+  call: null,
+  isAvailable: false,
+  initiateCall: async () => {},
+  acceptCall: async () => {},
+  declineCall: () => {},
+  endCall: () => {},
+  toggleMute: () => {},
+}
+
+// Reuse one context across hot reloads so the provider and consumers never split.
+const CallContext = globalThis.__nexusCallContext || (globalThis.__nexusCallContext = createContext(INACTIVE_CALL_API))
+
+export function useCall() {
+  return useContext(CallContext) || INACTIVE_CALL_API
+}
+
+function subscribeChannel(channel) {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (status) => {
+      if (settled) return
+      settled = true
+      resolve(status)
+    }
+    try {
+      channel.subscribe((status) => {
+        if (['SUBSCRIBED', 'CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) finish(status)
+      })
+    } catch {
+      finish('CHANNEL_ERROR')
+    }
+    if (typeof window !== 'undefined') window.setTimeout(() => finish('TIMED_OUT'), SUBSCRIBE_TIMEOUT_MS)
+  })
+}
+
+// A short-lived channel pointed at one user's inbox. Realtime broadcast is not
+// replayed, so the channel must be fully subscribed before the message is sent
+// and kept alive briefly afterwards for it to flush.
+async function sendInbox(peerId, event, payload) {
+  const name = inboxChannelName(peerId)
+  if (!supabase || !name || typeof window === 'undefined') return false
+  const channel = supabase.channel(name, { config: { broadcast: { self: false } } })
+  const status = await subscribeChannel(channel)
+  let delivered = false
+  if (status === 'SUBSCRIBED') {
+    try {
+      await channel.send({ type: 'broadcast', event, payload })
+      delivered = true
+    } catch {
+      delivered = false
+    }
+  }
+  window.setTimeout(() => {
+    try { supabase.removeChannel(channel) } catch { /* channel already gone */ }
+  }, SEND_LINGER_MS)
+  return delivered
+}
+
+// iOS only unlocks media playback from inside a user gesture; a no-op play on
+// the (still empty) audio element unlocks it for the remote stream arriving later.
+function primeAudio() {
+  const audio = document.getElementById(AUDIO_ELEMENT_ID)
+  audio?.play?.().catch(() => {})
+}
+
+/**
+ * App-wide voice calling.
+ *
+ * Signalling rides on Supabase Realtime broadcast channels (no third-party
+ * service and no per-minute cap): a per-user inbox carries call control so the
+ * app can ring anywhere, and a per-call channel carries the WebRTC handshake.
+ * Media flows peer-to-peer, falling back to a TURN relay when one is configured.
+ */
+export function CallProvider({ children }) {
+  const { user } = useAuth()
+  const userId = user?.id ? String(user.id) : null
+
+  const [call, setCall] = useState(null)
+  const callRef = useRef(null)
+  const userIdRef = useRef(userId)
+  const pcRef = useRef(null)
+  const streamRef = useRef(null)
+  const callChannelRef = useRef(null)
+  const pendingIceRef = useRef([])
+  const remoteSetRef = useRef(false)
+  const durationTimerRef = useRef(null)
+  const ringTimerRef = useRef(null)
+  const dismissTimerRef = useRef(null)
+
+  userIdRef.current = userId
+
+  const setCallState = useCallback((next) => {
+    callRef.current = next
+    setCall(next)
+  }, [])
+
+  const patchCall = useCallback((patch) => {
+    const current = callRef.current
+    if (!current) return
+    callRef.current = { ...current, ...patch }
+    setCall(callRef.current)
+  }, [])
+
+  const cleanupMedia = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.clearTimeout(ringTimerRef.current)
+      window.clearTimeout(dismissTimerRef.current)
+      window.clearInterval(durationTimerRef.current)
+    }
+    ringTimerRef.current = null
+    dismissTimerRef.current = null
+    durationTimerRef.current = null
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    const pc = pcRef.current
+    if (pc) {
+      pc.onicecandidate = null
+      pc.ontrack = null
+      pc.onconnectionstatechange = null
+      try { pc.close() } catch { /* already closed */ }
+      pcRef.current = null
+    }
+    pendingIceRef.current = []
+    remoteSetRef.current = false
+    if (typeof document !== 'undefined') {
+      const audio = document.getElementById(AUDIO_ELEMENT_ID)
+      if (audio) audio.srcObject = null
+    }
+    const channel = callChannelRef.current
+    if (channel) {
+      try { supabase?.removeChannel(channel) } catch { /* already removed */ }
+      callChannelRef.current = null
+    }
+  }, [])
+
+  // Ends the local call. `notify` tells the other side; remote-initiated endings
+  // pass false so two clients cannot bounce a hangup back and forth.
+  const endCallInternal = useCallback((patch = {}, notify = true) => {
+    const current = callRef.current
+    if (!current) return
+    if (notify) sendInbox(current.peerId, CALL_EVENTS.HANGUP, { callId: current.id })
+    cleanupMedia()
+    setCallState({ ...current, state: 'ended', ...patch })
+    if (typeof window !== 'undefined') {
+      dismissTimerRef.current = window.setTimeout(() => {
+        if (callRef.current?.state === 'ended') setCallState(null)
+      }, ENDED_DISMISS_MS)
+    }
+  }, [cleanupMedia, setCallState])
+
+  const markConnected = useCallback(() => {
+    const current = callRef.current
+    if (!current || current.state === 'connected') return
+    if (typeof window !== 'undefined') {
+      window.clearTimeout(ringTimerRef.current)
+      window.clearInterval(durationTimerRef.current)
+    }
+    ringTimerRef.current = null
+    const startedAt = Date.now()
+    callRef.current = { ...current, state: 'connected', error: '', startedAt, duration: 0 }
+    setCall(callRef.current)
+    if (typeof window === 'undefined') return
+    durationTimerRef.current = window.setInterval(() => {
+      const active = callRef.current
+      if (!active || active.state !== 'connected') return
+      patchCall({ duration: Math.floor((Date.now() - active.startedAt) / 1000) })
+    }, 1000)
+  }, [patchCall])
+
+  const ensureStream = useCallback(async () => {
+    if (streamRef.current) return streamRef.current
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    streamRef.current = stream
+    return stream
+  }, [])
+
+  const createPeerConnection = useCallback(async () => {
+    if (typeof RTCPeerConnection === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Voice calls are not supported in this browser.')
+    }
+    const stream = await ensureStream()
+    const pc = new RTCPeerConnection(ICE_SERVERS)
+    pc.onicecandidate = (event) => {
+      if (!event.candidate) return
+      callChannelRef.current?.send({
+        type: 'broadcast',
+        event: CALL_EVENTS.ICE,
+        payload: { callId: callRef.current?.id, candidate: event.candidate },
+      })
+    }
+    pc.ontrack = (event) => {
+      const audio = document.getElementById(AUDIO_ELEMENT_ID)
+      if (!audio) return
+      audio.srcObject = event.streams[0]
+      audio.play?.().catch(() => {})
+    }
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') markConnected()
+      else if (pc.connectionState === 'failed') endCallInternal({ error: 'The call connection failed' })
+      else if (pc.connectionState === 'disconnected') endCallInternal({ error: 'The call connection was lost' })
+    }
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream))
+    pcRef.current = pc
+    return pc
+  }, [ensureStream, markConnected, endCallInternal])
+
+  const flushIce = useCallback(async () => {
+    const pc = pcRef.current
+    if (!pc || !remoteSetRef.current) return
+    const queued = pendingIceRef.current
+    pendingIceRef.current = []
+    for (const candidate of queued) {
+      try { await pc.addIceCandidate(candidate) } catch { /* stale candidate */ }
+    }
+  }, [])
+
+  // Callee side of the handshake.
+  const handleOffer = useCallback(async (payload) => {
+    const current = callRef.current
+    if (!current || !matchesCall(payload, current)) return
+    try {
+      const pc = await createPeerConnection()
+      await pc.setRemoteDescription(payload.sdp)
+      remoteSetRef.current = true
+      await flushIce()
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+      await callChannelRef.current?.send({
+        type: 'broadcast',
+        event: CALL_EVENTS.ANSWER,
+        payload: { callId: current.id, sdp: pc.localDescription },
+      })
+    } catch {
+      endCallInternal({ error: 'The call could not be answered' })
+    }
+  }, [createPeerConnection, flushIce, endCallInternal])
+
+  // Caller side of the handshake.
+  const handleAnswer = useCallback(async (payload) => {
+    const current = callRef.current
+    if (!current || !matchesCall(payload, current) || !pcRef.current) return
+    try {
+      await pcRef.current.setRemoteDescription(payload.sdp)
+      remoteSetRef.current = true
+      await flushIce()
+    } catch {
+      endCallInternal({ error: 'The call could not be established' })
+    }
+  }, [flushIce, endCallInternal])
+
+  const handleIce = useCallback((payload) => {
+    const current = callRef.current
+    if (!current || !matchesCall(payload, current) || !payload.candidate) return
+    if (!pcRef.current || !remoteSetRef.current) {
+      pendingIceRef.current.push(payload.candidate)
+      return
+    }
+    pcRef.current.addIceCandidate(payload.candidate).catch(() => {})
+  }, [])
+
+  const bindCallChannel = useCallback((channel) => {
+    channel
+      .on('broadcast', { event: CALL_EVENTS.OFFER }, ({ payload }) => { handleOffer(payload) })
+      .on('broadcast', { event: CALL_EVENTS.ANSWER }, ({ payload }) => { handleAnswer(payload) })
+      .on('broadcast', { event: CALL_EVENTS.ICE }, ({ payload }) => { handleIce(payload) })
+  }, [handleOffer, handleAnswer, handleIce])
+
+  const openCallChannel = useCallback(async (callId) => {
+    if (!supabase) return null
+    const channel = supabase.channel(callChannelName(callId), { config: { broadcast: { self: false } } })
+    bindCallChannel(channel)
+    const status = await subscribeChannel(channel)
+    if (status !== 'SUBSCRIBED') {
+      try { supabase.removeChannel(channel) } catch { /* already removed */ }
+      return null
+    }
+    callChannelRef.current = channel
+    return channel
+  }, [bindCallChannel])
+
+  const startOffer = useCallback(async (callId) => {
+    try {
+      const pc = await createPeerConnection()
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      await callChannelRef.current?.send({
+        type: 'broadcast',
+        event: CALL_EVENTS.OFFER,
+        payload: { callId, sdp: pc.localDescription },
+      })
+    } catch {
+      endCallInternal({ error: 'Microphone access was denied or is unavailable' })
+    }
+  }, [createPeerConnection, endCallInternal])
+
+  // ---- Caller (outgoing) ----
+
+  const initiateCall = useCallback(async (target = {}) => {
+    const peerId = String(target.peerId || '').trim()
+    if (!supabase || !userIdRef.current || callRef.current || !peerId) return
+
+    const id = createCallId()
+    setCallState({
+      id,
+      chatId: String(target.chatId || ''),
+      direction: 'outgoing',
+      peerId,
+      peerName: target.peerName || 'Contact',
+      peerAvatar: target.peerAvatar || null,
+      state: 'ringing',
+      error: '',
+      muted: false,
+      startedAt: null,
+      duration: 0,
+    })
+    primeAudio()
+
+    const channel = await openCallChannel(id)
+    if (!channel) {
+      setCallState(null)
+      return
+    }
+
+    const delivered = await sendInbox(peerId, CALL_EVENTS.RING, buildRingPayload({
+      callId: id,
+      chatId: target.chatId,
+      caller: {
+        id: userIdRef.current,
+        name: user?.fullName || user?.firstName || user?.email,
+        avatar: user?.avatarUrl,
+      },
+    }))
+    if (!delivered) {
+      endCallInternal({ error: 'That contact could not be reached' })
+      return
+    }
+
+    if (typeof window !== 'undefined') {
+      ringTimerRef.current = window.setTimeout(() => {
+        if (callRef.current?.id === id && callRef.current.state === 'ringing') endCallInternal({ error: 'No answer' })
+      }, RING_TIMEOUT_MS)
+    }
+  }, [openCallChannel, setCallState, endCallInternal, user])
+
+  // ---- Callee (incoming) ----
+
+  const handleRing = useCallback(async (payload) => {
+    if (!payload?.callId || !payload.fromUserId) return
+    if (callRef.current) {
+      sendInbox(payload.fromUserId, CALL_EVENTS.BUSY, { callId: payload.callId })
+      return
+    }
+    const channel = await openCallChannel(payload.callId)
+    if (!channel) {
+      sendInbox(payload.fromUserId, CALL_EVENTS.DECLINE, { callId: payload.callId })
+      return
+    }
+    setCallState({
+      id: String(payload.callId),
+      chatId: String(payload.chatId || ''),
+      direction: 'incoming',
+      peerId: String(payload.fromUserId),
+      peerName: payload.fromName || 'Contact',
+      peerAvatar: payload.fromAvatar || null,
+      state: 'ringing',
+      error: '',
+      muted: false,
+      startedAt: null,
+      duration: 0,
+    })
+    if (typeof window !== 'undefined') {
+      ringTimerRef.current = window.setTimeout(() => {
+        if (callRef.current?.id === payload.callId && callRef.current.state === 'ringing') {
+          endCallInternal({ error: 'Missed call' })
+        }
+      }, RING_TIMEOUT_MS)
+    }
+  }, [openCallChannel, setCallState, endCallInternal])
+
+  const handleReady = useCallback(async (payload) => {
+    const current = callRef.current
+    if (!current || current.direction !== 'outgoing' || !matchesCall(payload, current)) return
+    if (typeof window !== 'undefined') window.clearTimeout(ringTimerRef.current)
+    ringTimerRef.current = null
+    patchCall({ state: 'connecting', error: '' })
+    await startOffer(current.id)
+  }, [patchCall, startOffer])
+
+  const handleDecline = useCallback((payload) => {
+    const current = callRef.current
+    if (!current || !matchesCall(payload, current)) return
+    endCallInternal({ error: 'Call declined' })
+  }, [endCallInternal])
+
+  const handleBusy = useCallback((payload) => {
+    const current = callRef.current
+    if (!current || !matchesCall(payload, current)) return
+    endCallInternal({ error: 'That contact is already on a call' })
+  }, [endCallInternal])
+
+  const handleHangup = useCallback((payload) => {
+    const current = callRef.current
+    if (!current || !matchesCall(payload, current)) return
+    endCallInternal({ error: '' }, false)
+  }, [endCallInternal])
+
+  // Always-on inbox so a call can ring on any page while signed in.
+  useEffect(() => {
+    if (!supabase || !userId) return undefined
+    const channel = supabase.channel(inboxChannelName(userId), { config: { broadcast: { self: false } } })
+    channel
+      .on('broadcast', { event: CALL_EVENTS.RING }, ({ payload }) => { handleRing(payload) })
+      .on('broadcast', { event: CALL_EVENTS.READY }, ({ payload }) => { handleReady(payload) })
+      .on('broadcast', { event: CALL_EVENTS.DECLINE }, ({ payload }) => { handleDecline(payload) })
+      .on('broadcast', { event: CALL_EVENTS.BUSY }, ({ payload }) => { handleBusy(payload) })
+      .on('broadcast', { event: CALL_EVENTS.HANGUP }, ({ payload }) => { handleHangup(payload) })
+      .subscribe()
+
+    return () => {
+      try { supabase.removeChannel(channel) } catch { /* already removed */ }
+      cleanupMedia()
+      setCallState(null)
+    }
+  }, [userId, handleRing, handleReady, handleDecline, handleBusy, handleHangup, cleanupMedia, setCallState])
+
+  // ---- Public API ----
+
+  const acceptCall = useCallback(async () => {
+    const current = callRef.current
+    if (!current || current.direction !== 'incoming' || current.state !== 'ringing') return
+    if (typeof window !== 'undefined') window.clearTimeout(ringTimerRef.current)
+    ringTimerRef.current = null
+    patchCall({ state: 'connecting', error: '' })
+    primeAudio()
+    try {
+      await ensureStream()
+    } catch {
+      sendInbox(current.peerId, CALL_EVENTS.DECLINE, { callId: current.id })
+      endCallInternal({ error: 'Microphone access is required to take the call' })
+      return
+    }
+    await sendInbox(current.peerId, CALL_EVENTS.READY, { callId: current.id })
+  }, [ensureStream, patchCall, endCallInternal])
+
+  const declineCall = useCallback(() => {
+    const current = callRef.current
+    if (current) sendInbox(current.peerId, CALL_EVENTS.DECLINE, { callId: current.id })
+    cleanupMedia()
+    setCallState(null)
+  }, [cleanupMedia, setCallState])
+
+  const endCall = useCallback(() => {
+    endCallInternal({ error: '' })
+  }, [endCallInternal])
+
+  const toggleMute = useCallback(() => {
+    const current = callRef.current
+    const stream = streamRef.current
+    if (!current || !stream) return
+    const muted = !current.muted
+    stream.getAudioTracks().forEach((track) => { track.enabled = !muted })
+    patchCall({ muted })
+  }, [patchCall])
+
+  const value = useMemo(() => ({
+    call,
+    isAvailable: Boolean(supabase),
+    initiateCall,
+    acceptCall,
+    declineCall,
+    endCall,
+    toggleMute,
+  }), [call, initiateCall, acceptCall, declineCall, endCall, toggleMute])
+
+  return (
+    <CallContext.Provider value={value}>
+      {children}
+      {/* Remote audio output for the active call. Rendered here (not in a chat
+          view) so the call keeps playing while the user navigates the app. */}
+      <audio id={AUDIO_ELEMENT_ID} autoPlay />
+    </CallContext.Provider>
+  )
+}

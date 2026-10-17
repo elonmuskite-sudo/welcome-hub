@@ -4,6 +4,7 @@ import ChatSidebar from '../components/chat/ChatSidebar'
 import BottomNav, { getActiveTabFromPath } from '../components/chat/BottomNav'
 import AppTopNav from '../components/chat/AppTopNav'
 import NotificationStack from '../components/chat/NotificationStack'
+import VoiceCallOverlay from '../components/chat/VoiceCallOverlay'
 import Header from '../components/Header'
 import { requestNotificationPermission, showSystemNotification } from '../lib/notifications'
 import { startRealtimeListeners, stopRealtimeListeners } from '../lib/persistence'
@@ -44,7 +45,7 @@ export default function ChatLayout() {
   }, [navigate])
 
   return (
-    <div className="relative h-[100dvh] flex flex-col bg-background overflow-hidden">
+    <div className="chat-shell relative flex flex-col bg-background overflow-hidden">
       <Header showSignIn={false}>
         <AppTopNav variant="user" />
       </Header>
@@ -62,6 +63,9 @@ export default function ChatLayout() {
       <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
 
       <NotificationStack />
+
+      {/* Rendered here rather than per-chat so an incoming call rings on any page. */}
+      <VoiceCallOverlay />
     </div>
   )
 }

@@ -45,6 +45,7 @@
 
     /* Chat layout metrics (kept in sync by useViewportInsets) */
     --chat-gap: 8px;
+    --vv-height: 100dvh;
     --bottom-nav-height: 64px;
     --keyboard-inset: 0px;
     --chat-bottom-offset: 72px;
@@ -215,6 +216,27 @@
     min-height: 36px;
   }
   .chat-surface { box-shadow: 0 4px 20px hsl(var(--foreground) / 0.06); }
+  /* App shell for the chat routes. On mobile it follows the *visible* viewport
+     (`--vv-height`, written by useViewportInsets) so the composer always ends up
+     on screen — above the bottom navigation when the keyboard is closed, and at
+     the keyboard's top edge while typing. Desktop keeps the full dynamic
+     viewport unit. */
+  .chat-shell {
+    height: 100dvh;
+  }
+  @media (max-width: 767px) {
+    .chat-shell {
+      height: var(--vv-height, 100dvh);
+    }
+  }
+  /* While the keyboard is up the shell already ends at the keyboard, so the
+     bottom navigation would overlap the composer. Hide it and let the composer
+     sit flush above the keyboard; it returns when the keyboard closes. */
+  @media (max-width: 767px) {
+    .keyboard-open [data-chat-bottom-nav] {
+      display: none;
+    }
+  }
   .chat-enter { animation: chat-enter 220ms ease-out both; }
   .chat-button:active:not(:disabled) { transform: scale(0.96); }
   /* Composer keeps an 8px rhythm and respects landscape/notch safe areas. */
