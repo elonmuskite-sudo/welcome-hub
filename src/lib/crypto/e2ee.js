@@ -91,7 +91,7 @@ async function getChatKey(chatId) {
   )
 
   let peerKey = peerPublicKeys.get(chatId)
-  if (!peerKey) throw new Error('Secure key exchange is not available for this conversation. No encrypted message was sent.')
+  if (!peerKey) throw new Error('This chat has no encryption key yet, so nothing was sent. Turn off End-to-End Encryption in Settings → Privacy to send messages in this conversation.')
 
   const peerPublicKey = await importPublicKey(peerKey)
   return deriveSharedKey(privateKey, peerPublicKey)
@@ -119,21 +119,20 @@ export async function encryptMessage(chatId, plaintext) {
   }
 }
 
+// Throws when a message cannot be decrypted (missing peer key, malformed
+// payload, or a payload from another key) so the caller can decide whether to
+// retry later or display a placeholder. Never returns a fake plaintext string.
 export async function decryptMessage(chatId, content, isEncrypted) {
   if (!isEncrypted || !isE2EEEnabled()) return content
 
-  try {
-    const { iv, data } = JSON.parse(content)
-    const key = await getChatKey(chatId)
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: fromBase64(iv) },
-      key,
-      fromBase64(data)
-    )
-    return new TextDecoder().decode(decrypted)
-  } catch {
-    return '[Encrypted message — unable to decrypt]'
-  }
+  const { iv, data } = JSON.parse(content)
+  const key = await getChatKey(chatId)
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: fromBase64(iv) },
+    key,
+    fromBase64(data)
+  )
+  return new TextDecoder().decode(decrypted)
 }
 
 export function generateSecurityCode(chatId) {

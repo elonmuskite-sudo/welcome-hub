@@ -17,6 +17,10 @@ import VerificationBadge from './VerificationBadge'
 import { peerIdOf, chatDisplayName } from './ChatListItem'
 import { resolveMessages, decodeContent, encodeReply } from '../../lib/chatProtocol'
 
+// Single placeholder for any encrypted message we cannot read yet (missing peer
+// key or a payload from another key), so pending and failed never look different.
+const UNDECRYPTABLE_MESSAGE = '🔒 Encrypted message — unable to decrypt'
+
 // eslint-disable-next-line react/prop-types
 export default function ChatView({ chat, onBack, autoStartCall = false }) {
   const [messages, setMessages] = useState(chat?.messages || [])
@@ -27,6 +31,10 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
   const [search, setSearch] = useState('')
   const [reacting, setReacting] = useState(false)
   const messagesEndRef = useRef(null)
+  // Message ids already attempted in this chat; keeps the decrypt effect from
+  // retrying a failure on every render while still allowing a retry after the
+  // next realtime refetch brings a fresh message list.
+  const decryptAttemptsRef = useRef(new Set())
   const [chatWallpaper] = useSetting('chatWallpaper', 'nature')
   const wallpaper = getWallpaperById(chatWallpaper)
 
@@ -72,29 +80,41 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
     return () => viewport.removeEventListener('resize', onResize)
   }, [scrollToBottom])
 
+  // Cached plaintext and in-flight attempts belong to one conversation only.
+  useEffect(() => {
+    setDecryptedMessages({})
+    decryptAttemptsRef.current = new Set()
+  }, [chat?.id])
+
+  // A fresh message list (realtime sync, refetch, or a local append) clears the
+  // attempt set so messages that failed before are retried once — never in a loop.
+  useEffect(() => {
+    decryptAttemptsRef.current = new Set()
+  }, [messages])
+
   useEffect(() => {
     if (!isE2EEEnabled()) return
-    const pending = messages.filter((msg) => msg.encrypted && !decryptedMessages[msg.id])
+    const pending = messages.filter((msg) => msg.encrypted && !decryptedMessages[msg.id] && !decryptAttemptsRef.current.has(msg.id))
     if (pending.length === 0) return
+    pending.forEach((msg) => decryptAttemptsRef.current.add(msg.id))
 
     const controller = { cancelled: false }
     ;(async () => {
       const results = await Promise.all(
         pending.map(async (msg) => {
           try {
-            const decrypted = await decryptMessage(chat.id, msg.content, true)
-            return { id: msg.id, decrypted }
+            return { id: msg.id, text: await decryptMessage(chat.id, msg.content, true) }
           } catch {
-            return { id: msg.id, decrypted: '🔒 Decryption failed' }
+            return { id: msg.id, text: null }
           }
         })
       )
       if (controller.cancelled) return
       setDecryptedMessages((prev) => {
         const next = { ...prev }
-        for (const { id, decrypted } of results) {
-          next[id] = decrypted
-        }
+        // Only successes are cached; failures stay uncached and fall back to the
+        // shared placeholder until a later retry succeeds.
+        for (const { id, text } of results) if (text != null) next[id] = text
         return next
       })
     })()
@@ -161,18 +181,25 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
     return true
   }, [chat.id, user?.id, reply])
 
-  const handleReact = async (message, emoji) => {
+  const handleReact = useCallback(async (message, emoji) => {
     if (reacting) return
     setReacting(true)
     setSendError('')
     try {
+      if (!user?.id) throw new Error('Sign in to react to messages.')
       const active = !(message.reactions || []).some(r => r.emoji === emoji && r.userId === String(user?.id))
       const event = await toggleMessageReaction(chat.id, message.id, emoji, user?.id, active)
       setMessages(prev => prev.some(m => m.id === event.id) ? prev : [...prev, event])
     } catch (error) { setSendError(error.message || 'Could not save this reaction.') }
     finally { setReacting(false) }
-  }
-  const visibleMessages = resolveMessages(messages).map(message => ({ ...message, content: message.encrypted ? decryptedMessages[message.id] || 'Encrypted message — unable to decrypt' : message.content })).filter(message => !search || decodeContent(message.content).text.toLowerCase().includes(search.toLowerCase()))
+  }, [reacting, user?.id, chat.id])
+
+  const visibleMessages = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return resolveMessages(messages)
+      .map(message => ({ ...message, content: message.encrypted ? decryptedMessages[message.id] || UNDECRYPTABLE_MESSAGE : message.content }))
+      .filter(message => !query || decodeContent(message.content).text.toLowerCase().includes(query))
+  }, [messages, decryptedMessages, search])
 
   const wallpaperStyle = useMemo(() => (
     wallpaper.url
@@ -202,7 +229,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
           <div className="min-w-0">
             <div className="flex items-center gap-1 min-w-0">
               <h2 className="font-bold text-foreground truncate text-sm sm:text-base">{chatDisplayName(chat, user?.id)}</h2>
-              {peerIdOf(chat, user?.id) && <VerificationBadge userId={peerIdOf(chat, user?.id)} className="w-4 h-4 flex-shrink-0" />}
+              {peerId && <VerificationBadge userId={peerId} className="w-4 h-4 flex-shrink-0" />}
               {chat.encrypted && (
                 <LockClosedIcon className="w-3.5 h-3.5 text-primary flex-shrink-0" title="End-to-end encrypted" />
               )}
@@ -226,7 +253,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
         </div>
       </div>
 
-      {showSearch && <div className="flex items-center gap-2 p-3 bg-card border-b border-border chat-enter"><Search className="w-4 h-4 text-muted-foreground" /><input autoFocus aria-label="Search messages" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search messages" className="flex-1 min-w-0 bg-muted text-foreground px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring" /><ChatButton title="Close search" onClick={() => { setSearch(''); setShowSearch(false) }} className="w-9"><X className="w-4 h-4" /></ChatButton></div>}
+      {showSearch && <div className="flex items-center gap-2 p-3 bg-card border-b border-border chat-enter"><Search className="w-4 h-4 text-muted-foreground" /><input autoFocus type="search" enterKeyHint="search" autoComplete="off" spellCheck="false" aria-label="Search messages" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search messages" className="flex-1 min-w-0 bg-muted text-foreground px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring" /><ChatButton title="Close search" onClick={() => { setSearch(''); setShowSearch(false) }} className="w-9"><X className="w-4 h-4" /></ChatButton></div>}
       <div className="flex-1 min-h-0 min-w-0 relative overflow-hidden" style={wallpaperStyle}>
         <div className="absolute inset-0 bg-card/60 dark:bg-background/70 pointer-events-none" />
 

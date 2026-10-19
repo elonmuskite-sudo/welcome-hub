@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Smile, Sticker, Paperclip, Mic, Send, Square, X, LoaderCircle, Reply } from 'lucide-react'
 import StickerPicker from './StickerPicker'
 import EmojiPicker from './EmojiPicker'
@@ -55,15 +55,30 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
     }
   }, [])
   useEffect(() => { if (reply) textareaRef.current?.focus() }, [reply])
-  useEffect(() => {
+
+  // Auto-grows the composer up to a cap derived from the *visible* viewport: on
+  // mobile the keyboard shrinks visualViewport but not window.innerHeight, so
+  // using innerHeight would let the composer grow past the space above the keyboard.
+  const resizeTextarea = useCallback(() => {
     const el = textareaRef.current
     if (!el || typeof window === 'undefined') return
-    const cap = Math.min(window.innerHeight * 0.4, 180)
+    const available = window.visualViewport?.height || window.innerHeight
+    const cap = Math.min(available * 0.4, 180)
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, cap)}px`
     el.style.overflowY = el.scrollHeight > cap ? 'auto' : 'hidden'
     el.scrollTop = el.scrollHeight
-  }, [inputText])
+  }, [])
+
+  useEffect(() => { resizeTextarea() }, [inputText, resizeTextarea])
+
+  // Re-fit when the keyboard opens or closes, since the available height changed.
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (!viewport) return
+    viewport.addEventListener('resize', resizeTextarea)
+    return () => viewport.removeEventListener('resize', resizeTextarea)
+  }, [resizeTextarea])
 
   const send = async data => {
     if (isSending) return false
