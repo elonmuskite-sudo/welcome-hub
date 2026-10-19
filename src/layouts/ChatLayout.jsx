@@ -50,7 +50,7 @@ export default function ChatLayout() {
         <AppTopNav variant="user" />
       </Header>
 
-      <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden pb-[var(--chat-bottom-offset,84px)] md:pb-0">
+      <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden pb-[var(--chat-bottom-offset,72px)] md:pb-0">
         <div className="hidden md:flex md:w-96 flex-col bg-card border-r border-border">
           <ChatSidebar activeTab={activeTab} onTabChange={handleTabChange} />
         </div>

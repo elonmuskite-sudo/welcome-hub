@@ -27,15 +27,17 @@ and the composer always renders fully visible above the on-screen keyboard.
 | File | Change |
 |------|--------|
 | [src/hooks/useViewportInsets.js](file:///c:/Users/User$/Downloads/welcome-hub/src/hooks/useViewportInsets.js) | **New.** Publishes `--vv-height`, `--keyboard-inset`, `--bottom-nav-height`, `--chat-bottom-offset`, and toggles the `keyboard-open` class. |
-| [src/layouts/ChatLayout.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/layouts/ChatLayout.jsx) | Calls the hook; root is `.chat-shell`; content padding is `pb-[var(--chat-bottom-offset,84px)] md:pb-0`. |
+| [src/layouts/ChatLayout.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/layouts/ChatLayout.jsx) | Calls the hook; root is `.chat-shell`; content padding is `pb-[var(--chat-bottom-offset,72px)] md:pb-0`. |
 | [src/components/chat/AppBottomNav.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/AppBottomNav.jsx) | Adds `data-chat-bottom-nav` so the nav can be measured. |
 | [src/components/chat/MessageInput.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/MessageInput.jsx) | 8px gaps, uniform `w-11 h-11` buttons, textarea autogrow with `min(40vh,180px)` cap, `chat-composer` safe-area padding. |
 | [src/components/chat/StickerPicker.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/StickerPicker.jsx) | Inline in composer flow; `max-h-[min(40vh,220px)]` + internal scroll. |
-| [src/components/chat/ChatView.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/ChatView.jsx) | Re-scrolls to bottom on keyboard resize; header name uses `chatDisplayName`. |
+| [src/components/chat/ChatView.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/ChatView.jsx) | Re-scrolls to bottom on keyboard resize; header name uses `chatDisplayName`; header, search bar, message list and error bar use the shared `.chat-page-x` gutter; list is `overflow-x-hidden`. |
+| [src/components/chat/MessageBubble.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/MessageBubble.jsx) | Bubble padding normalized to `px-3.5 py-2.5 sm:px-4 sm:py-3`. |
+| [src/layouts/ChatLayout.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/layouts/ChatLayout.jsx) | Bottom padding fallback aligned to the documented `72px`. |
 | [src/components/chat/ChatListItem.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/ChatListItem.jsx) | Adds `chatDisplayName`; list row, avatar `alt` and memo comparator use it. |
 | [src/lib/persistence.js](file:///c:/Users/User$/Downloads/welcome-hub/src/lib/persistence.js) | Reads/writes `participant_names` on `chats`. |
 | [src/components/chat/ChatSidebar.jsx](file:///c:/Users/User$/Downloads/welcome-hub/src/components/chat/ChatSidebar.jsx) | Passes `participantNames` when creating a chat. |
-| [src/index.css](file:///c:/Users/User$/Downloads/welcome-hub/src/index.css) | Declares layout vars; `.chat-composer`, `.chat-textarea` component classes. |
+| [src/index.css](file:///c:/Users/User$/Downloads/welcome-hub/src/index.css) | Declares layout vars (incl. the responsive `--chat-page-pad`); `.chat-page-x`, `.chat-composer`, `.chat-textarea` component classes. |
 | [supabase/migrations/20261017010000_chat_participant_names.sql](file:///c:/Users/User$/Downloads/welcome-hub/supabase/migrations/20261017010000_chat_participant_names.sql) | Adds `chats.participant_names jsonb` + idempotent backfill. |
 
 ---
@@ -47,6 +49,7 @@ CSS custom properties on `:root`, written by `useViewportInsets`:
 | Var | Meaning | Default |
 |-----|---------|---------|
 | `--chat-gap` | Standardized spacing unit | `8px` |
+| `--chat-page-pad` | Horizontal gutter for the messaging surface (responsive, see §4) | `12px` |
 | `--vv-height` | Height of the *visible* viewport; the mobile app shell height | `100dvh` |
 | `--bottom-nav-height` | Measured height of `[data-chat-bottom-nav]` | `64px` |
 | `--keyboard-inset` | px obscured by the on-screen keyboard | `0px` |
@@ -76,7 +79,49 @@ CSS custom properties on `:root`, written by `useViewportInsets`:
 
 ---
 
-## 4. Verification
+## 4. Mobile padding scale (320–768px)
+
+The messaging surface has **one** horizontal gutter, driven by `--chat-page-pad`
+on `:root`. It steps up with the viewport so the layout uses the app's existing
+4px/8px rhythm instead of ad-hoc values:
+
+| Viewport width | `--chat-page-pad` | Rationale |
+|---|---|---|
+| 320–359px | `12px` | 320px floor (iPhone SE 1st gen); keeps the composer textarea usable next to four 44px buttons |
+| 360–639px | `16px` | App's standard mobile gutter — Galaxy S24 (360), iPhone SE 2/3 (375), iPhone 15 (393) |
+| ≥ 640px (`sm`) | `24px` | App's desktop gutter (`px-4 sm:px-6`), reused inside the desktop chat shell |
+
+Every full-width row uses the `.chat-page-x` helper, which applies
+`max(var(--chat-page-pad), env(safe-area-inset-*))` so a landscape notch or
+rounded corner widens the gutter when it needs to and never clips content.
+
+| Element | Applied padding |
+|---|---|
+| Contact header | `.chat-page-x` + `py-2 sm:py-3` |
+| Search bar | `.chat-page-x` + `py-3` |
+| Message list container | `.chat-page-x` + `py-5` (+ `overflow-x-hidden`) |
+| Send-error alert | `.chat-page-x` + `py-2` + `break-words` |
+| Composer (`.chat-composer`) | vertical `--chat-gap` (8px), horizontal `--chat-page-pad` |
+| Message bubble | `px-3.5 py-2.5 sm:px-4 sm:py-3` |
+
+Notes:
+
+- The header, search bar, message list and composer therefore share identical
+  left/right gutters, so bubbles line up with the composer textarea.
+- Message bubbles sit **inside** the list gutter, so a bubble is never against a
+  screen edge: minimum text inset is `12 (gutter) + 14 (bubble) = 26px` at 320px.
+- No horizontal overflow: the list has `overflow-x-hidden`, every flex child that
+  can hold long content is `min-w-0`, text uses `break-words`/`whitespace-pre-wrap`,
+  and file names, reply previews and headers use `truncate`.
+- Widths after padding at the smallest target (320px): list content `296px`,
+  bubble `≤ 85%` → `≤ 251px`, composer textarea `≈ 96px` (four 44px buttons +
+  three 8px gaps = 200px).
+- The composer's 8px bottom gap above the bottom navigation is unchanged; only the
+  horizontal gutter was raised from 8px to match the rest of the surface.
+
+---
+
+## 5. Verification
 
 Automated (executed in this environment):
 
@@ -100,7 +145,7 @@ this environment; listed so they can be run before release):
 
 ---
 
-## 5. Edge cases handled
+## 6. Edge cases handled
 
 - **Keyboard on iOS vs Android:** iOS is detected from the shrinking visual
   viewport (+ `offsetTop` for its visual-viewport scroll), Android from the
@@ -132,7 +177,7 @@ this environment; listed so they can be run before release):
 
 ---
 
-## 6. Open items
+## 7. Open items
 
 - **Supabase MCP** `integrated_web-dev` returns `Forbidden (500000)`; migration work
   was done with the Supabase CLI instead.

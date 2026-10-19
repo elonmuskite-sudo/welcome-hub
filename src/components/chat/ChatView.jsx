@@ -214,7 +214,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 h-full bg-background">
-      <div className="bg-card border-b border-border px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between flex-shrink-0">
+      <div className="bg-card border-b border-border chat-page-x py-2 sm:py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <ChatButton
             title="Back to chats"
@@ -253,12 +253,12 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
         </div>
       </div>
 
-      {showSearch && <div className="flex items-center gap-2 p-3 bg-card border-b border-border chat-enter"><Search className="w-4 h-4 text-muted-foreground" /><input autoFocus type="search" enterKeyHint="search" autoComplete="off" spellCheck="false" aria-label="Search messages" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search messages" className="flex-1 min-w-0 bg-muted text-foreground px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring" /><ChatButton title="Close search" onClick={() => { setSearch(''); setShowSearch(false) }} className="w-9"><X className="w-4 h-4" /></ChatButton></div>}
+      {showSearch && <div className="flex items-center gap-2 chat-page-x py-3 bg-card border-b border-border chat-enter"><Search className="w-4 h-4 text-muted-foreground" /><input autoFocus type="search" enterKeyHint="search" autoComplete="off" spellCheck="false" aria-label="Search messages" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search messages" className="flex-1 min-w-0 bg-muted text-foreground px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring" /><ChatButton title="Close search" onClick={() => { setSearch(''); setShowSearch(false) }} className="w-9"><X className="w-4 h-4" /></ChatButton></div>}
       <div className="flex-1 min-h-0 min-w-0 relative overflow-hidden" style={wallpaperStyle}>
         <div className="absolute inset-0 bg-card/60 dark:bg-background/70 pointer-events-none" />
 
         <div className="relative h-full flex flex-col min-h-0">
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-5 space-y-3 sm:space-y-4 scroll-smooth">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden chat-page-x py-5 space-y-3 sm:space-y-4 scroll-smooth">
             {visibleMessages.length === 0 ? (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center">
@@ -284,7 +284,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
         </div>
       </div>
 
-      {sendError && <p role="alert" className="border-t border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">{sendError}</p>}
+      {sendError && <p role="alert" className="border-t border-destructive/30 bg-destructive/10 chat-page-x py-2 text-sm text-destructive break-words">{sendError}</p>}
       <MessageInput onSendMessage={handleSendMessage} reply={reply} onCancelReply={() => setReply(null)} chatId={chat.id} />
     </div>
   )

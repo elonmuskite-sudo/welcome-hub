@@ -49,6 +49,18 @@
     --bottom-nav-height: 64px;
     --keyboard-inset: 0px;
     --chat-bottom-offset: 72px;
+    /* Horizontal gutter for the whole messaging surface — contact header,
+       search bar, message list and composer. 12px is the floor at 320px. */
+    --chat-page-pad: 12px;
+  }
+
+  /* Chat gutters follow the app's rhythm as the screen widens: 16px from 360px
+     (Galaxy S24) and the app's 24px desktop gutter from sm (640px). */
+  @media (min-width: 360px) {
+    :root { --chat-page-pad: 16px; }
+  }
+  @media (min-width: 640px) {
+    :root { --chat-page-pad: 24px; }
   }
 
   /* Dark theme (Telegram-style) */
@@ -239,10 +251,18 @@
   }
   .chat-enter { animation: chat-enter 220ms ease-out both; }
   .chat-button:active:not(:disabled) { transform: scale(0.96); }
-  /* Composer keeps an 8px rhythm and respects landscape/notch safe areas. */
+  /* Horizontal gutter for every full-width chat row (contact header, search bar,
+     message list, error bar). Floors at --chat-page-pad and grows to the device
+     safe area in landscape so nothing sits under a notch or rounded corner. */
+  .chat-page-x {
+    padding-left: max(var(--chat-page-pad), env(safe-area-inset-left));
+    padding-right: max(var(--chat-page-pad), env(safe-area-inset-right));
+  }
+  /* Composer keeps the 8px vertical rhythm and adopts the shared chat gutter
+     horizontally so it lines up with the header and message list. */
   .chat-composer {
-    padding: var(--chat-gap) max(var(--chat-gap), env(safe-area-inset-right))
-      var(--chat-gap) max(var(--chat-gap), env(safe-area-inset-left));
+    padding: var(--chat-gap) max(var(--chat-page-pad), env(safe-area-inset-right))
+      var(--chat-gap) max(var(--chat-page-pad), env(safe-area-inset-left));
   }
   /* Textarea auto-grows; the JS hook mirrors scrollHeight while this cap keeps
      the composer from ever exceeding the available viewport. */

@@ -217,7 +217,7 @@ export default function UniversalEmojiPicker({ onSelect, onClose }) {
       {/* Click outside to close */}
       <div className="absolute inset-0 cursor-default" onClick={onClose} />
 
-      <div className="relative bg-card w-full max-w-sm rounded-2xl shadow-xl overflow-hidden border border-border flex flex-col h-[400px] z-10 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative bg-card w-full max-w-sm rounded-2xl shadow-xl overflow-hidden border border-border flex flex-col h-[min(400px,calc(100dvh_-_2rem))] z-10 animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="p-3 border-b border-border flex items-center justify-between bg-card">
           <span className="font-bold text-foreground text-sm">Select Reaction Emoji</span>

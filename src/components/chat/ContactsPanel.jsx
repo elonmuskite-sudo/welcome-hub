@@ -244,7 +244,7 @@ export default function ContactsPanel() {
             className="absolute inset-0 cursor-default" 
             onClick={() => setShowAddModal(false)}
           />
-          <div className="relative bg-card w-full max-w-md rounded-2xl shadow-xl overflow-hidden border border-border z-10 animate-in fade-in zoom-in-95 duration-200">
+          <div className="relative bg-card w-full max-w-md rounded-2xl shadow-xl overflow-hidden border border-border z-10 flex max-h-[calc(100dvh_-_2rem)] flex-col animate-in fade-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-border flex items-center justify-between bg-card">
               <h3 className="font-bold text-foreground text-lg">Add New Contact</h3>
               <button 
@@ -254,7 +254,7 @@ export default function ContactsPanel() {
                 <XMarkIcon className="w-5 h-5 text-muted-foreground" />
               </button>
             </div>
-            <form onSubmit={handleAddContact} className="p-6 space-y-4">
+            <form onSubmit={handleAddContact} className="p-6 space-y-4 min-h-0 overflow-y-auto">
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Nexus ID</label>
                 <input

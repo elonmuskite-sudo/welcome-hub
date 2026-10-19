@@ -117,7 +117,7 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting }) {
         className={
           isSticker
             ? 'min-w-0 max-w-[85%] sm:max-w-[70%]'
-            : `min-w-0 max-w-[85%] sm:max-w-[65%] px-3 sm:px-4 py-2 rounded-xl ${
+            : `min-w-0 max-w-[85%] sm:max-w-[65%] px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl ${
                 isOwn
                   ? 'bg-primary text-primary-foreground rounded-tr-none shadow-sm'
                   : 'bg-muted text-foreground rounded-tl-none shadow-sm'

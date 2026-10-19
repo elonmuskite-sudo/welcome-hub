@@ -28,7 +28,7 @@ export default function Header({ showSignIn = true, children }) {
   return (
     <header className="sticky top-0 z-50 mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-3 border-b border-border bg-card/80 text-foreground shadow-[0_18px_50px_rgba(15,23,42,0.10)] backdrop-blur-xl px-4 py-4 transition-all sm:px-6 lg:px-8">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="brand-badge flex h-13 w-13 shrink-0 items-center justify-center rounded-[18px] bg-gradient-to-br from-sky-500 via-cyan-400 to-blue-600 p-1 shadow-[0_18px_45px_rgba(59,130,246,0.30)]">
+        <div className="brand-badge flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[18px] bg-gradient-to-br from-sky-500 via-cyan-400 to-blue-600 p-1 shadow-[0_18px_45px_rgba(59,130,246,0.30)]">
           <div className={`flex h-full w-full items-center justify-center rounded-[14px] bg-slate-950/90 shadow-[inset_0_1px_15px_rgba(255,255,255,0.18)] ${logoStyle}`}>
             <img src="/logo.png" alt="Nexus logo" className="h-8 w-8 rounded-lg object-contain" />
           </div>
