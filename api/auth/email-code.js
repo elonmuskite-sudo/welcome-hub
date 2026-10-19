@@ -60,11 +60,17 @@ function nativeVerificationType(data) {
   return data?.properties?.verification_type || data?.verification_type || ''
 }
 
+// Accounts are resolved through the members mirror (unique, indexed email) instead of
+// paging auth.users, which only ever inspected the first 1000 accounts.
 async function findAuthUserByEmail(admin, email) {
   try {
-    const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-    if (error) return null
-    return data?.users?.find((item) => normalizedEmail(item.email) === email) || null
+    const { data, error } = await admin
+      .from('members')
+      .select('id, email_verified')
+      .eq('email', email)
+      .maybeSingle()
+    if (error || !data) return null
+    return { id: data.id, emailVerified: Boolean(data.email_verified) }
   } catch {
     return null
   }
@@ -196,8 +202,8 @@ export default async function handler(req, res) {
     const firstName = String(body.firstName || '').trim()
     const lastName = String(body.lastName || '').trim()
     const memberId = String(body.memberId || '')
-    if (password.length < 8 || firstName.length > 128 || lastName.length > 128 || !/^10\d{8}$/.test(memberId)) {
-      return json(res, 400, { error: 'Provide a valid name, an 8-character password, and a valid member ID.' })
+    if (firstName.length > 128 || lastName.length > 128 || !/^10\d{8}$/.test(memberId)) {
+      return json(res, 400, { error: 'Provide a valid name and member ID.' })
     }
     const { data, error } = await admin.auth.admin.createUser({
       email,
@@ -207,8 +213,14 @@ export default async function handler(req, res) {
     })
     if (error) {
       const existing = await findAuthUserByEmail(admin, email)
-      if (!existing || existing.email_confirmed_at) {
-        return json(res, 400, { error: error.message })
+      if (!existing) return json(res, 400, { error: error.message })
+      if (existing.emailVerified) {
+        // A confirmed account must never be re-registered with a new password.
+        // The code lets the client point at the sign-in flow instead.
+        return json(res, 400, {
+          error: 'An account with this email address already exists.',
+          code: 'email_already_registered',
+        })
       }
       user = existing
     } else {

@@ -24,26 +24,6 @@ async function sha256Hex(input: string) {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-async function isPasswordPwned(password: string) {
-  const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(password))
-  const hash = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase()
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 10000)
-  let response: Response
-  try {
-    response = await fetch(`https://api.pwnedpasswords.com/range/${hash.slice(0, 5)}`, {
-      headers: { 'Add-Padding': 'true' },
-      signal: controller.signal,
-    })
-  } finally {
-    clearTimeout(timeout)
-  }
-  if (!response.ok) throw new Error(`Pwned Passwords API returned HTTP ${response.status}.`)
-  const suffix = hash.slice(5)
-  const ranges = await response.text()
-  return ranges.split(/\r?\n/).some((line) => line.split(':')[0]?.toUpperCase() === suffix)
-}
-
 async function checkSendLimit(admin: ReturnType<typeof createAdminClient>, purpose: string, email: string) {
   const bucketKey = await sha256Hex(`${purpose}:${email}`)
   const { data, error } = await admin.rpc('consume_auth_email_code_limit', {
@@ -63,11 +43,17 @@ function nativeVerificationType(data: { properties?: { verification_type?: strin
   return data?.properties?.verification_type || data?.verification_type || ''
 }
 
+// Accounts are resolved through the members mirror (unique, indexed email) instead of
+// paging auth.users, which only ever inspected the first 1000 accounts.
 async function findAuthUserByEmail(admin: ReturnType<typeof createAdminClient>, email: string) {
   try {
-    const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-    if (error) return null
-    return data?.users?.find((item) => normalizedEmail(item.email) === email) || null
+    const { data, error } = await admin
+      .from('members')
+      .select('id, email_verified')
+      .eq('email', email)
+      .maybeSingle()
+    if (error || !data) return null
+    return { id: data.id as string, emailVerified: Boolean(data.email_verified) }
   } catch {
     return null
   }
@@ -194,24 +180,15 @@ Deno.serve(async (req) => {
   }
   if (!allowed) return json(429, { error: 'Please wait a minute before requesting another code.' })
 
-  let user: { id: string; email_confirmed_at?: string | null } | null = null
+  let user: { id: string; emailVerified?: boolean } | null = null
   let password = ''
   if (action === 'signup') {
     password = String(body.password || '')
     const firstName = String(body.firstName || '').trim()
     const lastName = String(body.lastName || '').trim()
     const memberId = String(body.memberId || '')
-    if (password.length < 8 || firstName.length > 128 || lastName.length > 128 || !/^10\d{8}$/.test(memberId)) {
-      return json(400, { error: 'Provide a valid name, an 8-character password, and a valid member ID.' })
-    }
-    let passwordPwned: boolean
-    try {
-      passwordPwned = await isPasswordPwned(password)
-    } catch {
-      return json(503, { error: 'Could not check this password against known data breaches. Please try again.' })
-    }
-    if (passwordPwned) {
-      return json(400, { error: 'This password has appeared in known data breaches. Choose a different password.' })
+    if (firstName.length > 128 || lastName.length > 128 || !/^10\d{8}$/.test(memberId)) {
+      return json(400, { error: 'Provide a valid name and member ID.' })
     }
     const { data, error } = await admin.auth.admin.createUser({
       email,
@@ -221,8 +198,14 @@ Deno.serve(async (req) => {
     })
     if (error) {
       const existing = await findAuthUserByEmail(admin, email)
-      if (!existing || existing.email_confirmed_at) {
-        return json(400, { error: error.message })
+      if (!existing) return json(400, { error: error.message })
+      if (existing.emailVerified) {
+        // A confirmed account must never be re-registered with a new password.
+        // The code lets the client point at the sign-in flow instead.
+        return json(400, {
+          error: 'An account with this email address already exists.',
+          code: 'email_already_registered',
+        })
       }
       user = existing
     } else {

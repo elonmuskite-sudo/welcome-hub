@@ -87,8 +87,9 @@ Appwrite and is treated like a credential; do not commit or share it.
 In the Appwrite Console, allow the production web origin (`nexus-chat-world.com`)
 as a Web platform and enable the password policy option that rejects breached
 passwords and blocks sign-in with them. This Appwrite policy is the project-wide
-password restriction; the app's HIBP range check alone is only a client/app
-check.
+password restriction; the app itself applies no password policy (no length
+minimum and no breach check) so that the console settings are the single place
+that governs it.
 
 The `appwrite_identity_links` migration and the SQL grants/policies must be
 applied before using the gateway. The migration has not been applied to the

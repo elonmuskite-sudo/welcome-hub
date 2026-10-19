@@ -212,7 +212,6 @@ export function AuthProvider({ children }) {
     const normalizedLastName = String(lastName || '').trim()
     const cleanPassword = String(password || '')
     if (!normalizedEmail) throw new Error('Email is required.')
-    if (cleanPassword.length < 8) throw new Error('Password must be at least 8 characters.')
     const nexusId = generateNexusId()
     await startSignupEmailCode({
       email: normalizedEmail,
@@ -237,9 +236,6 @@ export function AuthProvider({ children }) {
   }, [])
 
   const resetPassword = useCallback(async (newPassword) => {
-    if (String(newPassword || '').length < 8) {
-      throw new Error('Password must be at least 8 characters.')
-    }
     if (isAppwriteAuthEnabled()) {
       await completeAppwriteRecovery(newPassword)
     } else {

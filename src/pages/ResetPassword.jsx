@@ -25,10 +25,6 @@ export default function ResetPassword() {
       setError('Passwords do not match')
       return
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.')
-      return
-    }
 
     setLoading(true)
 
@@ -60,7 +56,6 @@ export default function ResetPassword() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={8}
                 autoComplete="new-password"
                 className={`w-full rounded-lg border px-4 py-3 pr-12 text-sm outline-none transition ${themeClasses.input}`}
                 placeholder="••••••••"
@@ -76,9 +71,6 @@ export default function ResetPassword() {
                 {passwordVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </ChatButton>
             </div>
-            <p className={`mt-2 text-xs ${themeClasses.muted}`}>
-              We check against known breached passwords using a partial hash; your password is not sent to the checker.
-            </p>
           </div>
           <div>
             <label className={`mb-2 block text-sm font-medium ${themeClasses.muted}`}>
@@ -90,7 +82,6 @@ export default function ResetPassword() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
-                minLength={8}
                 autoComplete="new-password"
                 className={`w-full rounded-lg border px-4 py-3 pr-12 text-sm outline-none transition ${themeClasses.input}`}
                 placeholder="••••••••"

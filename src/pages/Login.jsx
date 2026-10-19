@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import { ShieldCheckIcon } from '@heroicons/react/24/solid'
 import { Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { establishAdminSession } from '../lib/adminSession'
@@ -11,7 +10,7 @@ import AuthShell from '../components/AuthShell'
 export default function Login() {
   const location = useLocation()
   const [mode, setMode] = useState('password')
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(() => String(location.state?.email || ''))
   const [password, setPassword] = useState('')
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [error, setError] = useState('')

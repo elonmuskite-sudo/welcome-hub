@@ -12,6 +12,7 @@ export default function Register() {
   const [password, setPassword] = useState('')
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [error, setError] = useState('')
+  const [existingAccount, setExistingAccount] = useState(false)
   const [loading, setLoading] = useState(false)
   const { register, user } = useAuth()
   const navigate = useNavigate()
@@ -27,6 +28,7 @@ export default function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    setExistingAccount(false)
     setLoading(true)
 
     try {
@@ -66,6 +68,7 @@ export default function Register() {
         })
         return
       }
+      setExistingAccount(err.code === 'email_already_registered')
       setError(err.message || 'Registration failed')
     } finally {
       setLoading(false)
@@ -125,11 +128,10 @@ export default function Register() {
                   type={passwordVisible ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  minLength={8}
                   required
                   autoComplete="new-password"
                   className={`w-full rounded-lg border px-4 py-3 pr-12 text-sm outline-none transition ${themeClasses.input}`}
-                  placeholder="At least 8 characters"
+                  placeholder="Your password"
                 />
                 <ChatButton
                   type="button"
@@ -142,11 +144,24 @@ export default function Register() {
                   {passwordVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </ChatButton>
               </div>
-              <p className={`mt-2 text-xs ${themeClasses.muted}`}>
-                We check against known breached passwords using a partial hash; your password is not sent to the checker.
-              </p>
             </div>
-            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+                {existingAccount && (
+                  <>
+                    {' '}
+                    <Link
+                      to="/login"
+                      state={{ email: email.trim().toLowerCase() }}
+                      className="font-semibold text-primary hover:underline"
+                    >
+                      Sign in instead
+                    </Link>
+                  </>
+                )}
+              </p>
+            )}
             <ChatButton
               type="submit"
               disabled={loading}

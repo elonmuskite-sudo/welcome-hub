@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js'
-import { isPasswordPwned } from './pwnedPasswords'
 import { appwriteAccount, appwriteData, createAppwriteRecovery, isAppwriteAuthEnabled, signOutFromAppwrite } from './appwrite'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
@@ -67,6 +66,7 @@ function writeOtpType(email, purpose, otpType) {
 function throwEmailCodeError(body, fallback) {
   const error = new Error(body?.error || fallback)
   if (body?.verificationPending) error.verificationPending = true
+  if (body?.code) error.code = body.code
   throw error
 }
 
@@ -114,16 +114,18 @@ async function invokeEmailCode(payload) {
   if (error) {
     let details = error.message
     let verificationPending = false
+    let code = ''
     try {
       if (error.context instanceof Response) {
         const body = await error.context.json()
         if (body?.error) details = body.error
         verificationPending = Boolean(body?.verificationPending)
+        if (body?.code) code = body.code
       }
     } catch {
       // Keep the original error message when the response is not JSON.
     }
-    throwEmailCodeError({ error: details, verificationPending }, details)
+    throwEmailCodeError({ error: details, verificationPending, code }, details)
   }
   if (data?.error) throwEmailCodeError(data, data.error)
   return data
@@ -136,7 +138,6 @@ function rememberIssuedOtp(email, purpose, data) {
 
 export async function startSignupEmailCode({ email, password, firstName, lastName, memberId }) {
   if (!supabase) throw new Error('Account registration is not configured.')
-  if (await isPasswordPwned(password)) throw new Error('This password has appeared in known data breaches. Choose another password.')
   const normalized = normalizeEmail(email)
   const data = await invokeEmailCode({
     action: 'signup',
@@ -268,9 +269,6 @@ export async function startPasswordRecoveryCode(email) {
 }
 
 export async function updateAuthenticatedPassword(password) {
-  if (await isPasswordPwned(password)) {
-    throw new Error('This password has appeared in known data breaches. Choose a different password.')
-  }
   if (isAppwriteAuthEnabled()) {
     if (!appwriteAccount) throw new Error('Appwrite Auth is not configured.')
     const { code } = await appwriteAccount.updatePassword(password)

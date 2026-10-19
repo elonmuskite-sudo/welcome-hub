@@ -15,6 +15,9 @@ const testUserId = 'f9c2e2dd-f11f-43d4-ad07-c94269e5141d'
 let rateLimitAllowed = true
 let otpSequence = 100000
 
+// Emails that already exist in the auth store, so createUser fails for them.
+const ALREADY_REGISTERED_EMAILS = new Set(['taken-user@example.test', 'unverified-user@example.test'])
+
 function nextOtp() {
   otpSequence += 1
   return String(otpSequence)
@@ -31,6 +34,13 @@ globalThis.fetch = async (request, options = {}) => {
   if (url.pathname.endsWith('/auth/v1/admin/users') && options.method === 'POST') {
     const body = JSON.parse(options.body)
     authRequests.push({ action: 'createUser', body })
+    if (ALREADY_REGISTERED_EMAILS.has(body.email)) {
+      return new Response(JSON.stringify({
+        code: 422,
+        msg: 'A user with this email address has already been registered',
+        message: 'A user with this email address has already been registered',
+      }), { status: 422 })
+    }
     return new Response(JSON.stringify({ id: testUserId, email: body.email, user_metadata: body.user_metadata }), { status: 200 })
   }
 
@@ -44,6 +54,8 @@ globalThis.fetch = async (request, options = {}) => {
       { id: testUserId, email: 'rate-limited@example.test' },
       { id: testUserId, email: 'new-user@example.test' },
       { id: testUserId, email: 'code-user@example.test' },
+      { id: testUserId, email: 'taken-user@example.test', email_confirmed_at: '2026-01-01T00:00:00Z' },
+      { id: testUserId, email: 'unverified-user@example.test', email_confirmed_at: null },
     ] }), { status: 200 })
   }
 
@@ -136,6 +148,43 @@ test('signup creates an unconfirmed user and sends a Resend OTP from nexus-chat-
   assert.equal(generateLink.body.type, 'signup')
   const code = assertResendOtp('new-user@example.test', { purposeSubject: /verification code/ })
   assert.equal(JSON.stringify(res.body).includes(code), false)
+})
+
+test('signup refuses to re-register a confirmed account and returns a sign-in code', async () => {
+  const resendCount = sentEmails.length
+  const res = responseRecorder()
+  await handler(request({
+    action: 'signup',
+    purpose: 'signup',
+    email: 'taken-user@example.test',
+    password: 'Secure-test-password-123',
+    firstName: 'Taken',
+    lastName: 'Account',
+    memberId: '1011111111',
+  }), res)
+
+  assert.equal(res.statusCode, 400)
+  assert.equal(res.body.code, 'email_already_registered')
+  assert.match(res.body.error, /already exists/)
+  assert.equal(sentEmails.length, resendCount)
+})
+
+test('signup reuses an unconfirmed account and emails a fresh OTP', async () => {
+  const res = responseRecorder()
+  await handler(request({
+    action: 'signup',
+    purpose: 'signup',
+    email: 'unverified-user@example.test',
+    password: 'Secure-test-password-123',
+    firstName: 'Unverified',
+    lastName: 'Account',
+    memberId: '1022222222',
+  }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body.ok, true)
+  assert.equal(res.body.otpType, 'signup')
+  assertResendOtp('unverified-user@example.test', { purposeSubject: /verification code/ })
 })
 
 test('resend issues a fresh Resend OTP without using a verification link', async () => {

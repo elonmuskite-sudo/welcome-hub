@@ -1,5 +1,4 @@
 import { Account, Client } from 'appwrite'
-import { isPasswordPwned } from './pwnedPasswords'
 
 const endpoint = import.meta.env.VITE_APPWRITE_ENDPOINT || ''
 const projectId = import.meta.env.VITE_APPWRITE_PROJECT_ID || ''
@@ -77,9 +76,6 @@ export async function completeAppwriteRecovery(password) {
     throw new Error('Recovery could not be read in this browser. Request a new code and try again.')
   }
   if (!userId || !code) throw new Error('Verify your recovery code before setting a new password.')
-  if (await isPasswordPwned(password)) {
-    throw new Error('This password has appeared in known data breaches. Choose a different password.')
-  }
   try {
     await appwriteAccount.updateRecoveryOTP(userId, code, password)
   } finally {
