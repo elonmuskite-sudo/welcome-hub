@@ -7,6 +7,24 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const runtimeConfigPath = path.join(rootDir, '.vercel-runtime-env.json')
 const linkedProjectPath = path.join(rootDir, '.vercel', 'project.json')
 const dryRun = process.argv.includes('--dry-run')
+const localEnvPath = path.join(rootDir, '.env.local')
+
+// Vercel credentials may live in the gitignored .env.local so they survive
+// across terminal sessions; an exported shell variable still takes precedence.
+// These keys are never written to the generated runtime environment.
+function readLocalEnv(key) {
+  if (!fs.existsSync(localEnvPath)) return ''
+  for (const line of fs.readFileSync(localEnvPath, 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)
+    if (match && match[1] === key) return match[2].replace(/^["']|["']$/g, '')
+  }
+  return ''
+}
+
+function resolveSetting(key) {
+  const fromShell = String(process.env[key] || '').trim()
+  return fromShell || readLocalEnv(key)
+}
 
 const REQUIRED_ENV_KEYS = [
   'VITE_SUPABASE_URL',
@@ -77,9 +95,9 @@ function getProjectConfig() {
   const linked = fs.existsSync(linkedProjectPath)
     ? loadJson(linkedProjectPath, 'Vercel project link')
     : {}
-  const projectId = process.env.VERCEL_PROJECT_ID || linked.projectId || ''
+  const projectId = resolveSetting('VERCEL_PROJECT_ID') || linked.projectId || ''
   const linkedOrgId = String(linked.orgId || '')
-  const teamId = process.env.VERCEL_TEAM_ID || (linkedOrgId.startsWith('team_') ? linkedOrgId : '')
+  const teamId = resolveSetting('VERCEL_TEAM_ID') || (linkedOrgId.startsWith('team_') ? linkedOrgId : '')
   return { projectId, teamId }
 }
 
@@ -216,12 +234,12 @@ async function main() {
     return
   }
 
-  token = process.env.VERCEL_TOKEN || ''
-  if (!token) throw new Error('Set VERCEL_TOKEN in the shell before syncing.')
+  token = resolveSetting('VERCEL_TOKEN')
+  if (!token) throw new Error('Set VERCEL_TOKEN in the shell or in .env.local before syncing.')
 
   const projectConfig = getProjectConfig()
   if (!projectConfig.projectId) {
-    throw new Error('Set VERCEL_PROJECT_ID or link the project with the Vercel CLI first.')
+    throw new Error('Set VERCEL_PROJECT_ID in the shell or in .env.local, or link the project with the Vercel CLI first.')
   }
   if (invalidValue(projectConfig.projectId)) {
     throw new Error('VERCEL_PROJECT_ID is still an example value; use the real ID from Vercel Project Settings > General.')
