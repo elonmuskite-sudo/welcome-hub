@@ -5,6 +5,7 @@ import BottomNav, { getActiveTabFromPath } from '../components/chat/BottomNav'
 import AppTopNav from '../components/chat/AppTopNav'
 import NotificationStack from '../components/chat/NotificationStack'
 import VoiceCallOverlay from '../components/chat/VoiceCallOverlay'
+import ErrorBoundary from '../components/ErrorBoundary'
 import Header from '../components/Header'
 import { requestNotificationPermission, showSystemNotification } from '../lib/notifications'
 import { startRealtimeListeners, stopRealtimeListeners } from '../lib/persistence'
@@ -56,7 +57,9 @@ export default function ChatLayout() {
         </div>
 
         <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
-          <Outlet />
+          <ErrorBoundary label="chat" resetKey={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </div>
 

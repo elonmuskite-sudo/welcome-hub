@@ -16,6 +16,8 @@
     "vercel:env:dry": "npm run env:generate && node scripts/sync-vercel-env.js --dry-run",
     "turn:credentials": "node scripts/fetch-turn-credentials.js",
     "audit:responsive": "node scripts/responsive-audit.mjs",
+    "repro:chat": "node scripts/chat-input-repro.mjs",
+    "repro:chat:matrix": "node scripts/chat-input-repro.mjs --matrix",
     "prebuild": "npm run env:generate && npm run env:validate",
     "build": "vite build",
     "build:dev": "vite build --mode development",

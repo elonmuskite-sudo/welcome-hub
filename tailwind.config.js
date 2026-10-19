@@ -2,10 +2,16 @@ import tailwindcssAnimate from 'tailwindcss-animate'
 
 const config = {
   darkMode: ["class"],
+  // Every source file has to be scanned. Tailwind tree-shakes the custom
+  // classes declared in `@layer components` (src/index.css) against these
+  // globs, so a directory missing here silently deletes real CSS in
+  // production — e.g. `.chat-shell` (used only by src/layouts/ChatLayout.jsx)
+  // and `.keyboard-open` (toggled from src/hooks/useViewportInsets.js) were
+  // dropped, which let the chat column grow without a height limit and pushed
+  // the message composer off-screen after a few messages.
   content: [
-    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {
