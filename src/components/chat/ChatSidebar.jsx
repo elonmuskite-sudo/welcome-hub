@@ -5,6 +5,8 @@ import ChatListItem from './ChatListItem'
 import Avatar from './Avatar'
 import UnsavedContactPrompt from './UnsavedContactPrompt'
 import { useAuth } from '../../lib/AuthContext'
+import { useSyncStatus } from '../../hooks/useSyncStatus'
+import { SyncSpinner } from '../SyncIndicator'
 import { mockChats } from '../../data/mockChats'
 import { createChat, getChats, searchUserByNexusId, formatNexusId, addContact, isContactSaved } from '../../lib/persistence'
 
@@ -21,6 +23,8 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { chatId } = useParams()
+  const { keys: syncKeys } = useSyncStatus()
+  const chatsSyncing = syncKeys.includes('chats')
 
   useEffect(() => {
     const refreshChats = async () => {
@@ -188,7 +192,7 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto" aria-busy={chatsSyncing || undefined}>
             {chatError && <p role="alert" className="mx-4 mb-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{chatError}</p>}
             {/* Show found user when Nexus number is detected */}
             {foundUser && (
@@ -240,7 +244,10 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
             {/* Show loading state when searching */}
             {isSearching && isNexusNumber(searchQuery) && (
               <div className="p-4 border-b border-border bg-primary/5">
-                <p className="text-sm text-muted-foreground text-center">Searching for user...</p>
+                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <SyncSpinner label="Searching for user" />
+                  <span>Searching for user…</span>
+                </div>
               </div>
             )}
 

@@ -1,6 +1,7 @@
 import { findMemberByNexusId, supabase } from './supabase'
 import { appwriteData, isAppwriteAuthEnabled } from './appwrite'
-import { reactionContent } from './chatProtocol'
+import { reactionContent, receiptContent } from './chatProtocol'
+import { withSync } from './syncStatus'
 
 const STORAGE_KEY = 'nexus-chat-state-v1'
 const CONTACTS_STORAGE_KEY = 'nexus-contacts-state-v1'
@@ -64,7 +65,7 @@ export function startRealtimeListeners() {
           const known = readLocalChats().some((chat) => String(chat.id) === String(row.chat_id))
           if (!known) continue
           await appendMessage(String(row.chat_id), mapMessage(row))
-          if (row.type !== 'reaction') {
+          if (row.type !== 'reaction' && row.type !== 'receipt') {
             emit('nexus:incoming-notification', {
               title: 'New message',
               preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',
@@ -92,19 +93,19 @@ export function startRealtimeListeners() {
 
   const channel = supabase
     .channel('nexus-chat-sync')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async ({ new: row }) => {
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async ({ new: row }) => withSync('realtime', async () => {
       if (!row?.chat_id) return
       const known = readLocalChats().some((c) => String(c.id) === String(row.chat_id))
       if (!known) { await readChats(currentUserId); notifyChatUpdate() }
       await appendMessage(String(row.chat_id), mapMessage(row))
-      if (row.type !== 'reaction' && String(row.sender_id || '') !== String(currentUserId || '')) {
+      if (row.type !== 'reaction' && row.type !== 'receipt' && String(row.sender_id || '') !== String(currentUserId || '')) {
         emit('nexus:incoming-notification', {
           title: 'New message',
           preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',
           avatarUrl: '/logo.png', type: 'message',
         })
       }
-    })
+    }))
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, ({ old: row }) => {
       if (!row?.id) return
       writeLocalChats(readLocalChats().map((chat) => ({ ...chat, messages: (chat.messages || []).filter((m) => m.id !== String(row.id)) })))
@@ -123,6 +124,10 @@ export function stopRealtimeListeners(unsubscribe) {
 }
 
 export async function readChats(userId) {
+  return withSync('chats', () => readChatsFromSource(userId))
+}
+
+async function readChatsFromSource(userId) {
   if (isAppwriteAuthEnabled()) {
     const { chats = [] } = await appwriteData('chats.list')
     const mappedChats = chats.map(({ chat_members: members, ...chat }) => ({
@@ -219,6 +224,19 @@ export async function toggleMessageReaction(chatId, messageId, emoji, userId, ac
   return sendChatMessage(chatId, { id: newId(), sender_id: String(userId), type: 'reaction', content: reactionContent(messageId, emoji, active), created_at: new Date().toISOString() })
 }
 
+// Acknowledges a batch of received messages. Best-effort: delivery/read state is
+// an enhancement, so callers swallow failures rather than surfacing an error.
+export async function sendReadReceipt(chatId, userId, messageIds, status) {
+  if (!userId) return null
+  return sendChatMessage(chatId, {
+    id: newId(),
+    sender_id: String(userId),
+    type: 'receipt',
+    content: receiptContent(messageIds, status),
+    created_at: new Date().toISOString(),
+  })
+}
+
 export async function appendMessage(chatId, message) {
   const chats = readLocalChats()
   const chat = chats.find((item) => String(item.id) === String(chatId))
@@ -232,11 +250,14 @@ export async function appendMessage(chatId, message) {
   }
   const existing = Array.isArray(chat.messages) ? chat.messages : []
   const exists = existing.some((m) => m.id === nextMessage.id)
+  // Reactions and receipts are protocol control rows: they never become the
+  // conversation's last message preview.
+  const isControlRow = nextMessage.type === 'reaction' || nextMessage.type === 'receipt'
   const updatedChat = {
     ...chat,
     messages: exists ? existing.map((m) => (m.id === nextMessage.id ? { ...m, ...nextMessage } : m)) : [...existing, nextMessage],
-    last_message: nextMessage.type === 'reaction' ? chat.last_message : nextMessage.encrypted ? 'Encrypted message' : nextMessage.content,
-    last_message_time: nextMessage.type === 'reaction' ? chat.last_message_time : nextMessage.created_at,
+    last_message: isControlRow ? chat.last_message : nextMessage.encrypted ? 'Encrypted message' : nextMessage.content,
+    last_message_time: isControlRow ? chat.last_message_time : nextMessage.created_at,
     unread_count: 0,
   }
   writeLocalChats(chats.map((item) => (String(item.id) === String(chatId) ? updatedChat : item)))
@@ -245,6 +266,10 @@ export async function appendMessage(chatId, message) {
 }
 
 export async function getChatById(chatId, userId) {
+  return withSync('chat', () => loadChatById(chatId, userId))
+}
+
+async function loadChatById(chatId, userId) {
   if (isAppwriteAuthEnabled() && UUID_REGEX.test(String(chatId))) {
     const { chat } = await appwriteData('chats.get', { chatId: String(chatId) })
     if (!chat) return null
@@ -351,6 +376,10 @@ function mapCloudContact(row) {
 }
 
 async function syncContactsFromCloud(userId) {
+  return withSync('contacts', () => loadContactsFromCloud(userId))
+}
+
+async function loadContactsFromCloud(userId) {
   if (isAppwriteAuthEnabled()) {
     const { contacts = [] } = await appwriteData('contacts.list')
     const mapped = contacts.map(mapCloudContact)

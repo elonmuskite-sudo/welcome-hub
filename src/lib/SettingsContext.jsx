@@ -36,6 +36,7 @@ export function SettingsProvider({ children }) {
     notificationVolume: readFromStorage('notificationVolume', 0.5),
     badgeBlue: readFromStorage('badgeBlue', null),
     badgeGold: readFromStorage('badgeGold', null),
+    readReceipts: readFromStorage('readReceipts', true),
   }))
 
   useEffect(() => {

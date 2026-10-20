@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import SettingsRow from './SettingsRow'
-import { ShieldCheckIcon, KeyIcon, DocumentDuplicateIcon, CheckIcon } from '@heroicons/react/24/solid'
+import { ShieldCheckIcon, KeyIcon, DocumentDuplicateIcon, CheckIcon, EyeIcon } from '@heroicons/react/24/solid'
+import { useSetting } from '../../../hooks/useSetting'
 import {
   isE2EEEnabled,
   setE2EEEnabled,
@@ -14,6 +15,7 @@ export default function PrivacySettings() {
   const [publicKey, setPublicKey] = useState('')
   const [copied, setCopied] = useState(false)
   const [securityCode] = useState(() => generateSecurityCode('demo-chat'))
+  const [readReceipts, setReadReceipts] = useSetting('readReceipts', true)
 
   useEffect(() => {
     initializeE2EE().then(() => getMyPublicKey()).then(setPublicKey)
@@ -53,6 +55,33 @@ export default function PrivacySettings() {
           <span
             className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
               e2eeEnabled ? 'translate-x-6' : 'translate-x-0.5'
+            }`}
+          />
+        </button>
+      </SettingsRow>
+
+      <SettingsRow
+        label="Read receipts"
+        description={
+          readReceipts
+            ? 'People you message can see when you have read their messages.'
+            : 'Read receipts are off: you will not send them, and you will not see when your messages are read.'
+        }
+        icon={<EyeIcon className="w-4 h-4" />}
+      >
+        <button
+          type="button"
+          role="switch"
+          aria-checked={readReceipts}
+          aria-label="Read receipts"
+          onClick={() => setReadReceipts(!readReceipts)}
+          className={`relative w-12 h-6 rounded-full transition-colors ${
+            readReceipts ? 'bg-green-500' : 'bg-muted'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+              readReceipts ? 'translate-x-6' : 'translate-x-0.5'
             }`}
           />
         </button>

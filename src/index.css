@@ -298,6 +298,31 @@
     background: hsl(var(--primary));
     transition: width 160ms ease-out;
   }
+  /* Indeterminate bar pinned above the header while any data sync is in flight.
+     Fixed + pointer-events:none so it never shifts layout or blocks taps. */
+  .sync-bar-track {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    z-index: 60;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .sync-bar-fill {
+    display: block;
+    height: 100%;
+    width: 40%;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, transparent, hsl(var(--primary)), transparent);
+    animation: nexus-sync-slide 1.5s cubic-bezier(0.65, 0.815, 0.735, 0.395) infinite;
+  }
+}
+@keyframes nexus-sync-slide {
+  0% { transform: translateX(-150%); }
+  50% { transform: translateX(100%); }
+  100% { transform: translateX(350%); }
 }
 @keyframes chat-enter {
   from { opacity: 0; transform: translateY(8px); }

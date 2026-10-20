@@ -26,22 +26,22 @@ export default function Header({ showSignIn = true, children }) {
   const isNative = typeof window !== 'undefined' && window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()
 
   return (
-    <header className="sticky top-0 z-50 mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-3 border-b border-border bg-card/80 text-foreground shadow-[0_18px_50px_rgba(15,23,42,0.10)] backdrop-blur-xl px-4 py-4 transition-all sm:px-6 lg:px-8">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="brand-badge flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[18px] bg-gradient-to-br from-sky-500 via-cyan-400 to-blue-600 p-1 shadow-[0_18px_45px_rgba(59,130,246,0.30)]">
-          <div className={`flex h-full w-full items-center justify-center rounded-[14px] bg-slate-950/90 shadow-[inset_0_1px_15px_rgba(255,255,255,0.18)] ${logoStyle}`}>
-            <img src="/logo.png" alt="Nexus logo" className="h-8 w-8 rounded-lg object-contain" />
+    <header className="sticky top-0 z-50 mx-auto flex w-full max-w-7xl flex-nowrap items-center justify-between gap-2 border-b border-border bg-card/80 text-foreground shadow-[0_18px_50px_rgba(15,23,42,0.10)] backdrop-blur-xl px-4 py-3 transition-all sm:gap-3 sm:px-6 sm:py-4 lg:px-8">
+      <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+        <div className="brand-badge flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 via-cyan-400 to-blue-600 p-0.5 shadow-[0_18px_45px_rgba(59,130,246,0.30)] sm:h-[52px] sm:w-[52px] sm:rounded-[18px] sm:p-1">
+          <div className={`flex h-full w-full items-center justify-center rounded-[9px] bg-slate-950/90 shadow-[inset_0_1px_15px_rgba(255,255,255,0.18)] sm:rounded-[14px] ${logoStyle}`}>
+            <img src="/logo.png" alt="Nexus logo" className="h-5 w-5 rounded-lg object-contain sm:h-8 sm:w-8" />
           </div>
         </div>
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-foreground">Nexus</p>
-          <h1 className="truncate text-sm font-semibold sm:text-base">Privacy-first encrypted messaging</h1>
+        <div className="min-w-0 flex flex-col justify-center">
+          <h1 className="truncate text-base font-bold leading-none text-foreground sm:text-[clamp(1rem,4vw,1.125rem)]">Nexus Chat</h1>
+          <p className="truncate text-[10px] text-muted-foreground leading-tight sm:text-[11px] mt-0.5">Privacy-first encrypted messaging</p>
         </div>
       </div>
 
       {children}
 
-      <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+      <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2 sm:gap-3">
         <button
           onClick={toggleTheme}
           className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-muted text-foreground hover:bg-muted/80 transition animate-in fade-in duration-200"
@@ -82,7 +82,7 @@ export default function Header({ showSignIn = true, children }) {
           </div>
         ) : (
           !isNative && showSignIn && (
-            <Link to="/login" className="rounded-full bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition sm:px-4">
+            <Link to="/login" className="shrink-0 whitespace-nowrap rounded-full bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition sm:px-4">
               Sign in
             </Link>
           )

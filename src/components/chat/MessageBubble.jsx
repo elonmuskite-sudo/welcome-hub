@@ -1,7 +1,7 @@
 /* eslint-disable react/prop-types */
 import { memo, useMemo, useState } from 'react'
 import { format } from 'date-fns'
-import { FileText, Download, Film, Music, SmilePlus, Reply, Copy, Check } from 'lucide-react'
+import { FileText, Download, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck } from 'lucide-react'
 import ChatButton from './ChatButton'
 import { REACTIONS, decodeContent } from '../../lib/chatProtocol'
 
@@ -17,7 +17,7 @@ function formatTime(dateString) {
   }
 }
 
-function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting }) {
+function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, receiptsEnabled = true }) {
   const [showReactions, setShowReactions] = useState(false)
   const [copied, setCopied] = useState(false)
   const decoded = decodeContent(message.content)
@@ -128,7 +128,16 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting }) {
         {renderContent}
         {!isSticker && (
           <div className={`text-xs mt-1 opacity-70 ${isOwn ? 'text-primary-foreground' : 'text-muted-foreground'}`}>
-            <span>{timeLabel}</span>{isOwn && <Check className="inline w-3 h-3 ml-1" aria-label="Saved" />}
+            <span>{timeLabel}</span>
+            {isOwn && (() => {
+              if (receiptsEnabled && message.read) {
+                return <CheckCheck className="inline w-3.5 h-3.5 ml-1 text-sky-300" aria-label="Read" title="Read" />
+              }
+              if (receiptsEnabled && message.delivered) {
+                return <CheckCheck className="inline w-3.5 h-3.5 ml-1" aria-label="Delivered" title="Delivered" />
+              }
+              return <Check className="inline w-3.5 h-3.5 ml-1" aria-label="Sent" title="Sent" />
+            })()}
           </div>
         )}
         <div className="flex items-center gap-1 mt-1" aria-label="Message actions">

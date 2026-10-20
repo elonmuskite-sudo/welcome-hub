@@ -18,6 +18,8 @@
     "audit:responsive": "node scripts/responsive-audit.mjs",
     "repro:chat": "node scripts/chat-input-repro.mjs",
     "repro:chat:matrix": "node scripts/chat-input-repro.mjs --matrix",
+    "ux:audit": "node scripts/ux-audit.mjs",
+    "ux:audit:matrix": "node scripts/ux-audit.mjs --matrix",
     "prebuild": "npm run env:generate && npm run env:validate",
     "build": "vite build",
     "build:dev": "vite build --mode development",

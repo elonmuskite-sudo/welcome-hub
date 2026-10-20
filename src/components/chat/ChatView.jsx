@@ -5,10 +5,11 @@ import Avatar from './Avatar'
 import MessageInput from './MessageInput'
 import MessageBubble from './MessageBubble'
 import { useSetting } from '../../hooks/useSetting'
+import { useSyncStatus } from '../../hooks/useSyncStatus'
 import { getWallpaperById } from '../../lib/wallpapers'
 import { encryptMessage, decryptMessage, isE2EEEnabled } from '../../lib/crypto/e2ee'
 import { useCall } from '../../lib/CallContext'
-import { sendChatMessage, toggleMessageReaction } from '../../lib/persistence'
+import { sendChatMessage, toggleMessageReaction, sendReadReceipt } from '../../lib/persistence'
 import { isChatServiceAvailable, newId } from '../../lib/persistence'
 import { useAuth } from '../../lib/AuthContext'
 import { Search, X, MessageCircle } from 'lucide-react'
@@ -37,6 +38,25 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
   const decryptAttemptsRef = useRef(new Set())
   const [chatWallpaper] = useSetting('chatWallpaper', 'nature')
   const wallpaper = getWallpaperById(chatWallpaper)
+  const [readReceiptsEnabled] = useSetting('readReceipts', true)
+  // Highest receipt status already sent for each received message id, so a
+  // refetch never re-acknowledges the same message (which would loop).
+  const receiptStateRef = useRef(new Map())
+  const [threadVisible, setThreadVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
+
+  // A sync that finishes quickly should not flash a blocking overlay over the
+  // thread, so the overlay only appears once syncing has persisted for 250ms.
+  const { keys: syncKeys } = useSyncStatus()
+  const chatSyncing = syncKeys.includes('chat')
+  const [showSyncOverlay, setShowSyncOverlay] = useState(false)
+  useEffect(() => {
+    if (!chatSyncing) {
+      setShowSyncOverlay(false)
+      return undefined
+    }
+    const timer = window.setTimeout(() => setShowSyncOverlay(true), 250)
+    return () => window.clearTimeout(timer)
+  }, [chatSyncing])
 
   const { call, initiateCall } = useCall()
   const { user } = useAuth()
@@ -67,6 +87,47 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
   useEffect(() => {
     setMessages(chat?.messages || [])
   }, [chat?.id, chat?.messages])
+
+  // Receipt bookkeeping belongs to one conversation only.
+  useEffect(() => {
+    receiptStateRef.current = new Map()
+  }, [chat?.id])
+
+  useEffect(() => {
+    const onVisibility = () => setThreadVisible(document.visibilityState !== 'hidden')
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
+
+  // Acknowledge messages received from peers: a visible thread means "read",
+  // otherwise "delivered". Each id is acknowledged at most once (and only ever
+  // upgraded), so a refetch cannot loop, and nothing is sent when the user has
+  // turned receipts off.
+  useEffect(() => {
+    if (!readReceiptsEnabled || !user?.id) return
+    const pending = { delivered: [], read: [] }
+    for (const message of messages) {
+      if (message.type === 'receipt' || message.type === 'reaction') continue
+      const sender = String(message.sender_id || '')
+      if (!sender || sender === 'me' || sender === String(user.id)) continue
+      const alreadySent = receiptStateRef.current.get(message.id)
+      if (alreadySent === 'read') continue
+      if (threadVisible) {
+        receiptStateRef.current.set(message.id, 'read')
+        pending.read.push(message.id)
+      } else if (!alreadySent) {
+        receiptStateRef.current.set(message.id, 'delivered')
+        pending.delivered.push(message.id)
+      }
+    }
+    if (!pending.read.length && !pending.delivered.length) return
+    ;(async () => {
+      try {
+        if (pending.read.length) await sendReadReceipt(chat.id, user.id, pending.read, 'read')
+        if (pending.delivered.length) await sendReadReceipt(chat.id, user.id, pending.delivered, 'delivered')
+      } catch { /* Receipts are best-effort and must not disturb the thread. */ }
+    })()
+  }, [messages, chat.id, user?.id, readReceiptsEnabled, threadVisible])
 
   useEffect(() => {
     scrollToBottom()
@@ -256,9 +317,21 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
       {showSearch && <div className="flex items-center gap-2 chat-page-x py-3 bg-card border-b border-border chat-enter"><Search className="w-4 h-4 text-muted-foreground" /><input autoFocus type="search" enterKeyHint="search" autoComplete="off" spellCheck="false" aria-label="Search messages" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search messages" className="flex-1 min-w-0 bg-muted text-foreground px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring" /><ChatButton title="Close search" onClick={() => { setSearch(''); setShowSearch(false) }} className="w-9"><X className="w-4 h-4" /></ChatButton></div>}
       <div className="flex-1 min-h-0 min-w-0 relative overflow-hidden" style={wallpaperStyle}>
         <div className="absolute inset-0 bg-card/60 dark:bg-background/70 pointer-events-none" />
+        {showSyncOverlay && (
+          <div
+            className="absolute inset-0 z-20 flex items-center justify-center bg-background/20 backdrop-blur-[1px] transition-all duration-300 animate-in fade-in"
+            aria-hidden="true"
+            data-chat-sync-overlay="true"
+          >
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card/90 px-6 py-4 shadow-xl border border-border/50 scale-95 animate-in zoom-in-95 duration-300">
+              <SyncSpinner className="h-6 w-6" label="Syncing messages" />
+              <span className="text-xs font-semibold text-foreground tracking-tight">Syncing…</span>
+            </div>
+          </div>
+        )}
 
         <div className="relative h-full flex flex-col min-h-0">
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden chat-page-x py-5 space-y-3 sm:space-y-4 scroll-smooth">
+          <div aria-busy={showSyncOverlay || undefined} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden chat-page-x py-5 space-y-3 sm:space-y-4 scroll-smooth">
             {visibleMessages.length === 0 ? (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center">
@@ -275,6 +348,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
                   onReact={handleReact}
                   onReply={setReply}
                   reacting={reacting}
+                  receiptsEnabled={readReceiptsEnabled}
                   isOwn={String(message.sender_id) === String(user?.id) || message.sender_id === 'me'}
                 />
               ))

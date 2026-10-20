@@ -4,6 +4,8 @@ import { ChatBubbleLeftIcon, UserGroupIcon, PlusIcon, XMarkIcon, PhoneIcon, User
 import Avatar from './Avatar'
 import UnsavedContactPrompt from './UnsavedContactPrompt'
 import { useAuth } from '../../lib/AuthContext'
+import { useSyncStatus } from '../../hooks/useSyncStatus'
+import { SyncSpinner } from '../SyncIndicator'
 import { createChat, getChats, getContacts, addContact, formatNexusId, searchUserByNexusId, isContactSaved } from '../../lib/persistence'
 import { VerificationBadgeIcon, fetchVerificationBadges, BADGE_REFRESH_EVENT } from './VerificationBadge'
 
@@ -22,6 +24,8 @@ export default function ContactsPanel() {
   const [newContactNexusId, setNewContactNexusId] = useState('')
   const [promptAction, setPromptAction] = useState(null)
   const [promptBusy, setPromptBusy] = useState(false)
+  const { keys: syncKeys } = useSyncStatus()
+  const contactsSyncing = syncKeys.includes('contacts')
 
   useEffect(() => {
     const loadContacts = async () => {
@@ -195,7 +199,15 @@ export default function ContactsPanel() {
       </div>
 
       {/* Contact List */}
-      <div className="flex-1 overflow-y-auto p-6 max-w-4xl w-full mx-auto">
+      <div className="flex-1 overflow-y-auto p-6 max-w-4xl w-full mx-auto relative" aria-busy={contactsSyncing || undefined}>
+        {contactsSyncing && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/20 backdrop-blur-[1px] transition-all duration-300 animate-in fade-in">
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card/90 px-6 py-4 shadow-xl border border-border/50 scale-95 animate-in zoom-in-95 duration-300">
+              <SyncSpinner className="h-6 w-6" label="Syncing contacts" />
+              <span className="text-xs font-semibold text-foreground tracking-tight">Syncing…</span>
+            </div>
+          </div>
+        )}
         {chatError && <p role="alert" className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{chatError}</p>}
         {contacts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20">
@@ -268,7 +280,12 @@ export default function ContactsPanel() {
                   required
                 />
                 <p className="text-xs text-muted-foreground mt-1">Enter the 10-digit Nexus ID (e.g., 1012345678)</p>
-                {lookupState === 'searching' && <p className="text-xs text-muted-foreground mt-2">Looking up…</p>}
+                {lookupState === 'searching' && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                    <SyncSpinner className="h-3.5 w-3.5" label="Looking up contact" />
+                    <span>Looking up…</span>
+                  </div>
+                )}
                 {lookupState === 'missing' && <p className="text-xs text-destructive mt-2">No account found for this Nexus ID.</p>}
                 {match && (
                   <div className="mt-3 rounded-xl border border-primary/30 bg-primary/10 p-3 animate-in fade-in zoom-in-95 duration-200">

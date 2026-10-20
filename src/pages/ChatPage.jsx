@@ -1,6 +1,7 @@
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import ChatView from '../components/chat/ChatView'
+import { SyncSpinner } from '../components/SyncIndicator'
 import { getChatById } from '../data/mockChats'
 import { useAuth } from '../lib/AuthContext'
 
@@ -65,10 +66,10 @@ export default function ChatPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-background h-full">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4" />
-          <p className="text-sm text-muted-foreground">Loading chat...</p>
+      <div className="flex-1 flex items-center justify-center bg-background h-full" aria-busy="true">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <SyncSpinner className="h-8 w-8" label="Loading chat" />
+          <p className="text-sm text-muted-foreground">Loading chat…</p>
         </div>
       </div>
     )

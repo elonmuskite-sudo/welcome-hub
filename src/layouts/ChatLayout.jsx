@@ -6,6 +6,7 @@ import AppTopNav from '../components/chat/AppTopNav'
 import NotificationStack from '../components/chat/NotificationStack'
 import VoiceCallOverlay from '../components/chat/VoiceCallOverlay'
 import ErrorBoundary from '../components/ErrorBoundary'
+import SyncIndicator from '../components/SyncIndicator'
 import Header from '../components/Header'
 import { requestNotificationPermission, showSystemNotification } from '../lib/notifications'
 import { startRealtimeListeners, stopRealtimeListeners } from '../lib/persistence'
@@ -50,6 +51,8 @@ export default function ChatLayout() {
       <Header showSignIn={false}>
         <AppTopNav variant="user" />
       </Header>
+
+      <SyncIndicator />
 
       <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden pb-[var(--chat-bottom-offset,72px)] md:pb-0">
         <div className="hidden md:flex md:w-96 flex-col bg-card border-r border-border">
