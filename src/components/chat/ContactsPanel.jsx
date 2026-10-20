@@ -35,8 +35,15 @@ export default function ContactsPanel() {
     loadContacts()
 
     const handleUpdate = () => loadContacts()
+    const handleError = (e) => {
+      if (e.detail?.key === 'contacts') setChatError(e.detail.message)
+    }
     window.addEventListener('nexus-contacts:updated', handleUpdate)
-    return () => window.removeEventListener('nexus-contacts:updated', handleUpdate)
+    window.addEventListener('nexus:sync-error', handleError)
+    return () => {
+      window.removeEventListener('nexus-contacts:updated', handleUpdate)
+      window.removeEventListener('nexus:sync-error', handleError)
+    }
   }, [])
 
   const memberIds = contacts.map((contact) => nexusDigits(contact.nexusId)).filter(Boolean).join(',')

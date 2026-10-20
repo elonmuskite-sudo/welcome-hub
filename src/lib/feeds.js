@@ -15,6 +15,8 @@ import {
 
 export { formatTimeAgo, formatExactTime } from './relativeTime'
 
+import { withSync } from './syncStatus'
+
 const POST_COLUMNS = 'id, author_id, content, media, is_admin_post, status, created_at, updated_at'
 const COMMENT_COLUMNS = 'id, post_id, author_id, parent_id, content, status, created_at, updated_at'
 
@@ -105,89 +107,105 @@ function buildCommentTree(rows, reactionMap) {
   return roots
 }
 
+function emit(name, detail) {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(name, detail ? { detail } : undefined))
+}
+
 export async function listFeed() {
-  requireFeed()
-  // Every signed-in member reads all public posts; authors additionally keep
-  // their own moderated posts and admins read the whole table. Row level
-  // security enforces the same rule, so this filter keeps the UI in step with it.
-  const { data: auth } = await supabase.auth.getUser()
-  const viewerId = auth?.user?.id ? String(auth.user.id) : null
-  const visibility = feedVisibilityFilter({ viewerId, isAdmin: await viewerIsAdmin(viewerId) })
+  return withSync('feed', async () => {
+    try {
+      requireFeed()
+      // Every signed-in member reads all public posts; authors additionally keep
+      // their own moderated posts and admins read the whole table. Row level
+      // security enforces the same rule, so this filter keeps the UI in step with it.
+      const { data: auth } = await supabase.auth.getUser()
+      const viewerId = auth?.user?.id ? String(auth.user.id) : null
+      const visibility = feedVisibilityFilter({ viewerId, isAdmin: await viewerIsAdmin(viewerId) })
 
-  let query = supabase.from('feed_posts').select(POST_COLUMNS)
-  if (visibility) query = query.or(visibility)
-  const { data: posts, error } = await query
-    .order('created_at', { ascending: false })
-    .limit(100)
-  if (error) throw new Error(error.message || 'The feed could not be loaded.')
+      let query = supabase.from('feed_posts').select(POST_COLUMNS)
+      if (visibility) query = query.or(visibility)
+      const { data: posts, error } = await query
+        .order('created_at', { ascending: false })
+        .limit(100)
+      if (error) throw new Error(error.message || 'The feed could not be loaded.')
 
-  const postRows = posts || []
-  const postIds = postRows.map((post) => post.id)
-  let commentRows = []
-  let postReactions = []
-  let commentReactions = []
-  if (postIds.length) {
-    const [comments, pReactions] = await Promise.all([
-      supabase.from('feed_comments').select(COMMENT_COLUMNS).in('post_id', postIds).order('created_at', { ascending: true }).limit(2000),
-      supabase.from('feed_reactions').select('post_id, user_id, reaction').in('post_id', postIds),
-    ])
-    commentRows = comments.data || []
-    postReactions = pReactions.data || []
-  }
-  const commentIds = commentRows.map((comment) => comment.id)
-  if (commentIds.length) {
-    const { data } = await supabase.from('feed_comment_reactions').select('comment_id, user_id, reaction').in('comment_id', commentIds)
-    commentReactions = data || []
-  }
+      const postRows = posts || []
+      const postIds = postRows.map((post) => post.id)
+      let commentRows = []
+      let postReactions = []
+      let commentReactions = []
+      if (postIds.length) {
+        const [comments, pReactions] = await Promise.all([
+          supabase.from('feed_comments').select(COMMENT_COLUMNS).in('post_id', postIds).order('created_at', { ascending: true }).limit(2000),
+          supabase.from('feed_reactions').select('post_id, user_id, reaction').in('post_id', postIds),
+        ])
+        commentRows = comments.data || []
+        postReactions = pReactions.data || []
+      }
+      const commentIds = commentRows.map((comment) => comment.id)
+      if (commentIds.length) {
+        const { data } = await supabase.from('feed_comment_reactions').select('comment_id, user_id, reaction').in('comment_id', commentIds)
+        commentReactions = data || []
+      }
 
-  const profiles = await memberProfiles([
-    ...postRows.map((post) => post.author_id),
-    ...commentRows.map((comment) => comment.author_id),
-  ])
+      const profiles = await memberProfiles([
+        ...postRows.map((post) => post.author_id),
+        ...commentRows.map((comment) => comment.author_id),
+      ])
 
-  const postReactionMap = new Map()
-  for (const row of postReactions) {
-    const key = String(row.post_id)
-    if (!postReactionMap.has(key)) postReactionMap.set(key, { counts: {}, byUser: {} })
-    const entry = postReactionMap.get(key)
-    entry.counts[row.reaction] = (entry.counts[row.reaction] || 0) + 1
-    entry.byUser[String(row.user_id)] = row.reaction
-  }
+      const postReactionMap = new Map()
+      for (const row of postReactions) {
+        const key = String(row.post_id)
+        if (!postReactionMap.has(key)) postReactionMap.set(key, { counts: {}, byUser: {} })
+        const entry = postReactionMap.get(key)
+        entry.counts[row.reaction] = (entry.counts[row.reaction] || 0) + 1
+        entry.byUser[String(row.user_id)] = row.reaction
+      }
 
-  const commentReactionMap = new Map()
-  for (const row of commentReactions) {
-    const key = String(row.comment_id)
-    if (!commentReactionMap.has(key)) commentReactionMap.set(key, { counts: {}, byUser: {} })
-    const entry = commentReactionMap.get(key)
-    entry.counts[row.reaction] = (entry.counts[row.reaction] || 0) + 1
-    entry.byUser[String(row.user_id)] = row.reaction
-  }
+      const commentReactionMap = new Map()
+      for (const row of commentReactions) {
+        const key = String(row.comment_id)
+        if (!commentReactionMap.has(key)) commentReactionMap.set(key, { counts: {}, byUser: {} })
+        const entry = commentReactionMap.get(key)
+        entry.counts[row.reaction] = (entry.counts[row.reaction] || 0) + 1
+        entry.byUser[String(row.user_id)] = row.reaction
+      }
 
-  const commentsByPost = new Map()
-  for (const row of commentRows) {
-    const key = String(row.post_id)
-    if (!commentsByPost.has(key)) commentsByPost.set(key, [])
-    commentsByPost.get(key).push(row)
-  }
+      const commentsByPost = new Map()
+      for (const row of commentRows) {
+        const key = String(row.post_id)
+        if (!commentsByPost.has(key)) commentsByPost.set(key, [])
+        commentsByPost.get(key).push(row)
+      }
 
-  return postRows.map((post) => {
-    const author = profiles.get(String(post.author_id)) || { name: 'Nexus member', avatarUrl: null }
-    const reaction = postReactionMap.get(String(post.id)) || { counts: {}, byUser: {} }
-    return {
-      id: String(post.id),
-      userId: String(post.author_id),
-      userName: author.name,
-      userAvatar: author.avatarUrl,
-      content: post.content || '',
-      media: Array.isArray(post.media) ? post.media : [],
-      status: post.status,
-      isAdminPost: Boolean(post.is_admin_post),
-      createdAt: post.created_at,
-      updatedAt: post.updated_at,
-      edited: post.updated_at && post.created_at && post.updated_at !== post.created_at,
-      reactions: reaction.counts,
-      reactedBy: reaction.byUser,
-      comments: buildCommentTree(commentsByPost.get(String(post.id)) || [], commentReactionMap),
+      return postRows.map((post) => {
+        const author = profiles.get(String(post.author_id)) || { name: 'Nexus member', avatarUrl: null }
+        const reaction = postReactionMap.get(String(post.id)) || { counts: {}, byUser: {} }
+        return {
+          id: String(post.id),
+          userId: String(post.author_id),
+          userName: author.name,
+          userAvatar: author.avatarUrl,
+          content: post.content || '',
+          media: Array.isArray(post.media) ? post.media : [],
+          status: post.status,
+          isAdminPost: Boolean(post.is_admin_post),
+          createdAt: post.created_at,
+          updatedAt: post.updated_at,
+          edited: post.updated_at && post.created_at && post.updated_at !== post.created_at,
+          reactions: reaction.counts,
+          reactedBy: reaction.byUser,
+          comments: buildCommentTree(commentsByPost.get(String(post.id)) || [], commentReactionMap),
+        }
+      })
+    } catch (err) {
+      console.error('Feed load failed:', err)
+      emit('nexus:sync-error', {
+        key: 'feed',
+        message: 'The social feed could not be refreshed.',
+        error: err
+      })
+      throw err
     }
   })
 }

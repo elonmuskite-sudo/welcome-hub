@@ -136,7 +136,15 @@ export default function FeedsPage() {
 
   useEffect(() => {
     if (!feedAvailable) return undefined
-    return subscribeFeed(() => { loadFeed() })
+    const handleError = (e) => {
+      if (e.detail?.key === 'feed') setError(e.detail.message)
+    }
+    window.addEventListener('nexus:sync-error', handleError)
+    const unsubscribe = subscribeFeed(() => { loadFeed() })
+    return () => {
+      window.removeEventListener('nexus:sync-error', handleError)
+      unsubscribe()
+    }
   }, [feedAvailable, loadFeed])
 
   useEffect(() => {

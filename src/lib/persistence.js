@@ -364,6 +364,7 @@ async function getSessionUserId() {
 }
 
 let contactsChannel = null
+let inFlightContactsSync = null
 
 function mapCloudContact(row) {
   return {
@@ -376,13 +377,24 @@ function mapCloudContact(row) {
 }
 
 async function syncContactsFromCloud(userId) {
-  return withSync('contacts', () => loadContactsFromCloud(userId))
+  if (inFlightContactsSync) return inFlightContactsSync
+  inFlightContactsSync = withSync('contacts', async () => {
+    try {
+      return await loadContactsFromCloud(userId)
+    } finally {
+      inFlightContactsSync = null
+    }
+  })
+  return inFlightContactsSync
 }
 
 async function loadContactsFromCloud(userId) {
   if (isAppwriteAuthEnabled()) {
     const { contacts = [] } = await appwriteData('contacts.list')
     const mapped = contacts.map(mapCloudContact)
+    const local = readLocalContacts()
+    // Only update and notify if the data actually changed to prevent event loops.
+    if (JSON.stringify(mapped) === JSON.stringify(local)) return mapped
     writeLocalContacts(mapped)
     notifyContactsUpdate()
     return mapped
@@ -395,12 +407,20 @@ async function loadContactsFromCloud(userId) {
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(500)
-    if (error) return null
+    if (error) throw error
     const contacts = (data || []).map(mapCloudContact)
+    const local = readLocalContacts()
+    if (JSON.stringify(contacts) === JSON.stringify(local)) return contacts
     writeLocalContacts(contacts)
     notifyContactsUpdate()
     return contacts
-  } catch {
+  } catch (err) {
+    console.error('Contact sync failed:', err)
+    emit('nexus:sync-error', {
+      key: 'contacts',
+      message: 'Failed to sync contacts with the cloud.',
+      error: err
+    })
     return null
   }
 }
@@ -416,12 +436,17 @@ function ensureContactsRealtime(userId) {
     .subscribe()
 }
 
-export async function getContacts() {
+export async function getContacts(forceSync = false) {
   const userId = await getSessionUserId()
   if (userId) {
     ensureContactsRealtime(userId)
-    const cloud = await syncContactsFromCloud(userId)
-    if (cloud) return cloud
+    if (forceSync) {
+      const cloud = await syncContactsFromCloud(userId)
+      if (cloud) return cloud
+    } else {
+      // Start background sync if not forced, but return local data immediately.
+      void syncContactsFromCloud(userId)
+    }
   }
   return readLocalContacts()
 }
