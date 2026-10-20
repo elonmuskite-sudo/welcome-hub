@@ -8,22 +8,31 @@ import {
   getMyPublicKey,
   generateSecurityCode,
   initializeE2EE,
+  publishMyPublicKey,
 } from '../../../lib/crypto/e2ee'
 
 export default function PrivacySettings() {
   const [e2eeEnabled, setE2ee] = useState(isE2EEEnabled())
   const [publicKey, setPublicKey] = useState('')
   const [copied, setCopied] = useState(false)
-  const [securityCode] = useState(() => generateSecurityCode('demo-chat'))
+  const [keyError, setKeyError] = useState('')
   const [readReceipts, setReadReceipts] = useSetting('readReceipts', true)
 
   useEffect(() => {
-    initializeE2EE().then(() => getMyPublicKey()).then(setPublicKey)
+    initializeE2EE()
+      .then(() => getMyPublicKey())
+      .then(setPublicKey)
+      .catch(() => setPublicKey(''))
+    if (isE2EEEnabled()) publishMyPublicKey().catch(() => {})
   }, [])
 
   const handleToggleE2EE = (enabled) => {
     setE2EEEnabled(enabled)
     setE2ee(enabled)
+    setKeyError('')
+    // Publish on enable so contacts can actually derive the shared key; without
+    // it encryption would fail for everyone else.
+    if (enabled) publishMyPublicKey().catch((error) => setKeyError(error?.message || 'Could not publish your encryption key.'))
   }
 
   const copyPublicKey = () => {
@@ -110,12 +119,16 @@ export default function PrivacySettings() {
           <div className="p-4 bg-muted/40 rounded-xl border border-border">
             <p className="text-sm font-medium text-foreground mb-1">Security Code</p>
             <p className="text-2xl font-mono tracking-widest text-foreground">
-              {securityCode}
+              {publicKey ? generateSecurityCode(publicKey) : 'Generating...'}
             </p>
             <p className="text-xs text-muted-foreground mt-2">
               Compare this code with your contact to verify encryption.
             </p>
           </div>
+
+          {keyError && (
+            <p className="text-sm text-destructive" role="alert">{keyError}</p>
+          )}
         </>
       )}
     </div>

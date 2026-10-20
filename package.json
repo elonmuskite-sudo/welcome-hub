@@ -9,6 +9,7 @@
     "env:validate": "node scripts/validate-production-env.js",
     "test:email": "node --test tests/resendEmailApi.test.mjs",
     "test:schema": "node --test tests/supabaseSchema.test.mjs",
+    "test:e2ee": "node --test tests/e2ee.test.mjs",
     "supabase:sync": "npm run env:generate && node scripts/setup-supabase.js",
     "supabase:dry-run": "npm run env:generate && node scripts/setup-supabase.js --dry-run",
     "supabase:verify": "npm run env:generate && node scripts/setup-supabase.js --verify-only",

@@ -397,3 +397,74 @@ test('batch verification badges resolve every directory member in one query', as
   ])
   assert.equal(client.calls.length, 1)
 })
+
+test('chat listing is scoped to the caller and returns per-participant display names', async () => {
+  const client = makeClient((sql, values) => {
+    assert.match(sql, /c\.participant_names/)
+    assert.match(sql, /where c\.owner_id = \$1\s+or exists \(select 1 from public\.chat_members me/)
+    assert.deepEqual(values, [userId])
+    return { rows: [{ id: '123e4567-e89b-42d3-a456-426614174010', participant_names: { [userId]: 'Other Person' } }] }
+  })
+
+  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, { action: 'chats.list' })
+
+  assert.equal(result.chats[0].participant_names[userId], 'Other Person')
+  assert.equal(client.calls.length, 1)
+})
+
+test('chat creation persists sanitised per-participant display names', async () => {
+  const peerId = '123e4567-e89b-42d3-a456-426614174001'
+  const client = makeClient((sql, values) => {
+    if (sql.includes('insert into public.chat_members')) return { rows: [] }
+    assert.match(sql, /insert into public\.chats/)
+    assert.match(sql, /participant_names\)/)
+    assert.equal(values[5], userId)
+    assert.deepEqual(JSON.parse(values[6]), { [userId]: 'Me', [peerId]: 'Recipient' })
+    return { rows: [{ id: '123e4567-e89b-42d3-a456-426614174011', participant_names: JSON.parse(values[6]) }] }
+  })
+
+  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
+    action: 'chats.create',
+    title: 'Recipient',
+    participantIds: [peerId],
+    participantNames: { [userId]: 'Me', [peerId]: 'Recipient', 'not-a-uuid': 'Ignored' },
+  })
+
+  assert.deepEqual(result.chat.participant_names, { [userId]: 'Me', [peerId]: 'Recipient' })
+  assert.equal(client.calls.length, 3)
+})
+
+test('chat creation without participant names stores a null snapshot rather than a shared title', async () => {
+  const client = makeClient((sql, values) => {
+    if (sql.includes('insert into public.chat_members')) return { rows: [] }
+    assert.match(sql, /insert into public\.chats/)
+    assert.equal(values[6], null)
+    return { rows: [{ id: '123e4567-e89b-42d3-a456-426614174012', participant_names: null }] }
+  })
+
+  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
+    action: 'chats.create',
+    title: 'Shared Title',
+    participantIds: [],
+  })
+
+  assert.equal(result.chat.participant_names, null)
+  assert.equal(client.calls.length, 2)
+})
+
+test('E2EE status mirror records the provisioning outcome without touching message sending', async () => {
+  const client = makeClient((sql, values) => {
+    assert.match(sql, /select public\.set_my_e2ee_status\(\$1, \$2\)/)
+    assert.deepEqual(values, [true, true])
+    return { rows: [] }
+  })
+
+  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
+    action: 'profile.setE2ee',
+    enabled: true,
+    keyPublished: true,
+  })
+
+  assert.deepEqual(result, { ok: true })
+  assert.equal(client.calls.length, 1)
+})

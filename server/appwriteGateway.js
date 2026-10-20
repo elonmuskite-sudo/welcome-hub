@@ -95,6 +95,15 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       )
       return { profile: { ...rows[0], role: roles[0]?.is_admin ? 'admin' : 'user' } }
     }
+    case 'profile.setE2ee': {
+      // Status mirror only: the private key stays on the device, so this records
+      // the provisioning outcome for audit and never governs how messages send.
+      await client.query(
+        `select public.set_my_e2ee_status($1, $2)`,
+        [body.enabled === true, body.keyPublished === true],
+      )
+      return { ok: true }
+    }
     case 'directory.lookup': {
       const memberId = String(body.memberId || '').replace(/\D/g, '')
       if (!/^10\d{8}$/.test(memberId)) throw new GatewayError('Recipient ID is invalid.')
@@ -106,15 +115,22 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       return { member: rows[0] || null }
     }
     case 'chats.list': {
+      // Scoped to the caller's own conversations (owner or member). RLS already
+      // filters this, but an explicit predicate keeps the aggregate honest.
       const { rows } = await client.query(
         `select c.id, c.title, c.type, c.avatar_url, c.encrypted, c.owner_id, c.created_at,
+                c.participant_names,
                 coalesce(json_agg(json_build_object('profile_id', cm.profile_id))
                   filter (where cm.profile_id is not null), '[]'::json) as chat_members
            from public.chats c
            left join public.chat_members cm on cm.chat_id = c.id
+          where c.owner_id = $1
+             or exists (select 1 from public.chat_members me
+                         where me.chat_id = c.id and me.profile_id = $1)
           group by c.id
           order by c.created_at desc
           limit 500`,
+        [supabaseUserId],
       )
       return { chats: rows }
     }
@@ -123,13 +139,17 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       if (!validUuid(chatId)) throw new GatewayError('Chat ID is invalid.')
       const { rows: chats } = await client.query(
         `select c.id, c.title, c.type, c.avatar_url, c.encrypted, c.owner_id, c.created_at,
+                c.participant_names,
                 coalesce(json_agg(json_build_object('profile_id', cm.profile_id))
                   filter (where cm.profile_id is not null), '[]'::json) as chat_members
            from public.chats c
            left join public.chat_members cm on cm.chat_id = c.id
           where c.id = $1
+            and (c.owner_id = $2
+                 or exists (select 1 from public.chat_members me
+                             where me.chat_id = c.id and me.profile_id = $2))
           group by c.id`,
-        [chatId],
+        [chatId, supabaseUserId],
       )
       if (!chats[0]) return { chat: null }
       const { rows: messages } = await client.query(
@@ -153,11 +173,30 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       if (suppliedParticipants.length > 200 || suppliedParticipants.some((id) => !validUuid(id))) {
         throw new GatewayError('Chat participants are invalid.')
       }
+      // Per-viewer display names, so each participant sees the *other* person
+      // instead of the shared title (which is fixed to whoever created the chat).
+      const rawNames = body.participantNames
+      const participantNames = rawNames && typeof rawNames === 'object' && !Array.isArray(rawNames)
+        ? Object.fromEntries(
+            Object.entries(rawNames)
+              .filter(([id, name]) => validUuid(id) && typeof name === 'string' && name.trim())
+              .slice(0, 200)
+              .map(([id, name]) => [id, name.trim().slice(0, 200)]),
+          )
+        : null
       const { rows } = await client.query(
-        `insert into public.chats (id, title, type, avatar_url, encrypted, owner_id)
-         values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6)
-         returning id, title, type, avatar_url, encrypted, owner_id, created_at`,
-        [chatId || null, title, type, avatarUrl, encrypted, supabaseUserId],
+        `insert into public.chats (id, title, type, avatar_url, encrypted, owner_id, participant_names)
+         values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7::jsonb)
+         returning id, title, type, avatar_url, encrypted, owner_id, participant_names, created_at`,
+        [
+          chatId || null,
+          title,
+          type,
+          avatarUrl,
+          encrypted,
+          supabaseUserId,
+          participantNames && Object.keys(participantNames).length ? JSON.stringify(participantNames) : null,
+        ],
       )
       const participants = [...new Set([supabaseUserId, ...suppliedParticipants])]
       for (const participantId of participants) {
@@ -220,11 +259,15 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       }
     }
     case 'contacts.list': {
+      // Scoped to the caller: without this filter every account rendered the
+      // same rows, which is how unrelated people appeared with an identical name.
       const { rows } = await client.query(
         `select id, name, nexus_id, avatar_url, created_at
            from public.contacts
+          where user_id = $1
           order by created_at desc
           limit 500`,
+        [supabaseUserId],
       )
       return { contacts: rows }
     }

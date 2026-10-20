@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
-import { appwriteAccount, appwriteData, createAppwriteRecovery, isAppwriteAuthEnabled, signOutFromAppwrite } from './appwrite'
+import { appwriteAccount, appwriteData, createAppwriteRecovery, isAppwriteAuthEnabled, signOutFromAppwrite } from './appwrite.js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || ''
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || ''
-const appwriteSelected = import.meta.env.VITE_AUTH_PROVIDER === 'appwrite'
+const env = import.meta.env || {}
+const supabaseUrl = env.VITE_SUPABASE_URL || ''
+const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || ''
+const appwriteSelected = env.VITE_AUTH_PROVIDER === 'appwrite'
 
 export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey, {

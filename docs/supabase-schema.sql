@@ -724,6 +724,45 @@ do $$ begin alter publication supabase_realtime add table public.feed_comments; 
 do $$ begin alter publication supabase_realtime add table public.feed_reactions; exception when others then null; end $$;
 do $$ begin alter publication supabase_realtime add table public.feed_comment_reactions; exception when others then null; end $$;
 
+-- 20261017080000_e2ee_default_enabled.sql
+-- Default-on end-to-end encryption for newly registered accounts. PREPARED, not
+-- yet applied to production (see the deployment record below).
+-- The column is created with a false default so existing rows are stamped false
+-- (pre-existing accounts keep their opt-in behaviour); the default is then
+-- switched to true, so accounts created afterwards are recorded as encrypted by
+-- default. The private key never leaves the device, so this column is a status
+-- mirror used for audit and post-signup verification, not a sending switch.
+alter table public.members
+  add column if not exists e2ee_enabled boolean not null default false;
+alter table public.members
+  add column if not exists e2ee_key_published_at timestamptz;
+alter table public.members
+  alter column e2ee_enabled set default true;
+
+-- Members record their own provisioning outcome; security definer so the narrow
+-- write cannot be widened into an edit of other protected profile columns.
+create or replace function public.set_my_e2ee_status(p_enabled boolean, p_key_published boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  update public.members
+     set e2ee_enabled = coalesce(p_enabled, e2ee_enabled),
+         e2ee_key_published_at = case
+           when p_key_published then now()
+           else e2ee_key_published_at
+         end
+   where id = auth.uid();
+end $$;
+revoke execute on function public.set_my_e2ee_status(boolean, boolean) from public, anon;
+grant execute on function public.set_my_e2ee_status(boolean, boolean) to authenticated;
+
 -- ===========================================================================
 -- Deployment record (audit trail)
 -- ===========================================================================

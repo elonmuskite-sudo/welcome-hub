@@ -24,6 +24,8 @@ import {
   isAppwriteAuthEnabled,
   rememberAppwriteRecoveryCode,
 } from './appwrite'
+import { isE2EEEnabled, provisionE2EEForNewAccount } from './crypto/e2ee'
+import { syncE2EEStatus } from './persistence'
 
 const noopAsync = async () => { throw new Error('Account services are still loading. Please try again.') }
 const DEFAULT_AUTH = {
@@ -187,6 +189,20 @@ export function AuthProvider({ children }) {
       email_verified: Boolean(authUser.email_confirmed_at),
     })
     setUser(sessionUser)
+
+    // New accounts are end-to-end encrypted by default. The device key pair is
+    // generated and published, and the outcome mirrored to the account record,
+    // before the dashboard is reached. A failure is reported rather than thrown
+    // so the verified account is never stranded at the verification screen.
+    if (purpose === 'signup') {
+      const provisioning = await provisionE2EEForNewAccount()
+      await syncE2EEStatus(isE2EEEnabled(), provisioning.ok)
+      return {
+        ...sessionUser,
+        e2eeProvisioned: provisioning.ok,
+        e2eeError: provisioning.error?.message || '',
+      }
+    }
     return sessionUser
   }, [])
 

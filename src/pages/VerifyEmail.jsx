@@ -43,6 +43,7 @@ export default function VerifyEmail() {
   const [verifying, setVerifying] = useState(false)
   const [resending, setResending] = useState(false)
   const [resendCooldown, setResendCooldown] = useState(0)
+  const [provisioningError, setProvisioningError] = useState('')
 
   useEffect(() => {
     if (!resendCooldown) return undefined
@@ -62,13 +63,20 @@ export default function VerifyEmail() {
 
     setVerifying(true)
     try {
-      await verifyEmailCode(email, code, purpose)
+      const result = await verifyEmailCode(email, code, purpose)
       clearPendingEmail()
       try {
         sessionStorage.removeItem(PENDING_PURPOSE_KEY)
         sessionStorage.removeItem('nexus-pending-verification-password')
       } catch {
         // Verification succeeded; session storage is optional.
+      }
+      // New accounts must be encrypted before they reach the dashboard. If key
+      // provisioning failed, stop here and let the user decide how to proceed
+      // instead of dropping them into the app assuming encryption is active.
+      if (purpose === 'signup' && result?.e2eeProvisioned === false) {
+        setProvisioningError(result.e2eeError || 'Encryption keys could not be created on this device.')
+        return
       }
       navigate(purpose === 'recovery' ? '/reset-password' : '/app', { replace: true })
     } catch (verifyError) {
@@ -148,6 +156,25 @@ export default function VerifyEmail() {
               {resending ? 'Sending...' : resendCooldown ? `Resend in ${resendCooldown}s` : 'Resend code'}
             </ChatButton>
           </div>
+
+          {provisioningError && (
+            <div role="alert" className="mt-6 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-left">
+              <p className="text-sm font-semibold text-foreground">
+                Your account is verified, but encryption could not be set up on this device.
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">{provisioningError}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Messages will be sent without end-to-end encryption until you enable it in Settings → Privacy.
+              </p>
+              <ChatButton
+                type="button"
+                onClick={() => navigate('/app', { replace: true })}
+                className="mt-4 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+              >
+                Continue to Nexus
+              </ChatButton>
+            </div>
+          )}
         </div>
       ) : (
         <div className="mx-auto w-full max-w-md rounded-2xl border border-border bg-card p-6 text-center text-card-foreground shadow-sm">

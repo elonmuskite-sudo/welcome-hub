@@ -327,6 +327,7 @@ export async function createChat(chatData) {
       avatarUrl: newChat.avatar_url,
       encrypted: newChat.encrypted,
       participantIds,
+      participantNames: newChat.participant_names,
     })
     newChat.id = String(chat.id)
     newChat.created_at = chat.created_at
@@ -360,6 +361,30 @@ async function getSessionUserId() {
     return data?.session?.user?.id || null
   } catch {
     return null
+  }
+}
+
+// Mirrors the device's E2EE provisioning outcome onto the account record so the
+// server keeps an auditable status. Best-effort by design: the device stays the
+// source of truth for whether messages are encrypted, so a failure here must
+// never block the user from using the account.
+export async function syncE2EEStatus(enabled, keyPublished) {
+  const payload = { enabled: enabled === true, keyPublished: keyPublished === true }
+  try {
+    if (isAppwriteAuthEnabled()) {
+      await appwriteData('profile.setE2ee', payload)
+      return true
+    }
+    if (!supabase) return false
+    const { error } = await supabase.rpc('set_my_e2ee_status', {
+      p_enabled: payload.enabled,
+      p_key_published: payload.keyPublished,
+    })
+    if (error) throw error
+    return true
+  } catch (error) {
+    console.warn('Could not record the E2EE status:', error)
+    return false
   }
 }
 
@@ -401,14 +426,23 @@ async function loadContactsFromCloud(userId) {
   }
   if (!supabase || !userId) return null
   try {
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('id, name, nexus_id, avatar_url, created_at')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(500)
-    if (error) throw error
-    const contacts = (data || []).map(mapCloudContact)
+    // Prefer the directory-authoritative view so a stale stored snapshot can
+    // never show the wrong name; fall back to the raw table before the
+    // list_my_contacts migration is applied.
+    let rows = null
+    const { data: resolved, error: rpcError } = await supabase.rpc('list_my_contacts')
+    if (!rpcError && Array.isArray(resolved)) rows = resolved
+    if (!rows) {
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('id, name, nexus_id, avatar_url, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(500)
+      if (error) throw error
+      rows = data || []
+    }
+    const contacts = rows.map(mapCloudContact)
     const local = readLocalContacts()
     if (JSON.stringify(contacts) === JSON.stringify(local)) return contacts
     writeLocalContacts(contacts)

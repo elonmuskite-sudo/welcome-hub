@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback } from 'react'
+import { useEffect, useMemo, useCallback, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import ChatSidebar from '../components/chat/ChatSidebar'
 import BottomNav, { getActiveTabFromPath } from '../components/chat/BottomNav'
@@ -10,11 +10,13 @@ import SyncIndicator from '../components/SyncIndicator'
 import Header from '../components/Header'
 import { requestNotificationPermission, showSystemNotification } from '../lib/notifications'
 import { startRealtimeListeners, stopRealtimeListeners } from '../lib/persistence'
+import { isE2EEEnabled, publishMyPublicKey, applyE2EEDefaultForExistingAccount, shouldShowE2EEDefaultNotice, dismissE2EEDefaultNotice } from '../lib/crypto/e2ee'
 import { useViewportInsets } from '../hooks/useViewportInsets'
 
 export default function ChatLayout() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [showE2eeNotice, setShowE2eeNotice] = useState(false)
   useViewportInsets()
 
   useEffect(() => {
@@ -29,6 +31,13 @@ export default function ChatLayout() {
     }
 
     initNotifications()
+    // Accounts that predate automatic enablement keep their existing opt-in
+    // status; only accounts provisioned at signup run encrypted by default.
+    applyE2EEDefaultForExistingAccount()
+    // Republish the device public key on launch so contacts can always find it.
+    // Best-effort: a failure never blocks the chat UI.
+    if (isE2EEEnabled()) publishMyPublicKey().catch(() => {})
+    setShowE2eeNotice(shouldShowE2EEDefaultNotice())
     const channel = startRealtimeListeners()
     return () => stopRealtimeListeners(channel)
   }, [])
@@ -53,6 +62,21 @@ export default function ChatLayout() {
       </Header>
 
       <SyncIndicator />
+
+      {showE2eeNotice && (
+        <div role="status" className="flex items-start gap-3 border-b border-primary/30 bg-primary/10 px-4 py-3 text-sm text-foreground">
+          <p className="flex-1">
+            Your messages are end-to-end encrypted by default on this device. Your private key never leaves this browser.
+          </p>
+          <ChatButton
+            type="button"
+            onClick={() => { dismissE2EEDefaultNotice(); setShowE2eeNotice(false) }}
+            className="font-semibold text-primary hover:underline"
+          >
+            Got it
+          </ChatButton>
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden pb-[var(--chat-bottom-offset,72px)] md:pb-0">
         <div className="hidden md:flex md:w-96 flex-col bg-card border-r border-border">

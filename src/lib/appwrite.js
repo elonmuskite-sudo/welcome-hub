@@ -1,8 +1,9 @@
 import { Account, Client } from 'appwrite'
 
-const endpoint = import.meta.env.VITE_APPWRITE_ENDPOINT || ''
-const projectId = import.meta.env.VITE_APPWRITE_PROJECT_ID || ''
-const authProvider = import.meta.env.VITE_AUTH_PROVIDER || 'supabase'
+const env = import.meta.env || {}
+const endpoint = env.VITE_APPWRITE_ENDPOINT || ''
+const projectId = env.VITE_APPWRITE_PROJECT_ID || ''
+const authProvider = env.VITE_AUTH_PROVIDER || 'supabase'
 
 const client = endpoint && projectId
   ? new Client().setEndpoint(endpoint).setProject(projectId)

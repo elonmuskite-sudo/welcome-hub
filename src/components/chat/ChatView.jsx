@@ -7,7 +7,7 @@ import MessageBubble from './MessageBubble'
 import { useSetting } from '../../hooks/useSetting'
 import { useSyncStatus } from '../../hooks/useSyncStatus'
 import { getWallpaperById } from '../../lib/wallpapers'
-import { encryptMessage, decryptMessage, isE2EEEnabled } from '../../lib/crypto/e2ee'
+import { encryptMessage, decryptMessage, isE2EEEnabled, NO_PEER_KEY_NOTICE, ENCRYPTION_FAILED_NOTICE } from '../../lib/crypto/e2ee'
 import { useCall } from '../../lib/CallContext'
 import { sendChatMessage, toggleMessageReaction, sendReadReceipt } from '../../lib/persistence'
 import { isChatServiceAvailable, newId } from '../../lib/persistence'
@@ -15,6 +15,7 @@ import { useAuth } from '../../lib/AuthContext'
 import { Search, X, MessageCircle } from 'lucide-react'
 import ChatButton from './ChatButton'
 import VerificationBadge from './VerificationBadge'
+import { SyncSpinner } from '../SyncIndicator'
 import { peerIdOf, chatDisplayName } from './ChatListItem'
 import { resolveMessages, decodeContent, encodeReply } from '../../lib/chatProtocol'
 
@@ -27,6 +28,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
   const [messages, setMessages] = useState(chat?.messages || [])
   const [decryptedMessages, setDecryptedMessages] = useState({})
   const [sendError, setSendError] = useState('')
+  const [unencryptedNotice, setUnencryptedNotice] = useState('')
   const [reply, setReply] = useState(null)
   const [showSearch, setShowSearch] = useState(false)
   const [search, setSearch] = useState('')
@@ -144,6 +146,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
   // Cached plaintext and in-flight attempts belong to one conversation only.
   useEffect(() => {
     setDecryptedMessages({})
+    setUnencryptedNotice('')
     decryptAttemptsRef.current = new Set()
   }, [chat?.id])
 
@@ -200,17 +203,19 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
     const type = messageData.type || 'text'
     if (type === 'text') content = encodeReply(content, reply)
     let encrypted = false
+    let fallbackNotice = ''
 
     if (isE2EEEnabled() && type === 'text') {
-      try {
-        const result = await encryptMessage(chat.id, content)
-        content = result.content
-        encrypted = result.encrypted
-      } catch (error) {
-        setSendError(error?.message || 'Could not encrypt this message.')
-        return false
+      // Encryption fails open for contacts who have not published a key: the
+      // message still sends, but the sender is told it went out unencrypted.
+      const result = await encryptMessage(chat.id, content)
+      content = result.content
+      encrypted = result.encrypted
+      if (!encrypted) {
+        fallbackNotice = result.reason === 'peer_key_missing' ? NO_PEER_KEY_NOTICE : ENCRYPTION_FAILED_NOTICE
       }
     }
+    setUnencryptedNotice(fallbackNotice)
 
     const newMessage = {
       id: newId(),
@@ -358,6 +363,14 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
         </div>
       </div>
 
+      {unencryptedNotice && (
+        <div role="status" className="flex items-start gap-3 border-t border-amber-500/30 bg-amber-500/10 chat-page-x py-2">
+          <p className="flex-1 text-sm text-foreground">{unencryptedNotice}</p>
+          <ChatButton type="button" onClick={() => setUnencryptedNotice('')} className="text-sm font-semibold text-primary hover:underline">
+            Dismiss
+          </ChatButton>
+        </div>
+      )}
       {sendError && <p role="alert" className="border-t border-destructive/30 bg-destructive/10 chat-page-x py-2 text-sm text-destructive break-words">{sendError}</p>}
       <MessageInput onSendMessage={handleSendMessage} reply={reply} onCancelReply={() => setReply(null)} chatId={chat.id} />
     </div>
