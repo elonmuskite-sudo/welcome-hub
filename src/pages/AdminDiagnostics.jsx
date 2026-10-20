@@ -123,7 +123,7 @@ export default function AdminDiagnostics() {
         <Panel title={isAppwriteAuthEnabled() ? 'Database schema' : 'Supabase Edge Functions'}
           where={isAppwriteAuthEnabled()
             ? 'Tables accessible to the authenticated database gateway'
-            : 'Supabase → Edge Functions → Secrets (used for payments and emails)'} result={functions} />
+            : 'Supabase → Edge Functions → Secrets (used for emails and support)'} result={functions} />
       </main>
     </div>
   )

@@ -11,8 +11,6 @@ const CHECKS = [
   { service: 'Supabase', key: 'SUPABASE_SERVICE_ROLE_KEY' },
   { service: 'Resend', key: 'RESEND_API_KEY' },
   { service: 'Resend', key: 'RESEND_FROM' },
-  { service: 'NOWPayments', key: 'NOWPAYMENTS_API_KEY' },
-  { service: 'NOWPayments', key: 'NOWPAYMENTS_IPN_SECRET' },
 ]
 
 Deno.serve(async (req) => {
@@ -32,7 +30,7 @@ Deno.serve(async (req) => {
 
     const checks = CHECKS.map((c) => ({ ...c, configured: Boolean(Deno.env.get(c.key)?.trim()) }))
 
-    const tables = ['members', 'chats', 'messages', 'storage_purchases', 'payment_webhook_events']
+    const tables = ['members', 'chats', 'messages', 'identity_verifications']
     const tableChecks = await Promise.all(tables.map(async (table) => {
       const { error: tErr } = await admin.from(table).select('*', { head: true, count: 'exact' }).limit(1)
       return { table, ok: !tErr }

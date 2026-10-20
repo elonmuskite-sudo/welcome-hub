@@ -24,8 +24,8 @@ const ChatPage = lazy(() => import("./pages/ChatPage.jsx"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage.jsx"));
 const ContactsPanel = lazy(() => import("./components/chat/ContactsPanel.jsx"));
 const FeedsPage = lazy(() => import("./pages/FeedsPage.jsx"));
-const PaymentStatusPage = lazy(() => import("./pages/PaymentStatusPage.jsx"));
-const InvoicePage = lazy(() => import("./pages/InvoicePage.jsx"));
+const LegalPage = lazy(() => import("./pages/LegalPage.jsx"));
+const DeleteAccountPage = lazy(() => import("./pages/DeleteAccountPage.jsx"));
 const AdminLogin = lazy(() => import("./pages/AdminLogin.jsx"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard.jsx"));
 const AdminUsers = lazy(() => import("./pages/AdminUsers.jsx"));
@@ -58,6 +58,10 @@ function App() {
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/forgot-password" element={<AuthGuard><ForgotPassword /></AuthGuard>} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            {/* Store-review and user-facing legal pages must load without a session. */}
+            <Route path="/privacy" element={<Suspense fallback={<RouteFallback />}><LegalPage doc="privacy" /></Suspense>} />
+            <Route path="/terms" element={<Suspense fallback={<RouteFallback />}><LegalPage doc="terms" /></Suspense>} />
+            <Route path="/delete-account" element={<Suspense fallback={<RouteFallback />}><DeleteAccountPage /></Suspense>} />
             <Route
               path="/app"
               element={
@@ -74,8 +78,8 @@ function App() {
               <Route path="settings/:section" element={<SettingsPage />} />
               <Route path="contacts" element={<ContactsPanel />} />
               <Route path="feeds" element={<FeedsPage />} />
-              <Route path="payment/:purchaseId" element={<PaymentStatusPage />} />
-              <Route path="invoice/:purchaseId" element={<InvoicePage />} />
+              <Route path="privacy" element={<LegalPage doc="privacy" />} />
+              <Route path="terms" element={<LegalPage doc="terms" />} />
             </Route>
             <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
             <Route

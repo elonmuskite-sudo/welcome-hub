@@ -72,7 +72,7 @@ Set these in **Vercel → Project → Settings → Environment Variables** for P
 - `RESEND_FROM`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `ADMIN_SESSION_SECRET` (encrypted server variable — see §7)
+- `ADMIN_SESSION_SECRET` (encrypted server variable — see §6)
 
 Do not add `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_SESSION_SECRET`, the Postgres connection string, or `RESEND_API_KEY` to frontend `VITE_` variables. The database connection string stays local to the operator's migration environment and is not required by the Vercel app. Redeploy after environment changes.
 
@@ -80,18 +80,7 @@ To configure Production and Preview from GitHub, add `VERCEL_TOKEN`, `VERCEL_PRO
 
 The workflow's **Run database schema** option is only for an empty, fresh Supabase project. Leave it unchecked for any existing project; the baseline schema is not a repeatable migration and will fail on objects such as the existing `app_role` type. Use the versioned migration process above for schema updates.
 
-## 5. Configure NOWPayments Edge Function secrets
-
-NOWPayments credentials are read by Supabase Edge Functions, not by the Vercel app. Add these GitHub Actions repository secrets before running **Actions → Set up production**:
-
-- `SUPABASE_ACCESS_TOKEN` (a scoped Supabase access token authorized to manage Edge Function secrets)
-- `SUPABASE_PROJECT_REF` (the project reference shown in the Supabase project URL)
-- `NOWPAYMENTS_API_KEY`
-- `NOWPAYMENTS_IPN_SECRET`
-
-The workflow sends the two NOWPayments values to Supabase using the CLI; they are not added to Vercel. If an API key was pasted into chat or another public/shared location, revoke it and generate a replacement before saving it as a GitHub secret. Regenerating the IPN secret immediately invalidates the previous one, so update its GitHub secret and rerun the workflow promptly to avoid failed payment notifications. Supabase Edge Function secrets take effect without redeploying the functions.
-
-## 6. Verify the flow
+## 5. Verify the flow
 
 1. Register with an email address and an 8-character-minimum password; confirm the six-digit code is delivered by Resend.
 2. Verify the code, then sign in; the profile row should be created by the database trigger.
@@ -99,7 +88,7 @@ The workflow sends the two NOWPayments values to Supabase using the CLI; they ar
 4. Verify the code, set a new password, and sign in with it.
 5. In Supabase SQL Editor, verify `members.password` is not selected by anon/authenticated roles and that a user can only select their own member row.
 
-## 7. Admin access control
+## 6. Admin access control
 
 Admin surfaces live behind a small, fixed set of routes and a server-side gate:
 

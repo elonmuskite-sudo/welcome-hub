@@ -129,10 +129,17 @@ async function run() {
   try {
     browser = await chromium.launch()
   } catch (error) {
-    await new Promise((resolve) => server.close(resolve))
-    console.error(`Could not launch Chromium: ${error.message}`)
-    console.error('Install browsers with `npx playwright install chromium`.')
-    process.exit(1)
+    // The bundled Chromium build is downloaded on demand; in restricted
+    // environments it may be absent. Fall back to an installed Chrome channel
+    // so the audit still measures the real production bundle.
+    try {
+      browser = await chromium.launch({ channel: 'chrome' })
+    } catch {
+      await new Promise((resolve) => server.close(resolve))
+      console.error(`Could not launch Chromium: ${error.message}`)
+      console.error('Install browsers with `npx playwright install chromium`.')
+      process.exit(1)
+    }
   }
 
   const results = []

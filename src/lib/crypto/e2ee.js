@@ -14,8 +14,7 @@ const NOTICE_SEEN_KEY = 'nexus_e2ee_notice_seen'
 const PROTOCOL = 'ECDH-P256+AES-256-GCM'
 
 export const NO_PEER_KEY_MESSAGE = 'This contact has not shared an encryption key yet.'
-export const NO_PEER_KEY_NOTICE = 'Sent without end-to-end encryption: this contact has not set up encryption yet.'
-export const ENCRYPTION_FAILED_NOTICE = 'Sent without end-to-end encryption: encryption could not be set up on this device.'
+export const ENCRYPTION_FAILED_MESSAGE = 'End-to-end encryption failed. Please try again.'
 
 function toBase64(buffer) {
   return btoa(String.fromCharCode(...new Uint8Array(buffer)))
@@ -116,8 +115,7 @@ export async function provisionE2EEForNewAccount() {
     await publishMyPublicKey()
     return { ok: true, publicKey: keys.publicKey }
   } catch (error) {
-    // The keys exist locally, publishing retries on the next launch, and every
-    // send has a plaintext fallback, so the account keeps its default-on status.
+    // Keep E2EE enabled; encrypted sends stay blocked until key publication works.
     return { ok: false, error, publicKey: keys.publicKey }
   }
 }
@@ -190,14 +188,10 @@ export async function getPeerPublicKey(chatId) {
   const id = String(chatId)
   const cached = peerPublicKeys.get(id)
   if (cached) return cached
-  try {
-    const fetched = await fetchPeerPublicKey(id)
-    if (fetched) {
-      peerPublicKeys.set(id, fetched)
-      return fetched
-    }
-  } catch (error) {
-    console.warn('Could not load the contact encryption key:', error)
+  const fetched = await fetchPeerPublicKey(id)
+  if (fetched) {
+    peerPublicKeys.set(id, fetched)
+    return fetched
   }
   return null
 }
@@ -250,14 +244,8 @@ export async function encryptMessage(chatId, plaintext) {
       }),
     }
   } catch (error) {
-    // Default-on accounts must still reach contacts who have no published key,
-    // so encryption fails open. The reason is reported back so the sender sees a
-    // plaintext warning instead of believing the message was protected.
-    return {
-      encrypted: false,
-      content: plaintext,
-      reason: error?.message === NO_PEER_KEY_MESSAGE ? 'peer_key_missing' : 'encryption_failed',
-    }
+    if (error instanceof Error && error.message === NO_PEER_KEY_MESSAGE) throw error
+    throw new Error(ENCRYPTION_FAILED_MESSAGE, { cause: error })
   }
 }
 

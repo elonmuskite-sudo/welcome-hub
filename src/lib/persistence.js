@@ -35,6 +35,30 @@ const notifyContactsUpdate = () => emit('nexus-contacts:updated')
 const notifyChatUpdate = () => emit('nexus-chat:updated')
 const notifyChange = notifyChatUpdate
 
+// Reactions and receipts are protocol control rows: they are stored as messages
+// but must never become a conversation preview.
+function isPreviewRow(row) {
+  return Boolean(row) && row.type !== 'reaction' && row.type !== 'receipt'
+}
+
+// Folds a chat's newest message into the summary fields the contact list reads.
+// `latest` is the newest message row returned alongside the chat, if any. A
+// locally stored summary that is already newer is kept, so a message applied by
+// the poll is never rolled back by the next chat-list fetch.
+export function applyLastMessageSummary(chat, latest) {
+  const storedTime = chat.last_message_time ? Date.parse(chat.last_message_time) : 0
+  const latestTime = latest?.created_at ? Date.parse(latest.created_at) : 0
+  if (!isPreviewRow(latest) || (storedTime && (!latestTime || latestTime < storedTime))) return chat
+  return {
+    ...chat,
+    last_message: latest.encrypted ? 'Encrypted message' : (latest.content || ''),
+    last_message_time: latest.created_at || chat.last_message_time || null,
+    last_message_sender_id: latest.sender_id ? String(latest.sender_id) : null,
+    last_message_type: latest.type || 'text',
+    last_message_encrypted: Boolean(latest.encrypted),
+  }
+}
+
 function mapMessage(row) {
   return {
     id: String(row.id), sender_id: row.sender_id ? String(row.sender_id) : 'other', content: row.content,
@@ -157,15 +181,17 @@ export async function readChats(userId) {
 async function readChatsFromSource(userId) {
   if (isAppwriteAuthEnabled()) {
     const { chats = [] } = await appwriteData('chats.list')
-    const mappedChats = chats.map(({ chat_members: members, ...chat }) => ({
+    const mappedChats = chats.map(({ chat_members: members, latest, ...chat }) => ({
       ...chat,
       id: String(chat.id),
       participant_ids: (members || []).map((member) => String(member.profile_id)),
+      latest: Array.isArray(latest) ? latest[0] : latest,
     }))
     const localById = new Map(readLocalChats().map((chat) => [String(chat.id), chat]))
-    const merged = mappedChats.map((chat) => {
+    const merged = mappedChats.map(({ latest, ...chat }) => {
       const existing = localById.get(chat.id)
-      return { ...existing, ...chat, messages: existing?.messages || [] }
+      const mergedChat = { ...existing, ...chat, messages: existing?.messages || [] }
+      return applyLastMessageSummary(mergedChat, latest)
     })
     writeLocalChats(merged)
     return merged
@@ -173,14 +199,22 @@ async function readChatsFromSource(userId) {
   let remoteChats = null
   if (supabase && userId) {
     try {
+      // The newest message of every chat rides along with the chat row, so the
+      // contact list can preview conversations that were never opened. One
+      // embedded, per-chat-limited join keeps this a single round trip.
       const { data, error } = await supabase
         .from('chats')
-        .select('id, title, type, avatar_url, encrypted, owner_id, created_at, participant_names, chat_members(profile_id)')
+        .select('id, title, type, avatar_url, encrypted, owner_id, created_at, participant_names, chat_members(profile_id), latest:messages(content, created_at, sender_id, type, encrypted)')
         .order('created_at', { ascending: false })
+        .order('created_at', { referencedTable: 'messages', ascending: false })
+        .limit(1, { referencedTable: 'messages' })
         .limit(500)
       if (error) throw error
-      remoteChats = (data || []).map(({ chat_members: members, ...chat }) => ({
-        ...chat, id: String(chat.id), participant_ids: (members || []).map((m) => String(m.profile_id)),
+      remoteChats = (data || []).map(({ chat_members: members, latest, ...chat }) => ({
+        ...chat,
+        id: String(chat.id),
+        participant_ids: (members || []).map((m) => String(m.profile_id)),
+        latest: Array.isArray(latest) ? latest[0] : latest,
       }))
     } catch {
       remoteChats = null
@@ -193,9 +227,10 @@ async function readChatsFromSource(userId) {
     return local.filter((c) => String(c.owner_id || '') === String(userId) || (c.participant_ids || []).map(String).includes(String(userId)))
   }
   const localById = new Map(local.map((c) => [String(c.id), c]))
-  const merged = remoteChats.map((chat) => {
+  const merged = remoteChats.map(({ latest, ...chat }) => {
     const existing = localById.get(chat.id)
-    return { ...existing, ...chat, messages: existing?.messages || [] }
+    const mergedChat = { ...existing, ...chat, messages: existing?.messages || [] }
+    return applyLastMessageSummary(mergedChat, latest)
   })
   writeLocalChats(merged)
   return merged
@@ -276,6 +311,9 @@ function applyMessagesToChats(chats, chatId, messages) {
   const byId = new Map(existing.map((m) => [m.id, m]))
   let lastMessage = chat.last_message
   let lastMessageTime = chat.last_message_time
+  let lastMessageSenderId = chat.last_message_sender_id
+  let lastMessageType = chat.last_message_type
+  let lastMessageEncrypted = chat.last_message_encrypted
 
   for (const message of messages) {
     const nextMessage = {
@@ -286,10 +324,18 @@ function applyMessagesToChats(chats, chatId, messages) {
     }
     byId.set(nextMessage.id, nextMessage)
     // Reactions and receipts are protocol control rows: they never become the
-    // conversation's last message preview.
+    // conversation's last message preview. The preview is the newest by
+    // timestamp, so a batch that arrives out of order still settles correctly.
     if (nextMessage.type !== 'reaction' && nextMessage.type !== 'receipt') {
-      lastMessage = nextMessage.encrypted ? 'Encrypted message' : nextMessage.content
-      lastMessageTime = nextMessage.created_at
+      const nextTime = Date.parse(nextMessage.created_at)
+      const currentTime = lastMessageTime ? Date.parse(lastMessageTime) : NaN
+      if (!Number.isFinite(currentTime) || !Number.isFinite(nextTime) || nextTime >= currentTime) {
+        lastMessage = nextMessage.encrypted ? 'Encrypted message' : nextMessage.content
+        lastMessageTime = nextMessage.created_at
+        lastMessageSenderId = nextMessage.sender_id
+        lastMessageType = nextMessage.type
+        lastMessageEncrypted = nextMessage.encrypted
+      }
     }
   }
 
@@ -298,6 +344,9 @@ function applyMessagesToChats(chats, chatId, messages) {
     messages: [...byId.values()],
     last_message: lastMessage,
     last_message_time: lastMessageTime,
+    last_message_sender_id: lastMessageSenderId,
+    last_message_type: lastMessageType,
+    last_message_encrypted: lastMessageEncrypted,
     unread_count: 0,
   }
   const nextChats = chats.slice()
@@ -367,6 +416,13 @@ export async function getChatById(chatId, userId) {
   return withSync('chat', () => loadChatById(chatId, userId))
 }
 
+// A full chat load replaces the cached row but never recomputes the contact-list
+// summary, so the stored preview fields are carried over instead of dropped.
+function mergeLoadedChat(hydrated) {
+  const previous = readLocalChats().find((item) => String(item.id) === hydrated.id)
+  return previous ? { ...previous, ...hydrated } : hydrated
+}
+
 async function loadChatById(chatId, userId) {
   if (isAppwriteAuthEnabled() && UUID_REGEX.test(String(chatId))) {
     const { chat } = await appwriteData('chats.get', { chatId: String(chatId) })
@@ -378,8 +434,9 @@ async function loadChatById(chatId, userId) {
       participant_ids: (members || []).map((member) => String(member.profile_id)),
       messages: (rest.messages || []).map(mapMessage),
     }
-    writeLocalChats([hydrated, ...readLocalChats().filter((item) => String(item.id) !== hydrated.id)])
-    return hydrated
+    const merged = mergeLoadedChat(hydrated)
+    writeLocalChats([merged, ...readLocalChats().filter((item) => String(item.id) !== merged.id)])
+    return merged
   }
   if (supabase && UUID_REGEX.test(String(chatId))) {
     const { data: chatData, error } = await supabase
@@ -396,7 +453,7 @@ async function loadChatById(chatId, userId) {
       if (!data || data.length < 1000) break
     }
     const { chat_members: members, ...rest } = chatData
-    const hydrated = { ...rest, id: String(rest.id), participant_ids: (members || []).map((m) => String(m.profile_id)), messages }
+    const hydrated = mergeLoadedChat({ ...rest, id: String(rest.id), participant_ids: (members || []).map((m) => String(m.profile_id)), messages })
     writeLocalChats([hydrated, ...readLocalChats().filter((c) => String(c.id) !== hydrated.id)])
     return hydrated
   }
@@ -410,8 +467,12 @@ export async function createChat(chatData) {
 
   const newChat = {
     id: newId(), title: chatData.title || 'New Chat', type: chatData.type || 'private',
-    avatar_url: chatData.avatar_url || null, last_message: chatData.last_message || 'New conversation',
-    last_message_time: new Date().toISOString(), unread_count: 0, encrypted: Boolean(chatData.encrypted),
+    avatar_url: chatData.avatar_url || null, last_message: chatData.last_message || null,
+    // A new conversation has no history yet, so it must not fabricate a preview
+    // timestamp — the contact list shows its empty state until a message lands.
+    last_message_time: chatData.last_message ? new Date().toISOString() : null,
+    last_message_sender_id: null, last_message_type: 'text', last_message_encrypted: false,
+    unread_count: 0, encrypted: Boolean(chatData.encrypted),
     owner_id: chatData.owner_id ? String(chatData.owner_id) : null, participant_ids: participantIds,
     participant_names: chatData.participantNames || null,
     messages: chatData.messages || [], created_at: new Date().toISOString(),

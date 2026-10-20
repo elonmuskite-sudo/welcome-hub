@@ -14,11 +14,15 @@ import {
   PhotoIcon,
   VideoCameraIcon,
   EllipsisHorizontalIcon,
+  FlagIcon,
+  NoSymbolIcon,
 } from '@heroicons/react/24/solid'
 import Avatar from '../components/chat/Avatar'
 import FeedTimestamp from '../components/FeedTimestamp'
+import ReportDialog from '../components/ReportDialog'
 import { useAuth } from '../lib/AuthContext'
 import { useNow } from '../lib/useNow'
+import { blockUser } from '../lib/moderation'
 import { createChat, getChats, sendChatMessage, getContacts, searchUserByNexusId } from '../lib/persistence'
 import UniversalEmojiPicker from '../components/chat/UniversalEmojiPicker'
 import {
@@ -114,6 +118,7 @@ export default function FeedsPage() {
   const [shareError, setShareError] = useState('')
 
   const [menuFeedId, setMenuFeedId] = useState(null)
+  const [reportTarget, setReportTarget] = useState(null)
 
   const loadFeed = useCallback(async () => {
     if (!feedAvailable) {
@@ -253,6 +258,20 @@ export default function FeedsPage() {
       await loadFeed()
     } catch (moderateError) {
       setError(moderateError?.message || 'The post could not be moderated.')
+    }
+  }
+
+  // ---- Report & block (store UGC policy) ----------------------------------
+  const blockFromFeed = async (feed) => {
+    setMenuFeedId(null)
+    if (!window.confirm(`Block ${feed.userName}? You will no longer see their posts or comments.`)) return
+    setError('')
+    try {
+      await blockUser(feed.userId)
+      setNotice(`${feed.userName} is now blocked. You can unblock them in Settings → Account.`)
+      await loadFeed()
+    } catch (blockError) {
+      setError(blockError?.message || 'That member could not be blocked.')
     }
   }
 
@@ -437,6 +456,14 @@ export default function FeedsPage() {
               <button onClick={() => removeComment(comment.id)} className="text-destructive hover:underline">Delete</button>
             </>
           )}
+          {String(comment.userId) !== String(user?.id) && (
+            <button
+              onClick={() => setReportTarget({ type: 'comment', id: comment.id, label: `this comment by ${comment.userName}` })}
+              className="hover:underline"
+            >
+              Report
+            </button>
+          )}
           {isAdmin && comment.status === 'active' && (
             <>
               <button onClick={() => moderateComment(comment.id, 'hidden')} className="hover:underline">Hide</button>
@@ -522,25 +549,33 @@ export default function FeedsPage() {
                       <FeedTimestamp createdAt={feed.createdAt} now={now} className="text-xs text-muted-foreground" edited={feed.edited} />
                     </div>
                   </div>
-                  {(isOwner || isAdmin) && (
-                    <div className="relative">
-                      <button onClick={() => setMenuFeedId(menuFeedId === feed.id ? null : feed.id)} className="rounded-full p-2 hover:bg-muted" title="Post options">
-                        <EllipsisHorizontalIcon className="h-5 w-5 text-muted-foreground" />
-                      </button>
-                      {menuFeedId === feed.id && (
-                        <>
-                          <div className="fixed inset-0 z-10" onClick={() => setMenuFeedId(null)} />
-                          <div className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-xl border border-border bg-card py-1 text-sm shadow-lg">
-                            {isOwner && <button onClick={() => startEdit(feed)} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-muted"><PencilSquareIcon className="h-4 w-4" /> Edit post</button>}
-                            {isOwner && <button onClick={() => removePost(feed.id)} className="flex w-full items-center gap-2 px-3 py-2 text-destructive hover:bg-muted"><TrashIcon className="h-4 w-4" /> Delete post</button>}
-                            {isAdmin && feed.status === 'active' && <button onClick={() => moderatePost(feed.id, 'hidden')} className="w-full px-3 py-2 text-left hover:bg-muted">Hide from feed</button>}
-                            {isAdmin && feed.status === 'active' && <button onClick={() => moderatePost(feed.id, 'removed')} className="w-full px-3 py-2 text-left text-destructive hover:bg-muted">Remove post</button>}
-                            {isAdmin && feed.status !== 'active' && <button onClick={() => moderatePost(feed.id, 'active')} className="w-full px-3 py-2 text-left hover:bg-muted">Restore post</button>}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
+                  <div className="relative">
+                    <button onClick={() => setMenuFeedId(menuFeedId === feed.id ? null : feed.id)} className="rounded-full p-2 hover:bg-muted" title="Post options">
+                      <EllipsisHorizontalIcon className="h-5 w-5 text-muted-foreground" />
+                    </button>
+                    {menuFeedId === feed.id && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setMenuFeedId(null)} />
+                        <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-border bg-card py-1 text-sm shadow-lg">
+                          {isOwner && <button onClick={() => startEdit(feed)} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-muted"><PencilSquareIcon className="h-4 w-4" /> Edit post</button>}
+                          {isOwner && <button onClick={() => removePost(feed.id)} className="flex w-full items-center gap-2 px-3 py-2 text-destructive hover:bg-muted"><TrashIcon className="h-4 w-4" /> Delete post</button>}
+                          {isAdmin && feed.status === 'active' && <button onClick={() => moderatePost(feed.id, 'hidden')} className="w-full px-3 py-2 text-left hover:bg-muted">Hide from feed</button>}
+                          {isAdmin && feed.status === 'active' && <button onClick={() => moderatePost(feed.id, 'removed')} className="w-full px-3 py-2 text-left text-destructive hover:bg-muted">Remove post</button>}
+                          {isAdmin && feed.status !== 'active' && <button onClick={() => moderatePost(feed.id, 'active')} className="w-full px-3 py-2 text-left hover:bg-muted">Restore post</button>}
+                          {!isOwner && (
+                            <button onClick={() => { setMenuFeedId(null); setReportTarget({ type: 'post', id: feed.id, label: `this post by ${feed.userName}` }) }} className="flex w-full items-center gap-2 px-3 py-2 hover:bg-muted">
+                              <FlagIcon className="h-4 w-4" /> Report post
+                            </button>
+                          )}
+                          {!isOwner && (
+                            <button onClick={() => blockFromFeed(feed)} className="flex w-full items-center gap-2 px-3 py-2 text-destructive hover:bg-muted">
+                              <NoSymbolIcon className="h-4 w-4" /> Block {feed.userName}
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 {feed.content && <p className="whitespace-pre-wrap px-4 pb-3 leading-relaxed text-foreground">{feed.content}</p>}
@@ -770,6 +805,16 @@ export default function FeedsPage() {
             else reactToComment(pickerTarget.id, emoji)
           }}
           onClose={() => setPickerTarget(null)}
+        />
+      )}
+
+      {reportTarget && (
+        <ReportDialog
+          targetType={reportTarget.type}
+          targetId={reportTarget.id}
+          targetLabel={reportTarget.label}
+          onClose={() => setReportTarget(null)}
+          onSubmitted={() => setNotice('Thanks — your report has been sent to our moderators.')}
         />
       )}
     </div>

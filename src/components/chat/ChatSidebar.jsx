@@ -1,19 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { MagnifyingGlassIcon, ChatBubbleLeftRightIcon, PhoneIcon, UserPlusIcon } from '@heroicons/react/24/solid'
+import { MagnifyingGlassIcon, ChatBubbleLeftRightIcon, PhoneIcon, UserPlusIcon, ExclamationTriangleIcon } from '@heroicons/react/24/solid'
 import ChatListItem from './ChatListItem'
 import Avatar from './Avatar'
 import UnsavedContactPrompt from './UnsavedContactPrompt'
 import { useAuth } from '../../lib/AuthContext'
 import { useSyncStatus } from '../../hooks/useSyncStatus'
+import { useNow } from '../../lib/useNow'
 import { SyncSpinner } from '../SyncIndicator'
-import { mockChats } from '../../data/mockChats'
 import { createChat, getChats, searchUserByNexusId, formatNexusId, addContact, isContactSaved } from '../../lib/persistence'
 
 // eslint-disable-next-line react/prop-types
 export default function ChatSidebar({ activeTab, onTabChange }) {
   const [searchQuery, setSearchQuery] = useState('')
-  const [chats, setChats] = useState(mockChats)
+  const [chats, setChats] = useState([])
+  const [chatsLoading, setChatsLoading] = useState(true)
+  const [listError, setListError] = useState('')
+  const [reloadToken, setReloadToken] = useState(0)
   const [foundUser, setFoundUser] = useState(null)
   const [isSearching, setIsSearching] = useState(false)
   const [chatError, setChatError] = useState('')
@@ -25,13 +28,25 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
   const { chatId } = useParams()
   const { keys: syncKeys } = useSyncStatus()
   const chatsSyncing = syncKeys.includes('chats')
+  // One shared clock keeps every row's relative timestamp ticking.
+  const now = useNow()
 
   useEffect(() => {
     let disposed = false
     let pending = null
     const refreshChats = async () => {
-      const nextChats = await getChats(user?.id)
-      if (!disposed) setChats(Array.isArray(nextChats) ? nextChats : [])
+      try {
+        const nextChats = await getChats(user?.id)
+        if (disposed) return
+        setChats(Array.isArray(nextChats) ? nextChats : [])
+        setListError('')
+      } catch (error) {
+        // A failed load must never be mistaken for "this account has no chats".
+        if (disposed) return
+        setListError(error?.message || 'Could not load your conversations.')
+      } finally {
+        if (!disposed) setChatsLoading(false)
+      }
     }
     // A sync tick can announce several chats at once. Coalescing the burst into
     // one refetch keeps a busy poll from firing a network call per notification.
@@ -39,6 +54,7 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
       if (pending) return
       pending = window.setTimeout(() => { pending = null; void refreshChats() }, 120)
     }
+    setChatsLoading(true)
     void refreshChats()
     window.addEventListener('nexus-chat:updated', scheduleRefresh)
     return () => {
@@ -46,7 +62,7 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
       if (pending) window.clearTimeout(pending)
       window.removeEventListener('nexus-chat:updated', scheduleRefresh)
     }
-  }, [user?.id])
+  }, [user?.id, reloadToken])
 
   // Function to detect if the search query is a Nexus number (format: 10-xxxx-xxxx or 10xxxxxxxx)
   const isNexusNumber = (query) => {
@@ -204,7 +220,7 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto" aria-busy={chatsSyncing || undefined}>
+          <div className="flex-1 overflow-y-auto" aria-busy={chatsLoading || chatsSyncing || undefined}>
             {chatError && <p role="alert" className="mx-4 mb-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{chatError}</p>}
             {/* Show found user when Nexus number is detected */}
             {foundUser && (
@@ -274,11 +290,32 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
             )}
 
             {/* Show filtered chats */}
-            {filteredChats.length > 0 ? (
+            {listError && chats.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                <div className="w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center mb-4">
+                  <ExclamationTriangleIcon className="w-8 h-8 text-destructive" />
+                </div>
+                <p className="text-foreground font-medium">Couldn&apos;t load your chats</p>
+                <p className="text-sm text-muted-foreground mt-1">{listError}</p>
+                <button
+                  type="button"
+                  onClick={() => setReloadToken((token) => token + 1)}
+                  className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : chatsLoading && chats.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 px-4">
+                <SyncSpinner label="Loading chats" />
+                <p className="text-sm text-muted-foreground mt-2">Loading conversations…</p>
+              </div>
+            ) : filteredChats.length > 0 ? (
               filteredChats.map(chat => (
                 <ChatListItem
                   key={chat.id}
                   chat={chat}
+                  now={now}
                   selected={chatId === chat.id}
                   onClick={() => handleChatSelect(chat)}
                 />

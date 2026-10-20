@@ -50,11 +50,26 @@ test('message polling advances its authenticated composite cursor without skippi
   assert.deepEqual(result.cursor, { since: lastMessage.created_at, afterId: lastMessage.id })
 })
 
+test('the chat list carries each conversation\u2019s newest message for the contact preview', async () => {
+  const peerId = '123e4567-e89b-42d3-a456-426614174099'
+  const latest = { content: 'See you at six', created_at: '2026-10-20T09:00:00.000Z', sender_id: peerId, type: 'text', encrypted: false }
+  const client = makeClient((sql, values) => {
+    assert.match(sql, /select json_build_object/)
+    assert.match(sql, /m\.type not in \('reaction', 'receipt'\)/)
+    assert.match(sql, /me\.profile_id = \$1/)
+    assert.deepEqual(values, [userId])
+    return { rows: [{ id: '123e4567-e89b-42d3-a456-426614174001', chat_members: [{ profile_id: userId }], latest }] }
+  })
+
+  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, { action: 'chats.list' })
+
+  assert.deepEqual(result.chats[0].latest, latest)
+})
+
 test('storage upload preparation scopes the object path and database row to the verified user', async () => {
   const client = makeClient((sql, values) => {
     if (sql.includes('pg_advisory_xact_lock')) return { rows: [] }
     if (sql.includes('sum(size_bytes)')) return { rows: [{ used_bytes: 0 }] }
-    if (sql.includes('user_storage_quotas')) return { rows: [{ quota_bytes: 1000000 }] }
     if (sql.includes('insert into public.storage_files')) {
       assert.equal(values[0], userId)
       assert.match(values[7], new RegExp(`^${userId}/direct/`))
@@ -199,35 +214,6 @@ test('admin member update requires admin role and calls the existing guarded RPC
   })
 
   assert.deepEqual(result, { ok: true })
-  assert.equal(client.calls.length, 1)
-})
-
-test('payment QR settings reject actual Storage objects over the upload limit', async () => {
-  const client = makeClient((sql) => {
-    assert.match(sql, /public\.has_role/)
-    return { rows: [{ is_admin: true }] }
-  })
-  const admin = {
-    storage: {
-      from(bucket) {
-        assert.equal(bucket, 'payment-qr')
-        return {
-          async info() {
-            return { data: { size: 5 * 1024 * 1024 + 1, content_type: 'image/png' }, error: null }
-          },
-        }
-      },
-    },
-  }
-
-  await assert.rejects(
-    executeUserDataOperation(client, { supabaseUserId: userId }, {
-      action: 'payments.settings.save',
-      walletAddress: '0x1234567890123456789012345678901234567890',
-      qrPath: 'qr-123e4567-e89b-42d3-a456-426614174001.png',
-    }, admin),
-    { status: 400 },
-  )
   assert.equal(client.calls.length, 1)
 })
 

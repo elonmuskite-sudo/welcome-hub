@@ -17,6 +17,7 @@ import {
   updateAuthenticatedPassword,
   updateMemberProfile,
   verifyEmailCode as verifyEmailOtp,
+  deleteAccount as deleteAccountViaApi,
 } from './supabase'
 import {
   completeAppwriteRecovery,
@@ -31,7 +32,7 @@ const noopAsync = async () => { throw new Error('Account services are still load
 const DEFAULT_AUTH = {
   user: null, loading: true, login: noopAsync, logout: async () => {}, register: noopAsync,
   verifyEmailCode: noopAsync, resendVerificationCode: noopAsync, updateProfile: async () => {},
-  requestPasswordReset: noopAsync, resetPassword: noopAsync,
+  requestPasswordReset: noopAsync, resetPassword: noopAsync, deleteAccount: noopAsync,
 }
 // Reuse one context across hot reloads so the provider and consumers never split
 const AuthContext = globalThis.__nexusAuthContext || (globalThis.__nexusAuthContext = createContext(DEFAULT_AUTH))
@@ -264,6 +265,19 @@ export function AuthProvider({ children }) {
     return { ok: true }
   }, [])
 
+  // Removes the signed-in member's account and associated data, then clears the
+  // local session. The delete endpoint verifies the caller server-side, so this
+  // can only ever delete the account that is currently signed in.
+  const deleteAccount = useCallback(async () => {
+    if (!isSupabaseConfigured()) throw new Error('Account deletion is not configured.')
+    await deleteAccountViaApi()
+    await clearAdminSession()
+    await signOutFromSupabase().catch(() => {})
+    sessionStorage.removeItem(RECOVERY_SESSION_KEY)
+    setUser(null)
+    return { ok: true }
+  }, [])
+
   const value = useMemo(() => ({
     user,
     loading,
@@ -275,7 +289,8 @@ export function AuthProvider({ children }) {
     updateProfile,
     requestPasswordReset,
     resetPassword,
-  }), [user, loading, login, logout, register, verifyEmailCode, resendVerificationCode, updateProfile, requestPasswordReset, resetPassword])
+    deleteAccount,
+  }), [user, loading, login, logout, register, verifyEmailCode, resendVerificationCode, updateProfile, requestPasswordReset, resetPassword, deleteAccount])
 
   return (
     <AuthContext.Provider value={value}>

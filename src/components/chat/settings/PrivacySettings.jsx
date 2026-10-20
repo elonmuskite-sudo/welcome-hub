@@ -48,8 +48,9 @@ export default function PrivacySettings() {
         <div>
           <h3 className="font-semibold text-foreground">End-to-End Encryption</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Messages are encrypted on your device using AES-256-GCM before being sent.
-            Only you and the recipient can read them.
+            Text messages are encrypted on your device when E2EE is enabled.
+            If encryption cannot be completed, the message will not be sent.
+            Attachments and voice notes are not end-to-end encrypted.
           </p>
         </div>
       </div>

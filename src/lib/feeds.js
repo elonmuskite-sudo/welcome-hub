@@ -16,6 +16,7 @@ import {
 export { formatTimeAgo, formatExactTime } from './relativeTime'
 
 import { withSync } from './syncStatus'
+import { getBlockedUserIds } from './moderation'
 
 const POST_COLUMNS = 'id, author_id, content, media, is_admin_post, status, created_at, updated_at'
 const COMMENT_COLUMNS = 'id, post_id, author_id, parent_id, content, status, created_at, updated_at'
@@ -68,9 +69,9 @@ async function memberProfiles(ids) {
   const unique = [...new Set((ids || []).filter(Boolean).map(String))]
   const map = new Map()
   if (!unique.length) return map
-  const { data, error } = await supabase.from('members')
-    .select('id, full_name, first_name, last_name, avatar_url')
-    .in('id', unique)
+  // public.members is readable only for the viewer's own row, so another
+  // author's directory name has to come from the resolver RPC.
+  const { data, error } = await supabase.rpc('list_member_profiles', { p_ids: unique })
   if (error) return map
   for (const row of data || []) {
     map.set(String(row.id), {
@@ -121,6 +122,8 @@ export async function listFeed() {
       const { data: auth } = await supabase.auth.getUser()
       const viewerId = auth?.user?.id ? String(auth.user.id) : null
       const visibility = feedVisibilityFilter({ viewerId, isAdmin: await viewerIsAdmin(viewerId) })
+      // Members do not see content authored by accounts they have blocked.
+      const blocked = new Set(await getBlockedUserIds())
 
       let query = supabase.from('feed_posts').select(POST_COLUMNS)
       if (visibility) query = query.or(visibility)
@@ -129,7 +132,7 @@ export async function listFeed() {
         .limit(100)
       if (error) throw new Error(error.message || 'The feed could not be loaded.')
 
-      const postRows = posts || []
+      const postRows = (posts || []).filter((post) => !blocked.has(String(post.author_id)))
       const postIds = postRows.map((post) => post.id)
       let commentRows = []
       let postReactions = []
@@ -139,7 +142,7 @@ export async function listFeed() {
           supabase.from('feed_comments').select(COMMENT_COLUMNS).in('post_id', postIds).order('created_at', { ascending: true }).limit(2000),
           supabase.from('feed_reactions').select('post_id, user_id, reaction').in('post_id', postIds),
         ])
-        commentRows = comments.data || []
+        commentRows = (comments.data || []).filter((comment) => !blocked.has(String(comment.author_id)))
         postReactions = pReactions.data || []
       }
       const commentIds = commentRows.map((comment) => comment.id)

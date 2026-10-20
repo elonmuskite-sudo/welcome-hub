@@ -25,7 +25,19 @@ dist-ssr
 
 # misc
 .DS_Store
+# Private keys, certificates and keystores
 *.pem
+# The Play Console upload key certificate is a public certificate (no private
+# key) and is a tracked store-submission artifact, so keep that one file.
+!docs/store-submission/upload_certificate.pem
+
+# Android signing material — never commit keys or passwords
+android/key.properties
+*.keystore
+*.jks
+
+# Store-review demo account credentials
+.demo-accounts.local.json
 *.local
 *.suo
 *.ntvs*
@@ -65,6 +77,8 @@ android/.gradle/
 android/app/build/
 android/capacitor-android/build/
 android/gradle/wrapper/
+# Project-local Android SDK used for local release builds
+android-sdk/
 
 # wrangler files
 .wrangler

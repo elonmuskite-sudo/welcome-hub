@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useCallback, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import ChatSidebar from '../components/chat/ChatSidebar'
+import ChatButton from '../components/chat/ChatButton'
 import BottomNav, { getActiveTabFromPath } from '../components/chat/BottomNav'
 import AppTopNav from '../components/chat/AppTopNav'
 import NotificationStack from '../components/chat/NotificationStack'

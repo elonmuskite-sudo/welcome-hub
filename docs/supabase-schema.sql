@@ -13,18 +13,6 @@ create policy "Users see own roles" on public.user_roles for select to authentic
 
 create or replace function public.update_updated_at_column() returns trigger language plpgsql set search_path = public as $$ begin new.updated_at = now(); return new; end; $$;
 
-create table public.user_storage_quotas (user_id uuid primary key, quota_bytes bigint not null default 5368709120, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
-grant select on public.user_storage_quotas to authenticated; grant all on public.user_storage_quotas to service_role;
-alter table public.user_storage_quotas enable row level security;
-create policy "Own quota" on public.user_storage_quotas for select to authenticated using (user_id = auth.uid() or public.has_role(auth.uid(),'admin'));
-create trigger trg_quota_updated before update on public.user_storage_quotas for each row execute function public.update_updated_at_column();
-
-create table public.storage_purchases (id uuid primary key default gen_random_uuid(), user_id uuid not null, tier text not null, added_bytes bigint not null, amount_cents integer not null, currency text not null default 'usd', status text not null default 'pending', checkout_session_id text unique, receipt_url text, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
-grant select on public.storage_purchases to authenticated; grant all on public.storage_purchases to service_role;
-alter table public.storage_purchases enable row level security;
-create policy "Own purchases" on public.storage_purchases for select to authenticated using (user_id = auth.uid() or public.has_role(auth.uid(),'admin'));
-create trigger trg_purchases_updated before update on public.storage_purchases for each row execute function public.update_updated_at_column();
-
 create table public.identity_verifications (id uuid primary key default gen_random_uuid(), user_id uuid not null unique, status text not null default 'pending', match_score numeric, selfie_path text not null, id_document_path text not null, reviewer_note text, reviewed_by uuid, reviewed_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
 grant select, insert, update on public.identity_verifications to authenticated; grant all on public.identity_verifications to service_role;
 alter table public.identity_verifications enable row level security;
@@ -132,19 +120,6 @@ language sql stable security definer set search_path = public as $$
 revoke execute on function public.lookup_member_by_nexus_id(text) from public, anon;
 grant execute on function public.lookup_member_by_nexus_id(text) to authenticated;
 -- from 20261012113128_6f6c8415-a46e-4446-84e3-c5951468a2fe.sql
-create table public.payment_webhook_events (
-  id uuid primary key default gen_random_uuid(),
-  received_at timestamptz not null default now(),
-  order_id text, payment_id text, payment_status text,
-  signature_valid boolean not null default false,
-  outcome text not null default 'received',
-  error text, payload jsonb
-);
-grant select on public.payment_webhook_events to authenticated;
-grant all on public.payment_webhook_events to service_role;
-alter table public.payment_webhook_events enable row level security;
-create policy "Admins read webhook events" on public.payment_webhook_events for select to authenticated using (public.has_role(auth.uid(),'admin'));
-create index on public.payment_webhook_events (received_at desc);
 alter table public.members add column if not exists bio text, add column if not exists interests text[];
 -- from 20261012122632_31486d60-08f7-48ec-a6e7-0d32384bd185.sql
 CREATE TABLE public.auth_email_code_limits (
@@ -246,85 +221,16 @@ grant execute on function public.lookup_member_by_nexus_id(text) to authenticate
 alter publication supabase_realtime add table public.contacts;
 alter publication supabase_realtime add table public.messages;
 alter publication supabase_realtime add table public.chat_members;
-alter publication supabase_realtime add table public.storage_purchases;
--- USDT payments + admin claim
-create table if not exists public.payment_settings (
-  id int primary key default 1 check (id = 1),
-  wallet_address text not null,
-  qr_image_url text,
-  network text not null default 'BEP20',
-  updated_at timestamptz not null default now()
-);
-grant select on public.payment_settings to authenticated;
-grant insert, update on public.payment_settings to authenticated;
-grant all on public.payment_settings to service_role;
-alter table public.payment_settings enable row level security;
-create policy "Signed-in read wallet" on public.payment_settings for select to authenticated using (true);
-create policy "Admins insert wallet" on public.payment_settings for insert to authenticated with check (public.has_role(auth.uid(),'admin'));
-create policy "Admins update wallet" on public.payment_settings for update to authenticated using (public.has_role(auth.uid(),'admin')) with check (public.has_role(auth.uid(),'admin'));
-
-alter table public.storage_purchases add column if not exists tx_reference text;
-alter table public.storage_purchases add column if not exists reviewed_by uuid;
-alter table public.storage_purchases add column if not exists reviewed_at timestamptz;
-
-create or replace function public.submit_usdt_payment(_tier text, _tx_reference text)
-returns uuid language plpgsql security definer set search_path = public as $$
-declare v_bytes bigint; v_cents int; v_id uuid;
-begin
-  if auth.uid() is null then raise exception 'Sign in first'; end if;
-  if not exists(select 1 from public.payment_settings where id=1) then raise exception 'Payments are not set up yet'; end if;
-  case _tier
-    when 'plus_50' then v_bytes := 50::bigint*1073741824; v_cents := 199;
-    when 'plus_200' then v_bytes := 200::bigint*1073741824; v_cents := 499;
-    when 'plus_1000' then v_bytes := 1000::bigint*1073741824; v_cents := 1499;
-    else raise exception 'Unknown plan';
-  end case;
-  if (select count(*) from public.storage_purchases where user_id=auth.uid() and status='awaiting_approval') >= 3 then
-    raise exception 'You already have payments waiting for approval';
-  end if;
-  insert into public.storage_purchases(user_id,tier,added_bytes,amount_cents,currency,status,tx_reference)
-  values (auth.uid(),_tier,v_bytes,v_cents,'usdt','awaiting_approval',nullif(left(trim(coalesce(_tx_reference,'')),120),''))
-  returning id into v_id;
-  return v_id;
-end $$;
-revoke execute on function public.submit_usdt_payment(text,text) from public, anon;
-grant execute on function public.submit_usdt_payment(text,text) to authenticated;
-
-create or replace function public.review_usdt_payment(_purchase_id uuid, _approve boolean)
-returns void language plpgsql security definer set search_path = public as $$
-declare p public.storage_purchases;
-begin
-  if not public.has_role(auth.uid(),'admin') then raise exception 'Admins only'; end if;
-  select * into p from public.storage_purchases where id=_purchase_id for update;
-  if p.id is null or p.status <> 'awaiting_approval' then raise exception 'Payment is not waiting for approval'; end if;
-  update public.storage_purchases set status = case when _approve then 'completed' else 'rejected' end,
-    reviewed_by=auth.uid(), reviewed_at=now() where id=_purchase_id;
-  if _approve then
-    insert into public.user_storage_quotas(user_id, quota_bytes) values (p.user_id, 5368709120 + p.added_bytes)
-    on conflict (user_id) do update set quota_bytes = public.user_storage_quotas.quota_bytes + p.added_bytes;
-  end if;
-end $$;
-revoke execute on function public.review_usdt_payment(uuid,boolean) from public, anon;
-grant execute on function public.review_usdt_payment(uuid,boolean) to authenticated;
 
 create or replace function public.admin_exists() returns boolean language sql stable security definer set search_path = public as $$
   select exists(select 1 from public.user_roles where role='admin') $$;
 revoke execute on function public.admin_exists() from public, anon;
 grant execute on function public.admin_exists() to authenticated;
 
--- one pending/approved ID check per user max
-create policy "Signed-in read QR" on storage.objects for select to authenticated using (bucket_id='payment-qr');
-create policy "Admins upload QR" on storage.objects for insert to authenticated with check (bucket_id='payment-qr' and public.has_role(auth.uid(),'admin'));
-create policy "Admins change QR" on storage.objects for update to authenticated using (bucket_id='payment-qr' and public.has_role(auth.uid(),'admin'));
-
 drop policy if exists "Own ID docs upload" on storage.objects;
 drop policy if exists "Own ID docs read or admin" on storage.objects;
 create policy "Own ID docs upload" on storage.objects for insert to authenticated with check (bucket_id='identity-docs' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "Own ID docs read or admin" on storage.objects for select to authenticated using (bucket_id='identity-docs' and ((storage.foldername(name))[1] = auth.uid()::text or public.has_role(auth.uid(),'admin')));
-
-do $$ begin
-  alter publication supabase_realtime add table public.storage_purchases;
-exception when others then null; end $$;
 -- 20261013212651_a266bd67-bc53-4083-af85-83df904ae8ad.sql
 create unique index if not exists identity_verifications_user_id_key on public.identity_verifications(user_id);
 create or replace function public.stamp_idv_review() returns trigger language plpgsql set search_path = public as $$
@@ -335,31 +241,26 @@ begin
   return new;
 end $$;
 drop trigger if exists trg_idv_review on public.identity_verifications;
-create trigger trg_idv_review before update on public.identity_verifications for each row execute function public.stamp_idv_review();-- security hardening + invoices
+create trigger trg_idv_review before update on public.identity_verifications for each row execute function public.stamp_idv_review();-- security hardening
 create schema if not exists private;
 revoke all on schema private from public, anon;
 grant usage on schema private to authenticated, service_role;
 
 -- move privileged bodies into the non-exposed schema
-alter function public.submit_usdt_payment(text,text) set schema private;
-alter function public.review_usdt_payment(uuid,boolean) set schema private;
 alter function public.admin_exists() set schema private;
 alter function public.get_verification_badge(uuid) set schema private;
 alter function public.lookup_member_by_nexus_id(text) set schema private;
 
 revoke execute on all functions in schema private from public, anon;
-grant execute on function private.submit_usdt_payment(text,text), private.review_usdt_payment(uuid,boolean),
-  private.admin_exists(), private.get_verification_badge(uuid),
+grant execute on function private.admin_exists(), private.get_verification_badge(uuid),
   private.lookup_member_by_nexus_id(text) to authenticated;
 
 -- thin invoker wrappers keep the same API names
-create function public.submit_usdt_payment(_tier text, _tx_reference text) returns uuid language sql security invoker set search_path = public as $$ select private.submit_usdt_payment(_tier, _tx_reference) $$;
-create function public.review_usdt_payment(_purchase_id uuid, _approve boolean) returns void language sql security invoker set search_path = public as $$ select private.review_usdt_payment(_purchase_id, _approve) $$;
 create function public.admin_exists() returns boolean language sql stable security invoker set search_path = public as $$ select private.admin_exists() $$;
 create function public.get_verification_badge(_user_id uuid) returns text language sql stable security invoker set search_path = public as $$ select private.get_verification_badge(_user_id) $$;
 create function public.lookup_member_by_nexus_id(p_member_id text) returns table(id uuid, member_id text, first_name text, last_name text, full_name text, avatar_url text) language sql stable security invoker set search_path = public as $$ select * from private.lookup_member_by_nexus_id(p_member_id) $$;
-revoke execute on function public.submit_usdt_payment(text,text), public.review_usdt_payment(uuid,boolean), public.admin_exists(), public.get_verification_badge(uuid), public.lookup_member_by_nexus_id(text) from public, anon;
-grant execute on function public.submit_usdt_payment(text,text), public.review_usdt_payment(uuid,boolean), public.admin_exists(), public.get_verification_badge(uuid), public.lookup_member_by_nexus_id(text) to authenticated;
+revoke execute on function public.admin_exists(), public.get_verification_badge(uuid), public.lookup_member_by_nexus_id(text) from public, anon;
+grant execute on function public.admin_exists(), public.get_verification_badge(uuid), public.lookup_member_by_nexus_id(text) to authenticated;
 
 -- rate limiter is server-only
 revoke execute on function public.consume_auth_email_code_limit(text,integer,integer) from public, anon, authenticated;
@@ -368,10 +269,6 @@ grant execute on function public.consume_auth_email_code_limit(text,integer,inte
 -- server-only table: explicit deny policy documents intent
 create policy "No client access" on public.auth_email_code_limits for all to authenticated, anon using (false) with check (false);
 
--- invoice numbers
-create sequence if not exists public.invoice_number_seq start 1001;
-alter table public.storage_purchases add column if not exists invoice_number bigint unique default nextval('public.invoice_number_seq');
-grant usage on sequence public.invoice_number_seq to service_role;
 -- Admin member management (admin-only RPCs)
 create schema if not exists private;
 create or replace function private.admin_update_member(_member_id uuid, _first_name text, _last_name text, _bio text)
@@ -839,5 +736,114 @@ grant execute on function public.set_my_e2ee_status(boolean, boolean) to authent
 -- Follow-up  This resolves note 1 above: scripts/lib/supabase-schema.js no longer
 --            lists the profiles-based objects, so REQUIRED_TABLES /
 --            REQUIRED_FUNCTIONS now match the live schema.
+-- ===========================================================================
+
+-- 20261020100000_content_reports_and_blocks.sql
+-- User-generated content controls required by the Google Play and Apple App
+-- Store policies: members can report offensive content and block abusive
+-- members, and admins review the report queue.
+create table if not exists public.content_reports (
+  id uuid primary key default gen_random_uuid(),
+  reporter_id uuid not null,
+  target_type text not null check (target_type in ('post', 'comment', 'member')),
+  target_id uuid not null,
+  reason text not null check (reason in ('spam', 'harassment', 'hate', 'sexual', 'violence', 'misinformation', 'other')),
+  details text not null default '' check (char_length(details) <= 2000),
+  status text not null default 'open' check (status in ('open', 'reviewed', 'actioned', 'dismissed')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_content_reports_status on public.content_reports(status, created_at desc);
+create index if not exists idx_content_reports_reporter on public.content_reports(reporter_id);
+create unique index if not exists uq_content_reports_open
+  on public.content_reports(reporter_id, target_type, target_id)
+  where status = 'open';
+
+create table if not exists public.blocked_users (
+  blocker_id uuid not null,
+  blocked_id uuid not null,
+  created_at timestamptz not null default now(),
+  primary key (blocker_id, blocked_id),
+  check (blocker_id <> blocked_id)
+);
+create index if not exists idx_blocked_users_blocked on public.blocked_users(blocked_id);
+
+grant select, insert, update on public.content_reports to authenticated;
+grant select, insert, delete on public.blocked_users to authenticated;
+grant all on public.content_reports, public.blocked_users to service_role;
+
+alter table public.content_reports enable row level security;
+alter table public.blocked_users enable row level security;
+
+drop trigger if exists trg_content_reports_updated on public.content_reports;
+create trigger trg_content_reports_updated before update on public.content_reports
+  for each row execute function public.update_updated_at_column();
+
+drop policy if exists "Create own reports" on public.content_reports;
+create policy "Create own reports" on public.content_reports for insert to authenticated
+  with check (reporter_id = auth.uid());
+drop policy if exists "Read own or all reports" on public.content_reports;
+create policy "Read own or all reports" on public.content_reports for select to authenticated
+  using (reporter_id = auth.uid() or public.has_role(auth.uid(), 'admin'));
+drop policy if exists "Admins review reports" on public.content_reports;
+create policy "Admins review reports" on public.content_reports for update to authenticated
+  using (public.has_role(auth.uid(), 'admin'))
+  with check (public.has_role(auth.uid(), 'admin'));
+
+drop policy if exists "Read own blocks" on public.blocked_users;
+create policy "Read own blocks" on public.blocked_users for select to authenticated
+  using (blocker_id = auth.uid());
+drop policy if exists "Create own blocks" on public.blocked_users;
+create policy "Create own blocks" on public.blocked_users for insert to authenticated
+  with check (blocker_id = auth.uid());
+drop policy if exists "Delete own blocks" on public.blocked_users;
+create policy "Delete own blocks" on public.blocked_users for delete to authenticated
+  using (blocker_id = auth.uid());
+
+do $$ begin alter publication supabase_realtime add table public.blocked_users; exception when others then null; end $$;
+do $$ begin alter publication supabase_realtime add table public.content_reports; exception when others then null; end $$;
+
+-- 20261020110000_member_profile_directory_rpc.sql
+-- Author names must resolve for every member. public.members is readable only for
+-- the caller's own row ("Read own profile" above), so the direct members lookups
+-- in src/lib/feeds.js and src/lib/moderation.js returned nothing for other
+-- authors and every post, comment and blocked account rendered as the
+-- "Nexus member" placeholder. This resolver returns directory fields for a list
+-- of ids, following the same shape as lookup_member_by_nexus_id and
+-- list_my_contacts: security definer, directory fields only, authenticated only.
+create or replace function public.list_member_profiles(p_ids uuid[])
+returns table (id uuid, member_id text, full_name text, first_name text, last_name text, avatar_url text)
+language sql stable security definer set search_path = public as $$
+  select m.id, m.member_id, m.full_name, m.first_name, m.last_name, m.avatar_url
+  from public.members m
+  where m.id = any(coalesce(p_ids, array[]::uuid[]))
+  limit 500
+$$;
+revoke execute on function public.list_member_profiles(uuid[]) from public, anon;
+grant execute on function public.list_member_profiles(uuid[]) to authenticated, service_role;
+
+-- ===========================================================================
+-- Deployment record   2026-10-20
+-- ===========================================================================
+-- Scope     supabase/migrations/20261020110000_member_profile_directory_rpc.sql
+--           (adds public.list_member_profiles(uuid[])), applied on its own after
+--           20261017080000, 20261020090000 and 20261020100000 were confirmed
+--           already present on the remote project.
+-- Method    scripts/apply-pending-migrations.mjs — one transaction behind an
+--           advisory lock, each version recorded in
+--           supabase_migrations.schema_migrations; the three earlier files
+--           reported SKIP (already applied).
+-- Backup    supabase/backups/2026-10-20T18-22-28-217Z_public_data.sql
+--           SHA-256 8d0b7415a7d44197e22e76e9ebb3aab9d42bc14c224cb3e954b86a1787ef0239
+--           19 public tables / 65 rows, produced by scripts/backup-supabase.js
+--           Rollback: drop function public.list_member_profiles(uuid[]);
+--           No table, row or policy is touched, so the data backup is
+--           precautionary only.
+-- Verified  scripts/verify-migration-objects.mjs: 22 of 22 checks passed —
+--           list_member_profiles exists, is executable by authenticated and is
+--           NOT executable by anon (confirmed via has_function_privilege).
+--           Browser check signed in as demo1 on /app/feeds: a post authored by
+--           demo2 now renders "Demo Reviewer Two" instead of the
+--           "Nexus member" fallback produced by the previous direct table read.
 -- ===========================================================================
 

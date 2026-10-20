@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatExactTime, formatTimeAgo } from '../src/lib/relativeTime.js'
+import { formatChatTimestamp, formatExactTime, formatTimeAgo } from '../src/lib/relativeTime.js'
 
 const MINUTE = 60000
 const HOUR = 3600000
@@ -49,4 +49,27 @@ test('the exact timestamp includes both a date and a time', () => {
   const exact = formatExactTime('2026-10-17T09:30:00.000Z')
   assert.match(exact, /2026/)
   assert.match(exact, /\d{1,2}:\d{2}/)
+})
+
+// Local-time construction keeps these assertions independent of the machine's
+// timezone. 20 October 2026 is a Tuesday.
+const CHAT_NOW = new Date(2026, 9, 20, 12, 0, 0).getTime()
+const local = (year, month, day, hour = 12, minute = 0, second = 0) => new Date(year, month, day, hour, minute, second).toISOString()
+
+test('chat timestamps use the compact form the contact list has room for', () => {
+  assert.equal(formatChatTimestamp(local(2026, 9, 20, 11, 59, 30), CHAT_NOW), 'now')
+  assert.equal(formatChatTimestamp(local(2026, 9, 20, 11, 58), CHAT_NOW), '2m ago')
+  assert.equal(formatChatTimestamp(local(2026, 9, 20, 9), CHAT_NOW), '3h ago')
+})
+
+test('chat timestamps fall back to Yesterday, a weekday, then a date', () => {
+  assert.equal(formatChatTimestamp(local(2026, 9, 19), CHAT_NOW), 'Yesterday')
+  assert.equal(formatChatTimestamp(local(2026, 9, 17), CHAT_NOW), 'Sat')
+  assert.equal(formatChatTimestamp(local(2026, 8, 5), CHAT_NOW), '5 Sep')
+  assert.equal(formatChatTimestamp(local(2025, 8, 15), CHAT_NOW), '15 Sep 2025')
+})
+
+test('chat timestamps render nothing for an unusable date', () => {
+  assert.equal(formatChatTimestamp('not-a-date', CHAT_NOW), '')
+  assert.equal(formatChatTimestamp(null, CHAT_NOW), '')
 })

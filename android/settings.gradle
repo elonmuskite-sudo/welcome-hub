@@ -1,2 +1,8 @@
 rootProject.name = 'NexusChat'
 include ':app'
+include ':capacitor-cordova-android-plugins'
+project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+// Pulls in the generated module list (capacitor-android and any Capacitor
+// plugins) written by `npx cap sync`. Without this, :app cannot resolve the
+// :capacitor-android project reference and the build fails to configure.
+apply from: './capacitor.settings.gradle'

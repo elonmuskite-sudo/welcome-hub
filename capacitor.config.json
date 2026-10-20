@@ -2,7 +2,6 @@
   "appId": "com.nexus.chat.app",
   "appName": "Nexus Chat",
   "webDir": "dist",
-  "bundledWebRuntime": false,
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 1500,

@@ -370,6 +370,29 @@ export async function updateMemberProfile(userId, updates) {
   return { ...data, role: isAdmin ? 'admin' : 'user' }
 }
 
+// Deletes the signed-in member's account and associated data. The server
+// verifies the caller's session before removing anything, so the browser can
+// never delete an account it does not own.
+export async function deleteAccount() {
+  if (isAppwriteAuthEnabled()) {
+    throw new Error('Account deletion is not available for this sign-in method.')
+  }
+  if (!supabase) throw new Error('Account services are not configured.')
+  const { error } = await supabase.functions.invoke('delete-account', { method: 'POST', body: {} })
+  if (error) {
+    let details = error.message
+    try {
+      if (error.context instanceof Response) {
+        const body = await error.context.json()
+        if (body?.error) details = body.error
+      }
+    } catch {
+      // Keep the original message when the response is not JSON.
+    }
+    throw new Error(details || 'Your account could not be deleted.')
+  }
+}
+
 export function getSupabaseConfig() {
   return {
     url: supabaseUrl,

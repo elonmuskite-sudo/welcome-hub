@@ -6,11 +6,11 @@ import PrivacySettings from '../components/chat/settings/PrivacySettings'
 import ProfileEdit from '../components/chat/settings/ProfileEdit'
 import DataStorageSettings from '../components/chat/settings/DataStorageSettings'
 import VerificationSettings from '../components/chat/settings/VerificationSettings'
-import BillingHistory from '../components/chat/settings/BillingHistory'
+import AccountSettings from '../components/chat/settings/AccountSettings'
 import Avatar from '../components/chat/Avatar'
 import VerificationBadge from '../components/chat/VerificationBadge'
 import { useAuth } from '../lib/AuthContext'
-import { ChevronRight, ArrowLeft, Receipt, Bell, Database, HardDrive, LogOut, Palette, ShieldCheck, UserCircle } from 'lucide-react'
+import { ChevronRight, ArrowLeft, Bell, Database, HardDrive, LogOut, Palette, ScrollText, ShieldCheck, Trash2, UserCircle } from 'lucide-react'
 import { useNavigate, useLocation } from 'react-router-dom'
 
 function SettingsMenu() {
@@ -48,16 +48,16 @@ function SettingsMenu() {
       icon: <HardDrive className="w-5 h-5" />,
     },
     {
-      id: 'billing',
-      label: 'Billing history',
-      description: 'Your payments and storage upgrade status',
-      icon: <Receipt className="w-5 h-5" />,
-    },
-    {
       id: 'verification',
       label: 'Identity verification',
       description: 'Get the blue verified check',
       icon: <UserCircle className="w-5 h-5" />,
+    },
+    {
+      id: 'account',
+      label: 'Account',
+      description: 'Download your data, manage blocked accounts, and delete your account',
+      icon: <Trash2 className="w-5 h-5" />,
     },
   ]
 
@@ -112,6 +112,25 @@ function SettingsMenu() {
               )}
               <ChevronRight className="w-5 h-5 text-muted-foreground" />
             </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-border bg-card overflow-hidden">
+        {[
+          { id: 'privacy', label: 'Privacy policy' },
+          { id: 'terms', label: 'Terms of service' },
+        ].map((doc) => (
+          <button
+            key={doc.id}
+            onClick={() => navigate(`/app/${doc.id}`)}
+            className="w-full group border-b border-border last:border-b-0 flex items-center gap-4 p-4 hover:bg-muted/60 transition-colors text-left"
+          >
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary transition">
+              <ScrollText className="w-5 h-5" />
+            </div>
+            <p className="flex-1 font-medium text-foreground">{doc.label}</p>
+            <ChevronRight className="w-5 h-5 text-muted-foreground" />
           </button>
         ))}
       </div>
@@ -220,11 +239,11 @@ export default function SettingsPage() {
     )
   }
 
-  if (subPath === 'billing') {
+  if (subPath === 'account') {
     return (
       <div className="flex-1 overflow-y-auto bg-card">
-        <SettingsSubPage title="Billing history">
-          <BillingHistory />
+        <SettingsSubPage title="Account">
+          <AccountSettings />
         </SettingsSubPage>
       </div>
     )

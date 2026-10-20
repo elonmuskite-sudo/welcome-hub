@@ -28,7 +28,7 @@ const {
   isE2EEProvisionedForDevice,
   shouldShowE2EEDefaultNotice,
   dismissE2EEDefaultNotice,
-  NO_PEER_KEY_NOTICE,
+  NO_PEER_KEY_MESSAGE,
 } = await import('../src/lib/crypto/e2ee.js')
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -62,14 +62,23 @@ test('with E2EE off, messages pass through unchanged', async () => {
   assert.equal(await decryptMessage('chat-off', 'hello plain', false), 'hello plain')
 })
 
-test('a missing contact key falls back to plaintext and reports the reason', async () => {
+test('a missing contact key prevents sending plaintext', async () => {
   setE2EEEnabled(true)
   clearPeerKeyCache()
-  const result = await encryptMessage('chat-no-key', 'top secret')
-  // Default-on accounts still reach contacts who have not published a key, but
-  // the sender is told the message went out unencrypted.
-  assert.deepEqual(result, { encrypted: false, content: 'top secret', reason: 'peer_key_missing' })
-  assert.match(NO_PEER_KEY_NOTICE, /without end-to-end encryption/i)
+  await assert.rejects(
+    () => encryptMessage('chat-no-key', 'top secret'),
+    new RegExp(NO_PEER_KEY_MESSAGE),
+  )
+})
+
+test('an invalid contact key prevents sending plaintext', async () => {
+  setE2EEEnabled(true)
+  clearPeerKeyCache()
+  registerPeerPublicKey('chat-invalid-key', 'not-a-public-key')
+  await assert.rejects(
+    () => encryptMessage('chat-invalid-key', 'top secret'),
+    /End-to-end encryption failed/,
+  )
 })
 
 test('the contact can decrypt a message we encrypt (real ECDH + AES-256-GCM)', async () => {

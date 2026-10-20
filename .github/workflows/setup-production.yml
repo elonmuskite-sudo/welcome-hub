@@ -4,8 +4,8 @@ name: Set up production (Supabase database + Vercel env)
 # You are prompted for the Supabase address and anon key (both browser-safe).
 # Server-only values come from GitHub repo secrets (Settings → Secrets and variables → Actions):
 #   SUPABASE_DB_URL, SUPABASE_SERVICE_ROLE_KEY, VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_ORG_ID,
-#   SUPABASE_ACCESS_TOKEN, SUPABASE_PROJECT_REF, RESEND_API_KEY, RESEND_FROM,
-#   NOWPAYMENTS_API_KEY, NOWPAYMENTS_IPN_SECRET, APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID,
+#   RESEND_API_KEY, RESEND_FROM,
+#   APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID,
 #   SUPABASE_POOLER_URL, VERCEL_DEPLOY_HOOK_URL (required only for Appwrite cutover)
 on:
   workflow_dispatch:
@@ -83,27 +83,6 @@ jobs:
           test -n "$SUPABASE_DB_URL" || { echo "Add the SUPABASE_DB_URL repo secret first."; exit 1; }
           sudo apt-get install -y -qq postgresql-client >/dev/null
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/20261013232516_appwrite_identity_links.sql
-
-      - uses: supabase/setup-cli@v3
-        with:
-          version: 2.117.0
-
-      - name: Set NOWPayments Edge Function secrets
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-          NOWPAYMENTS_API_KEY: ${{ secrets.NOWPAYMENTS_API_KEY }}
-          NOWPAYMENTS_IPN_SECRET: ${{ secrets.NOWPAYMENTS_IPN_SECRET }}
-        run: |
-          test -n "$SUPABASE_ACCESS_TOKEN" || { echo "Add SUPABASE_ACCESS_TOKEN to GitHub repo secrets first."; exit 1; }
-          test -n "$SUPABASE_PROJECT_REF" || { echo "Add SUPABASE_PROJECT_REF to GitHub repo secrets first."; exit 1; }
-          test -n "$NOWPAYMENTS_API_KEY" || { echo "Add NOWPAYMENTS_API_KEY to GitHub repo secrets first."; exit 1; }
-          test -n "$NOWPAYMENTS_IPN_SECRET" || { echo "Add NOWPAYMENTS_IPN_SECRET to GitHub repo secrets first."; exit 1; }
-          umask 077
-          secret_file="$(mktemp)"
-          trap 'rm -f "$secret_file"' EXIT
-          printf 'NOWPAYMENTS_API_KEY=%s\nNOWPAYMENTS_IPN_SECRET=%s\n' "$NOWPAYMENTS_API_KEY" "$NOWPAYMENTS_IPN_SECRET" > "$secret_file"
-          supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"
 
       - name: Add environment variables to Vercel
         env:

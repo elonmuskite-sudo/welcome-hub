@@ -31,15 +31,13 @@ authenticate as the Supabase `postgres` role so the gateway can switch to
 `authenticated` within each transaction.
 
 Admin authorization and data now have gateway actions for the dashboard,
-member management, payment review/settings and webhook history, verification
-review, and configuration diagnostics. The payment, invoice, billing-history,
+member management, verification review, and configuration diagnostics. The
 verification-status, badge, and submission screens use those actions when
 Appwrite is selected. Queues poll the gateway instead of opening Supabase
-Realtime channels. Payment QR and identity-document uploads use scoped,
-single-object Storage upload tokens; the gateway validates the stored object's
-actual type and size before saving its path. Browsers still need the Supabase
-project URL and public key to redeem these upload tokens; no service-role key
-is sent to the browser.
+Realtime channels. Identity-document uploads use scoped, single-object Storage
+upload tokens; the gateway validates the stored object's actual type and size
+before saving its path. Browsers still need the Supabase project URL and public
+key to redeem these upload tokens; no service-role key is sent to the browser.
 
 ## Not yet migrated
 

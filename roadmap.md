@@ -17,13 +17,13 @@
 - [x] Settings → Storage section: usage metrics, per-type breakdown, individual/bulk delete with instant stats refresh.
 - [x] Persistent sessions (Supabase persistSession + autoRefreshToken) and logout only in Settings and header profile dropdown.
 - [x] Contacts synced to Supabase per user with realtime updates across devices.
-- [x] Paid storage upgrades via NOWPayments (needs NOWPAYMENTS_API_KEY / NOWPAYMENTS_IPN_SECRET).
+- [x] Removed paid storage upgrades and all payment processing; storage is a single fixed 5GB quota with no purchasable tiers.
 - [x] Facial ID verification (on-device face match) + blue/gold badges + admin review RPC; apply new schema SQL to production.
 
 # Backend credentials
 - [x] Use own Supabase; strip Appwrite; schema SQL + admin bootstrap; build needs only Supabase keys
-- [ ] Fill Vercel env vars, run schema SQL, set NOWPayments/Resend function secrets in Supabase — waiting on user
-- [x] Admin diagnostics page (/admin/diagnostics) and member billing history (Settings → Billing history)
+- [ ] Fill Vercel env vars, run schema SQL, set Resend function secrets in Supabase — waiting on user
+- [x] Admin diagnostics page (/admin/diagnostics)
 - [ ] Run schema + push Vercel env via GitHub Action "Set up production" — waiting on user's repo secrets
 
 # GitHub sync

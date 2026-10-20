@@ -3,7 +3,6 @@ import { HardDrive, Image, Video, Mic, Music, FileText, Sticker, Trash2, Refresh
 import { useAuth } from '../../../lib/AuthContext'
 import { getStorageUsage, deleteStorageFiles, formatBytes } from '../../../lib/storageManager'
 import ChatButton from '../ChatButton'
-import StorageUpgrades from './StorageUpgrades'
 
 const TYPE_META = {
   image: { label: 'Images', icon: Image },
@@ -110,8 +109,6 @@ export default function DataStorageSettings() {
           {formatBytes(Math.max(quotaBytes - usedBytes, 0))} free · Videos up to 45 seconds
         </p>
       </div>
-
-      <StorageUpgrades />
 
       {breakdown.length > 0 && (
         <div className="rounded-2xl border border-border bg-card overflow-hidden">

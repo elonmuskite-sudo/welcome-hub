@@ -8,11 +8,9 @@ import BottomNav from '../components/chat/BottomNav'
 import AppTopNav from '../components/chat/AppTopNav'
 import NotificationStack from '../components/chat/NotificationStack'
 import IdentityReviewQueue from '../components/IdentityReviewQueue'
-import PaymentWebhookLog from '../components/PaymentWebhookLog'
-import AdminPaymentSettings from '../components/AdminPaymentSettings'
-import AdminPaymentQueue from '../components/AdminPaymentQueue'
 import AdminMemberManager from '../components/AdminMemberManager'
 import AdminFeedManager from '../components/AdminFeedManager'
+import AdminReportManager from '../components/AdminReportManager'
 
 export default function AdminDashboard() {
   const { user } = useAuth()
@@ -132,10 +130,8 @@ export default function AdminDashboard() {
         )}
         <AdminMemberManager />
         <AdminFeedManager />
-        <AdminPaymentSettings />
-        <AdminPaymentQueue />
+        <AdminReportManager />
         <IdentityReviewQueue />
-        <PaymentWebhookLog />
       </main>
 
       <BottomNav />

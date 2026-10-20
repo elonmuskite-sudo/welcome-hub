@@ -6,6 +6,8 @@ import { isFileScanConfigured, scanFileBuffer, unavailableScan } from './fileSca
 
 let poolPromise
 const FIRST_VALID_UUID = '00000000-0000-1000-8000-000000000000'
+// Every account gets the same fixed quota; storage is not a purchasable upgrade.
+const STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024
 
 export class GatewayError extends Error {
   constructor(message, status = 400) {
@@ -116,10 +118,19 @@ export async function executeUserDataOperation(client, identity, body, admin) {
     }
     case 'chats.list': {
       // Scoped to the caller's own conversations (owner or member). RLS already
-      // filters this, but an explicit predicate keeps the aggregate honest.
+      // filters this, but an explicit predicate keeps the aggregate honest. The
+      // newest non-control message rides along so the contact list can preview
+      // conversations that were never opened, without a second round trip.
       const { rows } = await client.query(
         `select c.id, c.title, c.type, c.avatar_url, c.encrypted, c.owner_id, c.created_at,
                 c.participant_names,
+                (select json_build_object(
+                          'content', m.content, 'created_at', m.created_at, 'sender_id', m.sender_id,
+                          'type', m.type, 'encrypted', m.encrypted)
+                   from public.messages m
+                  where m.chat_id = c.id and m.type not in ('reaction', 'receipt')
+                  order by m.created_at desc
+                  limit 1) as latest,
                 coalesce(json_agg(json_build_object('profile_id', cm.profile_id))
                   filter (where cm.profile_id is not null), '[]'::json) as chat_members
            from public.chats c
@@ -294,17 +305,13 @@ export async function executeUserDataOperation(client, identity, body, admin) {
           order by created_at desc
           limit 1000`,
       )
-      const { rows: quota } = await client.query(
-        `select quota_bytes from public.user_storage_quotas where user_id = $1`,
-        [supabaseUserId],
-      )
       const { rows: usage } = await client.query(
         `select coalesce(sum(size_bytes), 0)::bigint as used_bytes
            from public.storage_files`,
       )
       return {
         files,
-        quotaBytes: Number(quota[0]?.quota_bytes) || 5368709120,
+        quotaBytes: STORAGE_QUOTA_BYTES,
         usedBytes: Number(usage[0]?.used_bytes || 0),
       }
     }
@@ -338,12 +345,7 @@ export async function executeUserDataOperation(client, identity, body, admin) {
         `select coalesce(sum(size_bytes), 0)::bigint as used_bytes
            from public.storage_files`,
       )
-      const { rows: quota } = await client.query(
-        `select quota_bytes from public.user_storage_quotas where user_id = $1`,
-        [supabaseUserId],
-      )
-      const quotaBytes = Number(quota[0]?.quota_bytes) || 5368709120
-      if (Number(usage[0]?.used_bytes || 0) + sizeBytes > quotaBytes) {
+      if (Number(usage[0]?.used_bytes || 0) + sizeBytes > STORAGE_QUOTA_BYTES) {
         throw new GatewayError('There is not enough storage space for this file.', 413)
       }
       const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80) || 'file'
@@ -505,120 +507,6 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       )
       return { ok: true }
     }
-    case 'payments.settings.get': {
-      const { rows } = await client.query(
-        `select id, wallet_address, qr_image_url, network, updated_at
-           from public.payment_settings where id = 1`,
-      )
-      const settings = rows[0] || null
-      let qrUrl = null
-      if (settings?.qr_image_url) {
-        const { data, error } = await admin.storage.from('payment-qr').createSignedUrl(settings.qr_image_url, 3600)
-        if (error) throw new GatewayError('Could not load the payment QR code.', 503)
-        qrUrl = data.signedUrl
-      }
-      return { settings: settings ? { ...settings, qrUrl } : null }
-    }
-    case 'payments.settings.save': {
-      await requireAdmin(client, supabaseUserId)
-      const walletAddress = requiredString(body.walletAddress, 'Wallet address', 42)
-      if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) throw new GatewayError('The BEP20 wallet address is invalid.')
-      const path = body.qrPath == null ? null : requiredString(body.qrPath, 'QR image path', 255)
-      if (path && !/^qr-[a-f0-9-]+\.(png|jpe?g|webp)$/i.test(path)) {
-        throw new GatewayError('The QR image path is invalid.')
-      }
-      if (path) {
-        const { data: image, error: infoError } = await admin.storage.from('payment-qr').info(path)
-        const sizeBytes = Number(image?.size ?? image?.metadata?.size)
-        const mimeType = String(image?.content_type || image?.metadata?.mimetype || '').toLowerCase()
-        if (infoError || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > 5 * 1024 * 1024
-          || !['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) {
-          throw new GatewayError('The uploaded QR image is invalid or exceeds 5 MB.')
-        }
-      }
-      const { rows } = await client.query(
-        `insert into public.payment_settings (id, wallet_address, qr_image_url, network)
-         values (1, $1, $2, 'BEP20')
-         on conflict (id) do update set wallet_address = excluded.wallet_address,
-           qr_image_url = excluded.qr_image_url, network = excluded.network
-         returning id, wallet_address, qr_image_url, network, updated_at`,
-        [walletAddress, path],
-      )
-      return { settings: rows[0] }
-    }
-    case 'payments.qr.upload.prepare': {
-      await requireAdmin(client, supabaseUserId)
-      const fileName = requiredString(body.fileName, 'File name', 255)
-      const mimeType = requiredString(body.mimeType, 'Image type', 100).toLowerCase()
-      const extensions = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }
-      const sizeBytes = Number(body.sizeBytes)
-      if (!extensions[mimeType] || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > 5 * 1024 * 1024) {
-        throw new GatewayError('Choose a PNG, JPEG, or WebP image under 5 MB.')
-      }
-      const path = `qr-${randomUUID()}.${extensions[mimeType]}`
-      const { data, error } = await admin.storage.from('payment-qr').createSignedUploadUrl(path, { upsert: false })
-      if (error || !data?.token) throw new GatewayError('Could not prepare the QR image upload.', 503)
-      return { path, token: data.token }
-    }
-    case 'payments.purchase.list': {
-      const userOnly = body.admin !== true
-      if (!userOnly) await requireAdmin(client, supabaseUserId)
-      const { rows } = await client.query(
-        `select * from public.storage_purchases
-          where ($1::boolean = false or user_id = $2)
-          order by created_at desc limit $3`,
-        [userOnly, supabaseUserId, body.admin === true ? 30 : 200],
-      )
-      return { purchases: rows }
-    }
-    case 'payments.purchase.get': {
-      const purchaseId = requiredString(body.purchaseId, 'Purchase ID', 64)
-      if (!validUuid(purchaseId)) throw new GatewayError('Purchase ID is invalid.')
-      const { rows } = await client.query(
-        `select * from public.storage_purchases where id = $1`,
-        [purchaseId],
-      )
-      return { purchase: rows[0] || null }
-    }
-    case 'payments.submit': {
-      const tier = requiredString(body.tier, 'Storage plan', 40)
-      const txReference = optionalString(body.txReference, 'Transaction reference', 120)
-      const { rows } = await client.query(
-        `select public.submit_usdt_payment($1, $2) as id`,
-        [tier, txReference],
-      )
-      return { purchaseId: rows[0].id }
-    }
-    case 'payments.review': {
-      const purchaseId = requiredString(body.purchaseId, 'Purchase ID', 64)
-      if (!validUuid(purchaseId) || typeof body.approve !== 'boolean') throw new GatewayError('Payment review details are invalid.')
-      await client.query(`select public.review_usdt_payment($1, $2)`, [purchaseId, body.approve])
-      return { ok: true }
-    }
-    case 'payments.admin.queue': {
-      await requireAdmin(client, supabaseUserId)
-      const { rows } = await client.query(
-        `select * from public.storage_purchases
-          where status = 'awaiting_approval'
-          order by created_at asc limit 100`,
-      )
-      return { purchases: rows }
-    }
-    case 'payments.admin.webhooks': {
-      await requireAdmin(client, supabaseUserId)
-      const [{ rows: events }, { rows: purchases }] = await Promise.all([
-        client.query(
-          `select * from public.payment_webhook_events
-            order by received_at desc limit 50`,
-        ),
-        client.query(
-          `select id, user_id, tier, amount_cents, status, created_at, updated_at
-             from public.storage_purchases
-            order by created_at desc limit 30`,
-        ),
-      ])
-      return { events, purchases }
-    }
     case 'verification.badge': {
       const memberId = requiredString(body.userId, 'Member ID', 64)
       if (!validUuid(memberId)) throw new GatewayError('Member ID is invalid.')
@@ -775,16 +663,11 @@ export async function executeUserDataOperation(client, identity, body, admin) {
         ['SUPABASE_POOLER_URL', process.env.SUPABASE_POOLER_URL],
         ['RESEND_API_KEY', process.env.RESEND_API_KEY],
         ['RESEND_FROM', process.env.RESEND_FROM],
-        ['NOWPAYMENTS_API_KEY', process.env.NOWPAYMENTS_API_KEY],
-        ['NOWPAYMENTS_IPN_SECRET', process.env.NOWPAYMENTS_IPN_SECRET],
       ].map(([key, value]) => ({ key, configured: Boolean(String(value || '').trim()) }))
       const tableNames = [
         'members',
         'chats',
         'messages',
-        'storage_purchases',
-        'payment_settings',
-        'payment_webhook_events',
         'identity_verifications',
         'appwrite_identity_links',
       ]

@@ -59,10 +59,8 @@ export async function getStorageUsage(userId) {
     usedBytes += size
     byType[file.file_type] = (byType[file.file_type] || 0) + size
   }
-  const { data: quotaRow } = await supabase
-    .from('user_storage_quotas').select('quota_bytes').eq('user_id', userId).maybeSingle()
-  const quotaBytes = Number(quotaRow?.quota_bytes) || STORAGE_QUOTA_BYTES
-  return { usedBytes, quotaBytes, byType, files }
+  // Every account has the same fixed quota; storage is not a purchasable upgrade.
+  return { usedBytes, quotaBytes: STORAGE_QUOTA_BYTES, byType, files }
 }
 
 export async function validateUpload(file, { userId, durationSeconds = null, kind = 'file' } = {}) {

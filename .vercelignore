@@ -5,3 +5,18 @@ dist
 .trae
 .log
 .figma
+
+# Secrets and signing material. A CLI deployment uploads the project directory,
+# and .gitignore does not apply here, so these must be listed explicitly or the
+# service-role key, Resend key, admin session secret and signing keystore would
+# travel to the build container. Production values come from Vercel env vars
+# (scripts/sync-vercel-env.js), never from these files.
+.env
+.env.*
+*.keystore
+*.jks
+*.pem
+android/key.properties
+android/local.properties
+.demo-accounts.local.json
+supabase/backups
