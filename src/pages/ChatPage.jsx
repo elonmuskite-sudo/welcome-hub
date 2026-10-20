@@ -47,13 +47,18 @@ export default function ChatPage() {
     }
     setChat(null)
     syncChat(true)
-    
+
+    // Bursts of updates (one sync tick can change several threads) collapse into
+    // a single refetch instead of one full chat load per notification.
+    let pending = null
     const handleUpdate = () => {
-      syncChat()
+      if (pending) return
+      pending = window.setTimeout(() => { pending = null; void syncChat() }, 150)
     }
     window.addEventListener('nexus-chat:updated', handleUpdate)
     return () => {
       active = false
+      if (pending) window.clearTimeout(pending)
       window.removeEventListener('nexus-chat:updated', handleUpdate)
     }
   }, [chatId, user?.id])

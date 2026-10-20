@@ -60,14 +60,20 @@ export default defineConfig(({ mode }) => {
         manualChunks(id) {
           if (id.includes('node_modules')) {
             if (id.includes('react-dom') || id.includes('react-router')) return 'vendor'
-            if (id.includes('/react/') && !id.includes('react-dom') && !id.includes('react-router')) return 'vendor'
+            // Match the react package itself, not any package with "/react/" in
+            // its path (e.g. @emoji-mart/react), which must stay with its owner.
+            if (id.includes('node_modules/react/')) return 'vendor'
             if (id.includes('@tanstack')) return 'query'
             if (id.includes('@supabase')) return 'supabase'
             if (id.includes('framer-motion') || id.includes('next-themes')) return 'ui'
             if (id.includes('@heroicons') || id.includes('lucide-react')) return 'icons'
             if (id.includes('react-hook-form') || id.includes('@hookform') || id.includes('zod') || id.includes('input-otp')) return 'forms'
-            if (id.includes('date-fns') || id.includes('class-variance-authority') || id.includes('clsx') || id.includes('tailwind-merge') || id.includes('react-markdown')) return 'util'
+            if (id.includes('date-fns') || id.includes('class-variance-authority') || id.includes('clsx') || id.includes('tailwind-merge')) return 'util'
             if (id.includes('@radix-ui')) return 'radix'
+            // Heavy, feature-specific libraries get their own chunks so a screen
+            // that needs them does not inflate the entry bundle or first paint.
+            if (id.includes('@vladmandic/face-api')) return 'face'
+            if (id.includes('react-markdown') || id.includes('remark') || id.includes('rehype') || id.includes('micromark') || id.includes('mdast') || id.includes('hast') || id.includes('unist')) return 'markdown'
           }
         },
       },

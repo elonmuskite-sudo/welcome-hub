@@ -1,7 +1,7 @@
-import { findMemberByNexusId, supabase } from './supabase'
-import { appwriteData, isAppwriteAuthEnabled } from './appwrite'
-import { reactionContent, receiptContent } from './chatProtocol'
-import { withSync } from './syncStatus'
+import { findMemberByNexusId, supabase } from './supabase.js'
+import { appwriteData, isAppwriteAuthEnabled } from './appwrite.js'
+import { reactionContent, receiptContent } from './chatProtocol.js'
+import { recordSyncTiming, withSync } from './syncStatus.js'
 
 const STORAGE_KEY = 'nexus-chat-state-v1'
 const CONTACTS_STORAGE_KEY = 'nexus-contacts-state-v1'
@@ -9,6 +9,10 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 export const newId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`)
 export const isChatServiceAvailable = () => Boolean(supabase) || isAppwriteAuthEnabled()
+
+function nowMs() {
+  return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
+}
 
 function readJson(key) {
   if (typeof window === 'undefined') return []
@@ -42,49 +46,72 @@ function mapMessage(row) {
 export function startRealtimeListeners() {
   if (isAppwriteAuthEnabled()) {
     let active = true
+    let timer = null
+    let running = false
+    let failures = 0
+    let lastContactsSyncAt = 0
     let cursor = { since: new Date().toISOString(), afterId: '00000000-0000-1000-8000-000000000000' }
-    const poll = async () => {
+    // Poll tightly while the tab is in the foreground so new messages land well
+    // inside the half-second budget, and back off when it is hidden so an idle
+    // tab stops burning round trips.
+    const ACTIVE_MS = 700
+    const HIDDEN_MS = 4000
+
+    const schedule = (delay) => {
       if (!active) return
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(() => { void poll() }, delay)
+    }
+
+    const poll = async () => {
+      if (!active || running) return
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        schedule(HIDDEN_MS)
+        return
+      }
+      running = true
+      const started = nowMs()
       try {
+        // The chat list and the message cursor are independent, so one tick costs
+        // a single pair of round trips instead of a serial chain.
         const [{ messages = [], cursor: nextCursor }, { chats = [] }] = await Promise.all([
           appwriteData('events.poll', { since: cursor.since, afterId: cursor.afterId }),
           appwriteData('chats.list'),
         ])
         cursor = nextCursor || cursor
-        const localChats = readLocalChats()
-        const mappedChats = chats.map(({ chat_members: members, ...chat }) => ({
+
+        const remoteChats = chats.map(({ chat_members: members, ...chat }) => ({
           ...chat,
           id: String(chat.id),
           participant_ids: (members || []).map((member) => String(member.profile_id)),
         }))
-        writeLocalChats(mappedChats.map((chat) => {
-          const existing = localChats.find((item) => String(item.id) === chat.id)
-          return { ...existing, ...chat, messages: existing?.messages || [] }
-        }))
-        for (const row of messages) {
-          const known = readLocalChats().some((chat) => String(chat.id) === String(row.chat_id))
-          if (!known) continue
-          await appendMessage(String(row.chat_id), mapMessage(row))
-          if (row.type !== 'reaction' && row.type !== 'receipt') {
-            emit('nexus:incoming-notification', {
-              title: 'New message',
-              preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',
-              avatarUrl: '/logo.png',
-              type: 'message',
-            })
-          }
+
+        const { notifications } = applyChatSyncBatch(remoteChats, messages)
+        for (const notification of notifications) emit('nexus:incoming-notification', notification)
+
+        // Contacts are independent of messages: refresh them on a slower cadence
+        // so a tight message poll does not multiply the contact round trips.
+        if (Date.now() - lastContactsSyncAt > 8000) {
+          lastContactsSyncAt = Date.now()
+          void syncContactsFromCloud('appwrite')
         }
-        notifyChatUpdate()
-        await syncContactsFromCloud('appwrite')
+
+        failures = 0
+        recordSyncTiming('realtime', nowMs() - started)
+        schedule(ACTIVE_MS)
       } catch (error) {
+        failures += 1
         console.error('Appwrite data sync failed', error)
+        schedule(Math.min(ACTIVE_MS * 2 ** Math.min(failures, 4), 15000))
+      } finally {
+        running = false
       }
     }
+
     void poll()
-    const timer = window.setInterval(() => { void poll() }, 5000)
     return () => {
       active = false
-      window.clearInterval(timer)
+      if (timer) window.clearTimeout(timer)
     }
   }
   if (!supabase) return null
@@ -237,32 +264,103 @@ export async function sendReadReceipt(chatId, userId, messageIds, status) {
   })
 }
 
-export async function appendMessage(chatId, message) {
-  const chats = readLocalChats()
-  const chat = chats.find((item) => String(item.id) === String(chatId))
-  if (!chat) return null
-
-  const nextMessage = {
-    id: message.id || `${Date.now()}`, sender_id: message.sender_id || 'me', content: message.content || '',
-    type: message.type || 'text', encrypted: Boolean(message.encrypted), file_url: message.file_url || null,
-    file_name: message.file_name || null, duration: message.duration || null,
-    created_at: message.created_at || new Date().toISOString(),
-  }
+// Folds a batch of messages into one chat without touching storage. Kept pure so
+// a whole poll result can be applied with a single read and a single write.
+function applyMessagesToChats(chats, chatId, messages) {
+  const index = chats.findIndex((item) => String(item.id) === String(chatId))
+  if (index === -1) return chats
+  const chat = chats[index]
   const existing = Array.isArray(chat.messages) ? chat.messages : []
-  const exists = existing.some((m) => m.id === nextMessage.id)
-  // Reactions and receipts are protocol control rows: they never become the
-  // conversation's last message preview.
-  const isControlRow = nextMessage.type === 'reaction' || nextMessage.type === 'receipt'
+  // A Map keeps existing messages in place while upserting, so an update never
+  // reorders the thread and new messages append in arrival order.
+  const byId = new Map(existing.map((m) => [m.id, m]))
+  let lastMessage = chat.last_message
+  let lastMessageTime = chat.last_message_time
+
+  for (const message of messages) {
+    const nextMessage = {
+      id: message.id || `${Date.now()}`, sender_id: message.sender_id || 'me', content: message.content || '',
+      type: message.type || 'text', encrypted: Boolean(message.encrypted), file_url: message.file_url || null,
+      file_name: message.file_name || null, duration: message.duration || null,
+      created_at: message.created_at || new Date().toISOString(),
+    }
+    byId.set(nextMessage.id, nextMessage)
+    // Reactions and receipts are protocol control rows: they never become the
+    // conversation's last message preview.
+    if (nextMessage.type !== 'reaction' && nextMessage.type !== 'receipt') {
+      lastMessage = nextMessage.encrypted ? 'Encrypted message' : nextMessage.content
+      lastMessageTime = nextMessage.created_at
+    }
+  }
+
   const updatedChat = {
     ...chat,
-    messages: exists ? existing.map((m) => (m.id === nextMessage.id ? { ...m, ...nextMessage } : m)) : [...existing, nextMessage],
-    last_message: isControlRow ? chat.last_message : nextMessage.encrypted ? 'Encrypted message' : nextMessage.content,
-    last_message_time: isControlRow ? chat.last_message_time : nextMessage.created_at,
+    messages: [...byId.values()],
+    last_message: lastMessage,
+    last_message_time: lastMessageTime,
     unread_count: 0,
   }
-  writeLocalChats(chats.map((item) => (String(item.id) === String(chatId) ? updatedChat : item)))
+  const nextChats = chats.slice()
+  nextChats[index] = updatedChat
+  return nextChats
+}
+
+// Persists a batch of messages for one chat with a single storage write and a
+// single update notification. A burst of N messages therefore costs one
+// parse/write/notify cycle instead of N, which is what kept sync slow.
+export async function appendMessages(chatId, messages) {
+  const list = (Array.isArray(messages) ? messages : [messages]).filter(Boolean)
+  if (!list.length) return null
+  const chats = readLocalChats()
+  const nextChats = applyMessagesToChats(chats, chatId, list)
+  if (nextChats === chats) return null
+  writeLocalChats(nextChats)
   notifyChatUpdate()
-  return updatedChat
+  return nextChats.find((item) => String(item.id) === String(chatId)) || null
+}
+
+export async function appendMessage(chatId, message) {
+  return appendMessages(chatId, [message])
+}
+
+// Applies one sync result to local storage in a single pass: chat metadata is
+// refreshed, then every chat's messages are folded in before the storage write
+// and the update notification happen once. This is the whole client-side sync
+// workflow, so it is exported to keep it directly benchmarkable.
+export function applyChatSyncBatch(remoteChats, messages) {
+  const localChats = readLocalChats()
+  const localById = new Map(localChats.map((chat) => [String(chat.id), chat]))
+  const knownIds = new Set(remoteChats.map((chat) => String(chat.id)))
+
+  const byChat = new Map()
+  const notifications = []
+  for (const row of (Array.isArray(messages) ? messages : [])) {
+    const chatId = String(row.chat_id)
+    if (!knownIds.has(chatId)) continue
+    const bucket = byChat.get(chatId)
+    if (bucket) bucket.push(row)
+    else byChat.set(chatId, [row])
+    if (row.type !== 'reaction' && row.type !== 'receipt') {
+      notifications.push({
+        title: 'New message',
+        preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',
+        avatarUrl: '/logo.png',
+        type: 'message',
+      })
+    }
+  }
+
+  let nextChats = remoteChats.map((chat) => {
+    const existing = localById.get(String(chat.id))
+    return { ...existing, ...chat, messages: existing?.messages || [] }
+  })
+  for (const [chatId, rows] of byChat) {
+    nextChats = applyMessagesToChats(nextChats, chatId, rows.map(mapMessage))
+  }
+
+  writeLocalChats(nextChats)
+  notifyChatUpdate()
+  return { chats: nextChats, notifications }
 }
 
 export async function getChatById(chatId, userId) {

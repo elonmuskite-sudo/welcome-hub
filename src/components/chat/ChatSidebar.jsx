@@ -27,13 +27,25 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
   const chatsSyncing = syncKeys.includes('chats')
 
   useEffect(() => {
+    let disposed = false
+    let pending = null
     const refreshChats = async () => {
       const nextChats = await getChats(user?.id)
-      setChats(Array.isArray(nextChats) ? nextChats : [])
+      if (!disposed) setChats(Array.isArray(nextChats) ? nextChats : [])
     }
-    refreshChats()
-    window.addEventListener('nexus-chat:updated', refreshChats)
-    return () => window.removeEventListener('nexus-chat:updated', refreshChats)
+    // A sync tick can announce several chats at once. Coalescing the burst into
+    // one refetch keeps a busy poll from firing a network call per notification.
+    const scheduleRefresh = () => {
+      if (pending) return
+      pending = window.setTimeout(() => { pending = null; void refreshChats() }, 120)
+    }
+    void refreshChats()
+    window.addEventListener('nexus-chat:updated', scheduleRefresh)
+    return () => {
+      disposed = true
+      if (pending) window.clearTimeout(pending)
+      window.removeEventListener('nexus-chat:updated', scheduleRefresh)
+    }
   }, [user?.id])
 
   // Function to detect if the search query is a Nexus number (format: 10-xxxx-xxxx or 10xxxxxxxx)

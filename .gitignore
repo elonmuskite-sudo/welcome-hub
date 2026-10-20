@@ -20,6 +20,9 @@ dist-ssr
 .tanstack/**
 .nitro
 
+# playwright browser downloads (perf/layout audits)
+.playwright-browsers/
+
 # misc
 .DS_Store
 *.pem

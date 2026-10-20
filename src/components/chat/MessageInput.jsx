@@ -1,13 +1,16 @@
 /* eslint-disable react/prop-types */
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
 import { Smile, Sticker, Paperclip, Mic, Send, Square, X, LoaderCircle, Reply } from 'lucide-react'
 import StickerPicker from './StickerPicker'
-import EmojiPicker from './EmojiPicker'
 import VoiceNoteDialog from './VoiceNoteDialog'
 import ChatButton from './ChatButton'
 import { uploadChatFile, ATTACHMENT_ACCEPT } from '../../lib/storageManager'
 import { extractWaveformPeaks } from '../../lib/audioWaveform'
 import { useAuth } from '../../lib/AuthContext'
+
+// The emoji set is a sizeable payload only needed once the picker is opened, so
+// it is fetched on demand instead of loading with every conversation.
+const EmojiPicker = lazy(() => import('./EmojiPicker'))
 
 // Keyboard note: web and Capacitor builds cannot launch or customize a system
 // IME such as Gboard — the OS owns the keyboard, and no API exposes it. What the
@@ -216,7 +219,7 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
   return <div className="relative flex-shrink-0 chat-surface chat-composer bg-card/95 border-t border-border">
     {reply && <div className="flex items-center gap-2 border-l-2 border-primary pl-2 pb-2 mb-2 chat-enter"><Reply className="w-4 h-4 shrink-0 text-primary" /><div className="flex-1 min-w-0"><p className="text-xs text-primary font-semibold">Reply</p><p className="text-sm truncate text-muted-foreground">{reply.content}</p></div><ChatButton title="Cancel reply" onClick={onCancelReply} className="w-8 shrink-0"><X className="w-4 h-4" /></ChatButton></div>}
     {activePanel === 'stickers' && <StickerPicker onSelect={async sticker => { if (await send({ content: sticker.emoji, type: 'sticker' })) setActivePanel(null) }} onClose={() => setActivePanel(null)} />}
-    {activePanel === 'emoji' && <EmojiPicker onSelect={emoji => setInputText(text => (text + emoji).slice(0, 16000))} onClose={() => setActivePanel(null)} />}
+    {activePanel === 'emoji' && <Suspense fallback={null}><EmojiPicker onSelect={emoji => setInputText(text => (text + emoji).slice(0, 16000))} onClose={() => setActivePanel(null)} /></Suspense>}
     {uploadProgress && <div className="mb-2" role="status" aria-live="polite">
       <p className="mb-1 truncate text-xs text-muted-foreground">{uploadProgress.label} · {uploadProgress.percent}%</p>
       <div className="chat-upload-progress"><span style={{ width: `${uploadProgress.percent}%` }} /></div>
