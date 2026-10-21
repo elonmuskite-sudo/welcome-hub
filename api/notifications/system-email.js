@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { sendSystemEmail } from '../../server/systemEmails.js'
+import { sendSystemSms } from '../../server/systemSms.js'
 import { createSystemEmailService } from '../../supabase/functions/_shared/system-email-service.js'
 
 function send(res, status, body) {
@@ -35,8 +36,9 @@ function createAdminClient(url, serviceRoleKey) {
 export function createSystemEmailHandler({
   adminClientFactory = createAdminClient,
   emailSender = sendSystemEmail,
+  smsSender = sendSystemSms,
 } = {}) {
-  const sendNotification = createSystemEmailService({ adminClientFactory, emailSender })
+  const sendNotification = createSystemEmailService({ adminClientFactory, emailSender, smsSender })
   return async function systemEmailHandler(req, res) {
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST')

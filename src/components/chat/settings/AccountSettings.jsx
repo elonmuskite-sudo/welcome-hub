@@ -8,12 +8,26 @@ import { isModerationAvailable, listBlockedUsers, unblockUser } from '../../../l
 const CONFIRM_WORD = 'DELETE'
 
 async function collectAccountData(userId) {
-  const [profile, contacts, posts] = await Promise.all([
+  const [profile, contacts, posts, authResult] = await Promise.all([
     getMemberProfile(userId).catch(() => null),
     supabase.from('contacts').select('name, nexus_id, created_at').eq('user_id', userId).then(({ data }) => data || []),
     supabase.from('feed_posts').select('content, media, created_at').eq('author_id', userId).then(({ data }) => data || []),
+    supabase.auth.getUser(),
   ])
-  return { exportedAt: new Date().toISOString(), profile, contacts, posts }
+  if (authResult.error) throw authResult.error
+  const authUser = authResult.data.user
+  if (!authUser || authUser.id !== userId) throw new Error('The signed-in account could not be verified for export.')
+  return {
+    exportedAt: new Date().toISOString(),
+    profile,
+    contactDetails: {
+      phone: authUser.phone || null,
+      phoneVerified: Boolean(authUser.phone_confirmed_at),
+      smsTransactionalOptIn: authUser.user_metadata?.sms_transactional_opt_in === true,
+    },
+    contacts,
+    posts,
+  }
 }
 
 export default function AccountSettings() {

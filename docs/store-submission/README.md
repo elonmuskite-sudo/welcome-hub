@@ -14,6 +14,7 @@ submission tasks. App: **Nexus Chat** · `com.nexus.chat.app`.
 | [reviewer-notes.md](./reviewer-notes.md) | App reviewer notes (free model, E2EE, deletion, report/block) + demo accounts + reviewer checklist |
 | [signing.md](./signing.md) | Android release signing (configured + verified) and iOS distribution signing steps |
 | [console-runbooks.md](./console-runbooks.md) | Credential backup, Apple Developer setup, Play App Signing enrolment, console paste map |
+| [sms-setup.md](./sms-setup.md) | Twilio setup, consent, phone verification, transactional SMS, and staging checks |
 | [upload_certificate.pem](./upload_certificate.pem) | Public upload certificate for the Play Console (no private key) |
 | [screenshots/](./screenshots/) | Device-specific screenshots + the 1024 × 500 feature graphic |
 

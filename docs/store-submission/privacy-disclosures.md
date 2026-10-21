@@ -32,16 +32,17 @@ ephemerally = No**. **Required = Optional** unless stated.
 | --- | --- | --- | --- | --- |
 | 1 | Personal info → Name | Yes | App functionality, Account management | No (required at signup) |
 | 2 | Personal info → Email address | Yes | App functionality, Account management | No (required at signup) |
-| 3 | Personal info → User IDs (Nexus ID / member number) | Yes | App functionality, Account management | No |
-| 4 | Personal info → Other info (avatar, bio, interests) | Yes | App functionality | Yes |
-| 5 | Photos and videos → Photos | Yes | App functionality (avatar, chat images, feed media) | Yes |
-| 6 | Photos and videos → Videos | Yes | App functionality (chat video attachments) | Yes |
-| 7 | Files and docs | Yes | App functionality (chat document attachments) | Yes |
-| 8 | Audio → Voice or sound recordings | Yes | App functionality (voice notes, call audio) | Yes |
-| 9 | Messages → Other in-app messages | Yes | App functionality (delivery of messages) | Yes |
-| 10 | App activity → Other user-generated content (posts, comments, reactions) | Yes | App functionality | Yes |
-| 11 | Personal info → Government IDs (manual identity verification only) | Yes | App functionality (identity verification) | Yes |
-| 12 | Photos and videos → Photos (selfie, manual verification only) | Yes | App functionality (identity verification) | Yes |
+| 3 | Personal info → Phone number | Yes | Optional account phone verification and transactional SMS alerts | Yes |
+| 4 | Personal info → User IDs (Nexus ID / member number) | Yes | App functionality, Account management | No |
+| 5 | Personal info → Other info (avatar, bio, interests) | Yes | App functionality | Yes |
+| 6 | Photos and videos → Photos | Yes | App functionality (avatar, chat images, feed media) | Yes |
+| 7 | Photos and videos → Videos | Yes | App functionality (chat video attachments) | Yes |
+| 8 | Files and docs | Yes | App functionality (chat document attachments) | Yes |
+| 9 | Audio → Voice or sound recordings | Yes | App functionality (voice notes, call audio) | Yes |
+| 10 | Messages → Other in-app messages | Yes | App functionality (delivery of messages) | Yes |
+| 11 | App activity → Other user-generated content (posts, comments, reactions) | Yes | App functionality | Yes |
+| 12 | Personal info → Government IDs (manual identity verification only) | Yes | App functionality (identity verification) | Yes |
+| 13 | Photos and videos → Photos (selfie, manual verification only) | Yes | App functionality (identity verification) | Yes |
 
 ### Not collected (leave unchecked)
 
@@ -71,6 +72,11 @@ are **service providers processing data on our behalf**, which Play treats as
 
 - **Supabase** — database, authentication, file storage.
 - **Resend** — transactional email (verification codes, one-time welcome email).
+- **Twilio** — optional transactional SMS to a phone number the user verifies and
+  explicitly opts in to use for sign-in security alerts and identity-review
+  status updates. Phone verification codes are sent through Supabase Auth's
+  configured Twilio SMS provider. No marketing messages are sent. SMS is not
+  currently enabled in production until the provider is configured.
 - **Vercel / Cloudflare** — application hosting and delivery.
 
 ### Data handling summary (for the "how data is handled" section)
@@ -102,6 +108,7 @@ Collected and linked to the user's identity, all used for **App Functionality**:
 | --- | --- | --- | --- |
 | Contact Info → Name | Yes | App Functionality | First/last name at signup |
 | Contact Info → Email Address | Yes | App Functionality | Account + verification email |
+| Contact Info → Phone Number | Yes | App Functionality | Optional; verified for transactional SMS only |
 | Identifiers → User ID | Yes | App Functionality | Nexus ID / member number |
 | User Content → Photos or Videos | Yes | App Functionality | Avatar, chat media, feed media |
 | User Content → Audio Data | Yes | App Functionality | Voice notes, call audio |
@@ -132,7 +139,7 @@ Analytics, Product Personalization, Advertising, or "Other" purpose.
       (public request instructions; in-app deletion is also available at
       **Settings → Account → Delete account**)
 - [ ] Apple privacy policy URL: `https://nexus-chat-world.com/privacy`
-- [ ] Disclosures match the published Policy (name, email, messages, media,
+- [ ] Disclosures match the published Policy (name, email, optional phone, messages, media,
       contacts/feed, optional ID verification, technical data).
 - [ ] "Free, no purchases" is stated in the listing and reviewer notes so it
       cannot look like a hidden paywall.

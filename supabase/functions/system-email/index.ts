@@ -2,6 +2,7 @@ import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { resolveResendFrom } from '../_shared/system-email.js'
 import { createSystemEmailService } from '../_shared/system-email-service.js'
+import { createTwilioSmsSender } from '../_shared/system-sms.js'
 
 const json = (status: number, body: Record<string, unknown>) => new Response(
   JSON.stringify(body),
@@ -46,6 +47,7 @@ async function sendWithResend(message: {
 const sendNotification = createSystemEmailService({
   adminClientFactory: createAdminClient,
   emailSender: sendWithResend,
+  smsSender: createTwilioSmsSender({ getEnv: (name) => Deno.env.get(name) }),
 })
 
 Deno.serve(async (req) => {

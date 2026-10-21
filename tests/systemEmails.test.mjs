@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createSystemEmailHandler } from '../api/notifications/system-email.js'
 import { identityReviewEmail, securityAlertEmail, sendSystemEmail } from '../server/systemEmails.js'
+import { identityReviewSms, securityAlertSms } from '../supabase/functions/_shared/system-sms.js'
 
 process.env.SUPABASE_URL = 'https://auth.example.test'
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key'
@@ -39,9 +40,13 @@ function makeDependencies({
   emailVerified = true,
   verification = null,
   recipient = null,
+  phoneVerified = false,
+  smsOptIn = false,
+  smsFailure = false,
   rateLimitAllowed = true,
 } = {}) {
   const sent = []
+  const sentSms = []
   const admin = {
     auth: {
       async getUser(token) {
@@ -52,10 +57,27 @@ function makeDependencies({
               id: userId,
               email: 'account@example.test',
               email_confirmed_at: emailVerified ? '2026-10-01T00:00:00Z' : null,
+              phone: '+14155552671',
+              phone_confirmed_at: phoneVerified ? '2026-10-01T00:00:00Z' : null,
+              user_metadata: { sms_transactional_opt_in: smsOptIn },
             },
           },
           error: null,
         }
+      },
+      admin: {
+        async getUserById() {
+          return {
+            data: {
+              user: {
+                phone: '+442071838750',
+                phone_confirmed_at: phoneVerified ? '2026-10-01T00:00:00Z' : null,
+                user_metadata: { sms_transactional_opt_in: smsOptIn },
+              },
+            },
+            error: null,
+          }
+        },
       },
       async getClaims() {
         return {
@@ -98,7 +120,12 @@ function makeDependencies({
     handler: createSystemEmailHandler({
       adminClientFactory: () => admin,
       emailSender: async (message) => { sent.push(message) },
+      smsSender: async (message) => {
+        if (smsFailure) throw new Error('Twilio unavailable')
+        sentSms.push(message)
+      },
     }),
+    sentSms,
   }
 }
 
@@ -132,8 +159,43 @@ test('security alerts require AAL2 for administrators and are rate limited', asy
   assert.equal(limited.sent.length, 0)
 })
 
+test('security alert SMS uses only the verified, opted-in phone on the authenticated account', async () => {
+  const { handler, sent, sentSms } = makeDependencies({ phoneVerified: true, smsOptIn: true })
+  const res = responseRecorder()
+  await handler(request('security-alert', { to: '+15555550123' }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(sent.length, 1)
+  assert.equal(sentSms.length, 1)
+  assert.equal(sentSms[0].to, '+14155552671')
+  assert.equal(sentSms[0].body, securityAlertSms())
+})
+
+test('security alert SMS is skipped unless the number is verified and consented', async () => {
+  const { handler, sentSms } = makeDependencies({ phoneVerified: false, smsOptIn: true })
+  const res = responseRecorder()
+  await handler(request('security-alert'), res)
+  assert.equal(res.statusCode, 200)
+  assert.equal(sentSms.length, 0)
+})
+
+test('a Twilio failure is returned explicitly after the email attempt', async () => {
+  const { handler, sent, sentSms } = makeDependencies({
+    phoneVerified: true,
+    smsOptIn: true,
+    smsFailure: true,
+  })
+  const res = responseRecorder()
+  await handler(request('security-alert'), res)
+
+  assert.equal(res.statusCode, 502)
+  assert.match(res.body.error, /sign-in notification/)
+  assert.equal(sent.length, 1)
+  assert.equal(sentSms.length, 0)
+})
+
 test('identity review emails require AAL2 admin and use the verified reviewed account address', async () => {
-  const { handler, sent } = makeDependencies({
+  const { handler, sent, sentSms } = makeDependencies({
     adminRole: true,
     aal: 'aal2',
     verification: {
@@ -156,10 +218,41 @@ test('identity review emails require AAL2 admin and use the verified reviewed ac
   assert.deepEqual(res.body, { ok: true })
   assert.equal(sent.length, 1)
   assert.equal(sent[0].to, 'reviewed-user@example.test')
+  assert.equal(sentSms.length, 0)
   assert.match(sent[0].text, /Reviewer note: <img/)
   assert.equal(sent[0].html.includes('<img src=x'), false)
   assert.match(sent[0].html, /&lt;img src=x/)
   assert.match(sent[0].idempotencyKey, new RegExp(`^identity-review/${verificationId}/rejected/`))
+})
+
+test('identity review SMS uses the reviewed account phone and omits reviewer notes', async () => {
+  const { handler, sentSms } = makeDependencies({
+    adminRole: true,
+    aal: 'aal2',
+    phoneVerified: true,
+    smsOptIn: true,
+    verification: {
+      id: verificationId,
+      user_id: '123e4567-e89b-42d3-a456-426614174002',
+      status: 'rejected',
+      reviewer_note: 'Do not include this private note in a text',
+      reviewed_by: userId,
+      reviewed_at: '2026-10-21T10:00:00Z',
+    },
+    recipient: { email: 'reviewed-user@example.test', email_verified: true },
+  })
+  const res = responseRecorder()
+  await handler(request('identity-review', { verificationId }), res)
+
+  assert.equal(res.statusCode, 200)
+  assert.equal(sentSms.length, 1)
+  assert.equal(sentSms[0].to, '+442071838750')
+  assert.equal(sentSms[0].body, identityReviewSms('rejected'))
+  assert.equal(sentSms[0].body.includes('private note'), false)
+})
+
+test('identity review SMS template only accepts completed statuses', () => {
+  assert.throws(() => identityReviewSms('pending'), /Invalid identity review status/)
 })
 
 test('identity review email rejects non-admin, unverified-recipient, and malformed requests', async () => {

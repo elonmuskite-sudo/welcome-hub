@@ -1,4 +1,5 @@
 import { identityReviewEmail, securityAlertEmail } from './system-email.js'
+import { hasSmsConsent, identityReviewSms, securityAlertSms } from './system-sms.js'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
 
@@ -6,7 +7,7 @@ function result(status, body) {
   return { status, body }
 }
 
-export function createSystemEmailService({ adminClientFactory, emailSender }) {
+export function createSystemEmailService({ adminClientFactory, emailSender, smsSender }) {
   return async function sendSystemNotification({ url, serviceRoleKey, token, action, verificationId }) {
     if (!url || !serviceRoleKey) {
       return result(503, { error: 'System email delivery is not configured on the server.' })
@@ -67,10 +68,14 @@ export function createSystemEmailService({ adminClientFactory, emailSender }) {
           ...securityAlertEmail(),
           idempotencyKey: `security-alert/${user.id}/${sessionId}`,
         })
+        if (hasSmsConsent(user)) {
+          if (!smsSender) throw new Error('Twilio SMS delivery is not configured on the server.')
+          await smsSender({ to: user.phone, body: securityAlertSms() })
+        }
         return result(200, { ok: true })
       } catch (error) {
-        console.error('Sign-in alert email failed', error)
-        return result(502, { error: 'The sign-in alert email could not be delivered.' })
+        console.error('Sign-in notification delivery failed', error)
+        return result(502, { error: 'The sign-in notification could not be delivered.' })
       }
     }
 
@@ -112,6 +117,11 @@ export function createSystemEmailService({ adminClientFactory, emailSender }) {
     if (!member?.email || member.email_verified !== true) {
       return result(409, { error: 'The reviewed account does not have a verified email address.' })
     }
+    const { data: recipientAuthData, error: recipientAuthError } = await admin.auth.admin.getUserById(verification.user_id)
+    if (recipientAuthError || !recipientAuthData?.user) {
+      console.error('Identity status SMS recipient lookup failed', recipientAuthError)
+      return result(503, { error: 'The review recipient notification settings could not be verified.' })
+    }
     const reviewedAt = new Date(verification.reviewed_at).getTime()
     if (!Number.isFinite(reviewedAt)) return result(503, { error: 'The review timestamp could not be verified.' })
 
@@ -121,10 +131,17 @@ export function createSystemEmailService({ adminClientFactory, emailSender }) {
         ...identityReviewEmail({ status: verification.status, reviewerNote: verification.reviewer_note }),
         idempotencyKey: `identity-review/${verification.id}/${verification.status}/${reviewedAt}`,
       })
+      if (hasSmsConsent(recipientAuthData.user)) {
+        if (!smsSender) throw new Error('Twilio SMS delivery is not configured on the server.')
+        await smsSender({
+          to: recipientAuthData.user.phone,
+          body: identityReviewSms(verification.status),
+        })
+      }
       return result(200, { ok: true })
     } catch (error) {
-      console.error('Identity status email failed', error)
-      return result(502, { error: 'The identity review was saved, but its status email could not be delivered.' })
+      console.error('Identity status notification delivery failed', error)
+      return result(502, { error: 'The identity review was saved, but its notification could not be delivered.' })
     }
   }
 }

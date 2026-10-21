@@ -30,7 +30,7 @@ function PrivacyContent() {
       </Section>
 
       <Section title="Information we collect">
-        <p><strong className="text-foreground">Account details.</strong> Your name, email address and a generated member number. We use these to create and secure your account.</p>
+        <p><strong className="text-foreground">Account details.</strong> Your name, email address and a generated member number. You may also add and verify a phone number and opt in to transactional SMS alerts. We use these details to provide and secure your account.</p>
         <p><strong className="text-foreground">Profile details you provide.</strong> An optional avatar, bio and interests.</p>
         <p><strong className="text-foreground">Messages and media.</strong> Text and sticker messages must be end-to-end encrypted on your device. If encryption or a recipient key is unavailable, the message is not sent. Private keys stay on your device. Attachments and voice notes are not covered by E2EE; we store files so they can be delivered to recipients.</p>
         <p><strong className="text-foreground">Contacts and feed content.</strong> The contacts you save and any posts, comments or reactions you publish in the social feed.</p>
@@ -39,7 +39,7 @@ function PrivacyContent() {
       </Section>
 
       <Section title="How we use your information">
-        <p>We use your information to provide messaging, calls, the social feed and account features; to verify identity when you ask us to; to keep the service safe and prevent abuse; and to send service emails such as verification codes and a one-time welcome message.</p>
+        <p>We use your information to provide messaging, calls, the social feed and account features; to verify identity when you ask us to; to keep the service safe and prevent abuse; and to send service emails such as verification codes and a one-time welcome message. If you verify a phone number and opt in, we may send transactional SMS sign-in alerts and identity-review status updates. SMS consent is optional, no marketing texts are sent, and you can opt out in settings or by replying STOP. Message and data rates may apply.</p>
       </Section>
 
       <Section title="What we never do">
@@ -51,7 +51,7 @@ function PrivacyContent() {
       </Section>
 
       <Section title="Service providers">
-        <p>We rely on trusted providers to run the service: Supabase (database, authentication and file storage), Resend (transactional email) and our hosting provider. These providers only process data on our instructions.</p>
+        <p>We rely on trusted providers to run the service: Supabase (database, authentication and file storage), Resend (transactional email), Twilio (phone verification and optional transactional SMS), and our hosting provider. These providers only process data on our instructions.</p>
       </Section>
 
       <Section title="Data retention">
