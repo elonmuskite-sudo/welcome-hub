@@ -56,16 +56,12 @@ Crash logs · Diagnostics · Performance data.
 
 ### Messages and encryption note
 
-Text-message bodies are end-to-end encrypted on the device (ECDH P-256 key
-agreement, AES-256-GCM payloads) only while E2EE is enabled. New accounts enable
-it by default when key setup succeeds; existing users can enable or disable it
-in Settings. If the sender cannot obtain the recipient key or encryption fails,
-the app blocks that text message instead of sending plaintext. When E2EE is
-disabled, message text is not end-to-end encrypted and may be processed by the
-service provider. Attachments and voice notes are not covered by E2EE and are
-stored for delivery. Row 9 is disclosed because message contents and delivery
-metadata are collected; whether the content is end-to-end encrypted depends on
-the user's E2EE setting.
+Text-message and sticker bodies must be end-to-end encrypted on the device (ECDH P-256 key
+agreement, AES-256-GCM payloads). Encryption is mandatory for all accounts and
+cannot be disabled. If the sender or recipient key is unavailable, or encryption
+fails, the app blocks the text message instead of sending plaintext. Attachments
+and voice notes are not covered by E2EE and are stored for delivery. Row 9 is
+disclosed because message contents and delivery metadata are collected.
 
 ### Third parties (for the "sharing" definition)
 

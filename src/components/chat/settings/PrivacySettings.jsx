@@ -3,37 +3,43 @@ import SettingsRow from './SettingsRow'
 import { ShieldCheckIcon, KeyIcon, DocumentDuplicateIcon, CheckIcon, EyeIcon } from '@heroicons/react/24/solid'
 import { useSetting } from '../../../hooks/useSetting'
 import {
-  isE2EEEnabled,
-  setE2EEEnabled,
   getMyPublicKey,
   generateSecurityCode,
-  initializeE2EE,
   publishMyPublicKey,
 } from '../../../lib/crypto/e2ee'
 
 export default function PrivacySettings() {
-  const [e2eeEnabled, setE2ee] = useState(isE2EEEnabled())
   const [publicKey, setPublicKey] = useState('')
   const [copied, setCopied] = useState(false)
   const [keyError, setKeyError] = useState('')
+  const [keySetupAttempt, setKeySetupAttempt] = useState(0)
+  const [keySetupPending, setKeySetupPending] = useState(true)
   const [readReceipts, setReadReceipts] = useSetting('readReceipts', true)
 
   useEffect(() => {
-    initializeE2EE()
-      .then(() => getMyPublicKey())
-      .then(setPublicKey)
-      .catch(() => setPublicKey(''))
-    if (isE2EEEnabled()) publishMyPublicKey().catch(() => {})
-  }, [])
-
-  const handleToggleE2EE = (enabled) => {
-    setE2EEEnabled(enabled)
-    setE2ee(enabled)
-    setKeyError('')
-    // Publish on enable so contacts can actually derive the shared key; without
-    // it encryption would fail for everyone else.
-    if (enabled) publishMyPublicKey().catch((error) => setKeyError(error?.message || 'Could not publish your encryption key.'))
-  }
+    let active = true
+    const prepareEncryption = async () => {
+      setKeySetupPending(true)
+      setKeyError('')
+      try {
+        const key = await getMyPublicKey()
+        await publishMyPublicKey()
+        if (active) {
+          setPublicKey(key)
+          setKeyError('')
+        }
+      } catch (error) {
+        if (active) {
+          setPublicKey('')
+          setKeyError(error?.message || 'Could not prepare your encryption key.')
+        }
+      } finally {
+        if (active) setKeySetupPending(false)
+      }
+    }
+    void prepareEncryption()
+    return () => { active = false }
+  }, [keySetupAttempt])
 
   const copyPublicKey = () => {
     navigator.clipboard.writeText(publicKey)
@@ -48,26 +54,21 @@ export default function PrivacySettings() {
         <div>
           <h3 className="font-semibold text-foreground">End-to-End Encryption</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Text messages are encrypted on your device when E2EE is enabled.
-            If encryption cannot be completed, the message will not be sent.
+            End-to-end encryption is required for every text and sticker message. Messages
+            are blocked until your key and the recipient&apos;s key are available.
             Attachments and voice notes are not end-to-end encrypted.
           </p>
         </div>
       </div>
 
-      <SettingsRow label="Enable E2EE">
-        <button
-          onClick={() => handleToggleE2EE(!e2eeEnabled)}
-          className={`relative w-12 h-6 rounded-full transition-colors ${
-            e2eeEnabled ? 'bg-green-500' : 'bg-muted'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-              e2eeEnabled ? 'translate-x-6' : 'translate-x-0.5'
-            }`}
-          />
-        </button>
+      <SettingsRow
+        label="Text message encryption"
+        description="Required. This protection cannot be turned off."
+        icon={<ShieldCheckIcon className="w-4 h-4" />}
+      >
+        <span className="rounded-full bg-green-500/10 px-3 py-1 text-sm font-medium text-green-600">
+          Required
+        </span>
       </SettingsRow>
 
       <SettingsRow
@@ -97,8 +98,6 @@ export default function PrivacySettings() {
         </button>
       </SettingsRow>
 
-      {e2eeEnabled && (
-        <>
           <div className="p-4 bg-muted/40 rounded-xl border border-border">
             <div className="flex items-center gap-2 mb-2">
               <KeyIcon className="w-4 h-4 text-muted-foreground" />
@@ -128,10 +127,18 @@ export default function PrivacySettings() {
           </div>
 
           {keyError && (
-            <p className="text-sm text-destructive" role="alert">{keyError}</p>
+            <div className="space-y-2">
+              <p className="text-sm text-destructive" role="alert">{keyError}</p>
+              <button
+                type="button"
+                onClick={() => setKeySetupAttempt((attempt) => attempt + 1)}
+                disabled={keySetupPending}
+                className="text-sm font-medium text-primary hover:underline disabled:opacity-50"
+              >
+                {keySetupPending ? 'Retrying key setup...' : 'Retry key setup'}
+              </button>
+            </div>
           )}
-        </>
-      )}
     </div>
   )
 }

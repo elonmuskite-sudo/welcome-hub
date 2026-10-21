@@ -1,10 +1,13 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
 import { IdentityLinkError, linkAppwriteIdentity, verifyAppwriteSession } from './appwriteIdentity.js'
 import { createDatabasePool, withAuthenticatedDatabaseTransaction } from './appwriteDatabase.js'
 import { isFileScanConfigured, scanFileBuffer, unavailableScan } from './fileScan.js'
+import { isEncryptedTextEnvelope, requiresE2EEEncryption } from '../src/lib/crypto/envelope.js'
+import { securityAlertEmail, sendSystemEmail } from './systemEmails.js'
 
 let poolPromise
+const POST_COMMIT = Symbol('postCommit')
 const FIRST_VALID_UUID = '00000000-0000-1000-8000-000000000000'
 // Every account gets the same fixed quota; storage is not a purchasable upgrade.
 const STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024
@@ -42,9 +45,12 @@ function getConfiguration() {
   return { endpoint: parsedEndpoint, projectId, supabaseUrl, serviceRoleKey, poolerUrl }
 }
 
-export async function executeUserDataOperation(client, identity, body, admin) {
+export async function executeUserDataOperation(client, identity, body, admin, account = {}) {
   const { supabaseUserId } = identity
   const action = String(body?.action || '')
+  if (action.startsWith('admin.') || action.startsWith('verification.admin.')) {
+    throw new GatewayError('Privileged actions require the Supabase MFA workflow.', 403)
+  }
   switch (action) {
     case 'profile.get': {
       const { rows } = await client.query(
@@ -223,6 +229,10 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       if (!validUuid(chatId)) throw new GatewayError('Chat ID is invalid.')
       const content = requiredString(body.content, 'Message content', 65535)
       if (!content.trim()) throw new GatewayError('Message content is required.')
+      const type = optionalString(body.type || 'text', 'Message type', 40)
+      if (requiresE2EEEncryption(type) && (body.encrypted !== true || !isEncryptedTextEnvelope(content))) {
+        throw new GatewayError('Text and sticker messages must be end-to-end encrypted.')
+      }
       const messageId = validUuid(body.id) ? body.id : undefined
       const duration = body.duration == null ? null : Number(body.duration)
       if (duration !== null && (!Number.isFinite(duration) || duration < 0)) throw new GatewayError('Message duration is invalid.')
@@ -237,7 +247,7 @@ export async function executeUserDataOperation(client, identity, body, admin) {
           chatId,
           supabaseUserId,
           content,
-          optionalString(body.type || 'text', 'Message type', 40),
+          type,
           optionalString(body.fileUrl, 'File URL', 4096),
           optionalString(body.fileName, 'File name', 255),
           duration,
@@ -443,6 +453,42 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       if (!rows[0]?.is_admin) throw new GatewayError('Administrator access is required.', 403)
       return { isAdmin: true }
     }
+    case 'security.alert.send': {
+      if (account.emailVerification !== true || !account.email) {
+        throw new GatewayError('A verified account email is required.', 403)
+      }
+      const { rows: roles } = await client.query(
+        `select public.has_role($1, 'admin'::public.app_role) as is_admin`,
+        [supabaseUserId],
+      )
+      if (roles[0]?.is_admin) {
+        throw new GatewayError('Admin sign-in alerts require the Supabase MFA workflow.', 403)
+      }
+      const bucketKey = createHash('sha256').update(`security-alert:${supabaseUserId}`).digest('hex')
+      const { data: allowed, error: limitError } = await admin.rpc('consume_auth_email_code_limit', {
+        p_bucket_key: bucketKey,
+        p_window_seconds: 3600,
+        p_limit: 3,
+      })
+      if (limitError) throw new GatewayError('Sign-in alert rate limiting is unavailable.', 503)
+      if (allowed !== true) throw new GatewayError('Sign-in alert email rate limit exceeded.', 429)
+      return {
+        [POST_COMMIT]: async () => {
+          try {
+            await sendSystemEmail({
+              to: account.email,
+              ...securityAlertEmail(),
+              idempotencyKey: `security-alert/${supabaseUserId}/${account.authSessionFingerprint || randomUUID()}`,
+            })
+            return true
+          } catch (error) {
+            console.error('Appwrite sign-in alert email failed', error)
+            return false
+          }
+        },
+        response: { ok: true },
+      }
+    }
     case 'admin.dashboard': {
       await requireAdmin(client, supabaseUserId)
       const [{ rows: members }, { rows: messages }] = await Promise.all([
@@ -623,21 +669,6 @@ export async function executeUserDataOperation(client, identity, body, admin) {
       }))
       return { verifications: signedRows }
     }
-    case 'verification.admin.review': {
-      await requireAdmin(client, supabaseUserId)
-      const id = requiredString(body.id, 'Verification ID', 64)
-      if (!validUuid(id) || !['approved', 'rejected'].includes(body.status)) {
-        throw new GatewayError('Verification review details are invalid.')
-      }
-      const note = optionalString(body.note, 'Reviewer note', 2000)
-      // Route through the audited RPC so an Appwrite-auth deployment records the
-      // same admin audit-log entry as the Supabase path.
-      await client.query(
-        `select public.review_identity_verification($1, $2, $3)`,
-        [id, body.status === 'approved', note],
-      )
-      return { ok: true }
-    }
     case 'verification.upload.prepare': {
       const fileName = requiredString(body.fileName, 'File name', 255)
       const mimeType = requiredString(body.mimeType, 'Image type', 100).toLowerCase()
@@ -726,12 +757,19 @@ async function inUserTransaction(config, account, operation) {
   const admin = getAdminClient(config)
   const identity = await linkAppwriteIdentity(admin, account)
   const pool = await getPool(config)
-  return withAuthenticatedDatabaseTransaction(pool, identity.supabaseUserId, (client) => operation(client, identity, admin))
+  const result = await withAuthenticatedDatabaseTransaction(
+    pool,
+    identity.supabaseUserId,
+    (client) => operation(client, identity, admin, account),
+  )
+  if (typeof result?.[POST_COMMIT] !== 'function') return result
+  const emailNotificationSent = await result[POST_COMMIT]()
+  return { ...result.response, emailNotificationSent }
 }
 
 export async function dispatchUserData(config, account, body) {
   return inUserTransaction(config, account, async (client, identity, admin) => {
-    return executeUserDataOperation(client, identity, body, admin)
+    return executeUserDataOperation(client, identity, body, admin, account)
   })
 }
 
@@ -740,11 +778,15 @@ export async function authenticateGatewayRequest(req) {
   if (!config) throw new GatewayError('The Appwrite data gateway is not configured on the server.', 503)
   const token = String(req.headers.authorization || '').match(/^Bearer\s+(\S+)$/i)?.[1]
   if (!token || token.length > 8192) throw new GatewayError('A valid Appwrite session is required.', 401)
-  const account = await verifyAppwriteSession({
+  const verifiedAccount = await verifyAppwriteSession({
     endpoint: config.endpoint,
     projectId: config.projectId,
     token,
   })
+  const account = {
+    ...verifiedAccount,
+    authSessionFingerprint: createHash('sha256').update(token).digest('hex'),
+  }
   return { config, account }
 }
 

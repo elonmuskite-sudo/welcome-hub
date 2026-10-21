@@ -39,6 +39,15 @@ export default async function handler(req, res) {
   const { data, error } = await admin.auth.getUser(token)
   if (error || !data?.user) return send(res, 401, { error: 'Sign in required.' })
 
+  const { data: claimsData, error: claimsError } = await admin.auth.getClaims(token)
+  if (claimsError || claimsData?.claims?.sub !== data.user.id) {
+    return send(res, 401, { error: 'Sign in required.' })
+  }
+  if (claimsData.claims.aal !== 'aal2') {
+    res.setHeader('Set-Cookie', adminSessionClearedCookie())
+    return send(res, 403, { error: 'Administrator multi-factor authentication is required.' })
+  }
+
   const { data: isAdmin, error: roleError } = await admin.rpc('has_role', { _user_id: data.user.id, _role: 'admin' })
   if (roleError) {
     console.error('Admin role check failed', roleError)

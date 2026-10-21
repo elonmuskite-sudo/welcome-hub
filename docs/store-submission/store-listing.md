@@ -35,10 +35,9 @@ private social feed — all for free, with no subscriptions, no paid tiers and n
 in-app purchases.
 
 PRIVATE BY DESIGN
-• Text messages are end-to-end encrypted on your device when E2EE is enabled.
-  New accounts have E2EE enabled by default when setup succeeds.
+• Text and sticker messages require end-to-end encryption on your device.
 • If a contact's key is unavailable or encryption fails, the app will not send
-  that text message. You can manage E2EE in Settings → Privacy.
+  that text message. Encryption cannot be turned off.
 • Attachments and voice notes are not covered by end-to-end encryption.
 
 MESSAGING THAT KEEPS UP

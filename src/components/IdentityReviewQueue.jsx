@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { sendIdentityReviewEmail } from '../lib/supabase'
 import { appwriteData, isAppwriteAuthEnabled } from '../lib/appwrite'
 import { clearVerificationBadgeCache } from './chat/VerificationBadge'
 
@@ -7,6 +8,9 @@ export default function IdentityReviewQueue() {
   const [rows, setRows] = useState([])
   const [notes, setNotes] = useState({})
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [notificationRetryId, setNotificationRetryId] = useState(null)
+  const [notificationRetrying, setNotificationRetrying] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -44,20 +48,48 @@ export default function IdentityReviewQueue() {
 
   const decide = async (row, status) => {
     const { id, user_id: userId } = row
+    let notificationFailed = false
     try {
       if (isAppwriteAuthEnabled()) {
-        await appwriteData('verification.admin.review', { id, status, note: notes[id] || null })
+        const result = await appwriteData('verification.admin.review', { id, status, note: notes[id] || null })
+        notificationFailed = result?.emailNotificationSent !== true
       } else {
         const { error: updateError } = await supabase.rpc('review_identity_verification', {
           _id: id, _approve: status === 'approved', _note: notes[id] || null,
         })
         if (updateError) throw updateError
+        try {
+          await sendIdentityReviewEmail(id)
+        } catch (notificationError) {
+          console.error('Identity review status email failed', notificationError)
+          notificationFailed = true
+        }
       }
       clearVerificationBadgeCache(userId)
       setRows((r) => r.filter((x) => x.id !== id))
       setError('')
+      setNotice(notificationFailed
+        ? 'The review was saved, but its status email could not be delivered.'
+        : 'The review was saved and the status email was sent.')
+      setNotificationRetryId(notificationFailed ? id : null)
     } catch (reviewError) {
       setError(reviewError.message || 'The identity check could not be reviewed.')
+      setNotice('')
+    }
+  }
+
+  const retryStatusEmail = async () => {
+    if (!notificationRetryId || notificationRetrying) return
+    setNotificationRetrying(true)
+    try {
+      await sendIdentityReviewEmail(notificationRetryId)
+      setNotice('The identity review status email was sent.')
+      setNotificationRetryId(null)
+    } catch (notificationError) {
+      console.error('Identity review status email retry failed', notificationError)
+      setNotice('The review was saved, but its status email still could not be delivered.')
+    } finally {
+      setNotificationRetrying(false)
     }
   }
 
@@ -66,6 +98,17 @@ export default function IdentityReviewQueue() {
       <h2 className="text-xl font-semibold text-foreground">ID checks waiting for review</h2>
       <p className="mt-1 text-sm text-muted-foreground">Manual submissions are held until an admin confirms the government ID matches the selfie. Instant checks are automated and never appear here.</p>
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+      {notice && <p role="status" className="mt-3 text-sm text-muted-foreground">{notice}</p>}
+      {notificationRetryId && (
+        <button
+          type="button"
+          onClick={retryStatusEmail}
+          disabled={notificationRetrying}
+          className="mt-2 rounded-full border border-border px-4 py-2 text-sm text-foreground disabled:opacity-50"
+        >
+          {notificationRetrying ? 'Retrying email…' : 'Retry status email'}
+        </button>
+      )}
       {!rows.length && !error && <p className="mt-4 text-sm text-muted-foreground">Nothing to review.</p>}
       <div className="mt-4 space-y-4">
         {rows.map((r) => (

@@ -18,6 +18,22 @@ let otpSequence = 100000
 // Emails that already exist in the auth store, so createUser fails for them.
 const ALREADY_REGISTERED_EMAILS = new Set(['taken-user@example.test', 'unverified-user@example.test'])
 
+// email-code resolves accounts through the members mirror
+// (.from('members').select('id, email_verified').eq('email', …).maybeSingle()),
+// not by paging auth.users, so the mock has to mirror that table: which
+// addresses resolve at all, and whether each one is verified.
+const MEMBER_EMAILS = new Map([
+  ['taken-user@example.test', true],
+  ['unverified-user@example.test', false],
+  ['verify-user@example.test', true],
+  ['resend-user@example.test', true],
+  ['recover-user@example.test', true],
+  ['reset-user@example.test', true],
+  ['rate-limited@example.test', true],
+  ['new-user@example.test', true],
+  ['code-user@example.test', true],
+])
+
 function nextOtp() {
   otpSequence += 1
   return String(otpSequence)
@@ -70,6 +86,16 @@ globalThis.fetch = async (request, options = {}) => {
       verification_type: body.type,
       user: { id: testUserId, email: body.email },
     }), { status: 200 })
+  }
+
+  if (url.pathname.endsWith('/rest/v1/members') && options.method === 'GET') {
+    const filter = url.searchParams.get('email') || ''
+    const email = filter.replace(/^eq\./, '')
+    const verified = MEMBER_EMAILS.get(email)
+    return new Response(
+      JSON.stringify(verified === undefined ? [] : [{ id: testUserId, email_verified: verified }]),
+      { status: 200 },
+    )
   }
 
   if (url.pathname.endsWith('/rest/v1/rpc/consume_auth_email_code_limit')) {

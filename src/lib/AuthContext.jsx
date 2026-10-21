@@ -12,6 +12,7 @@ import {
   startPasswordRecoveryCode,
   startSignupEmailCode,
   signInWithEmail,
+  sendSecurityAlertEmail,
   signOutFromSupabase,
   supabase,
   updateAuthenticatedPassword,
@@ -158,6 +159,9 @@ export function AuthProvider({ children }) {
     const { user: authUser } = await signInWithEmail(email, password)
     const profile = await getMemberProfile(authUser.id)
     void sendWelcomeEmail()
+    if (!isAdminRole(profile.role)) {
+      void sendSecurityAlertEmail().catch((error) => console.error('Sign-in alert email failed', error))
+    }
     const sessionUser = normalizeUser({
       ...profile,
       email: authUser.email,
@@ -184,6 +188,9 @@ export function AuthProvider({ children }) {
     if (purpose === 'recovery') return { ok: true }
     const profile = await getMemberProfile(authUser.id)
     void sendWelcomeEmail()
+    if (purpose === 'email' && !isAdminRole(profile.role)) {
+      void sendSecurityAlertEmail().catch((error) => console.error('Sign-in alert email failed', error))
+    }
     const sessionUser = normalizeUser({
       ...profile,
       email: authUser.email,

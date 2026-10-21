@@ -3,6 +3,11 @@ import assert from 'node:assert/strict'
 import { executeUserDataOperation } from '../server/appwriteGateway.js'
 
 const userId = '123e4567-e89b-42d3-a456-426614174000'
+const encryptedContent = JSON.stringify({
+  alg: 'ECDH-P256+AES-256-GCM',
+  iv: 'AAAAAAAAAAAAAAAA',
+  data: `${'A'.repeat(23)}=`,
+})
 
 function makeClient(handler) {
   const calls = []
@@ -24,11 +29,44 @@ test('message insert binds its sender to the verified linked Supabase identity',
     action: 'messages.send',
     chatId: '123e4567-e89b-42d3-a456-426614174001',
     senderId: '123e4567-e89b-42d3-a456-426614174099',
-    content: 'hello',
+    content: encryptedContent,
+    type: 'text',
+    encrypted: true,
   })
 
   assert.equal(result.message.sender_id, userId)
   assert.equal(client.calls[0].values[2], userId)
+  assert.equal(client.calls[0].values[3], encryptedContent)
+})
+
+test('the Appwrite gateway rejects plaintext text before database access', async () => {
+  const client = makeClient(() => assert.fail('Plaintext must be rejected before database access'))
+  await assert.rejects(
+    executeUserDataOperation(client, { supabaseUserId: userId }, {
+      action: 'messages.send',
+      chatId: '123e4567-e89b-42d3-a456-426614174001',
+      content: 'plaintext must not be persisted',
+      type: 'text',
+      encrypted: false,
+    }),
+    { status: 400, message: 'Text and sticker messages must be end-to-end encrypted.' },
+  )
+  assert.equal(client.calls.length, 0)
+})
+
+test('the Appwrite gateway rejects a forged encryption flag without an envelope', async () => {
+  const client = makeClient(() => assert.fail('Invalid encrypted content must be rejected before database access'))
+  await assert.rejects(
+    executeUserDataOperation(client, { supabaseUserId: userId }, {
+      action: 'messages.send',
+      chatId: '123e4567-e89b-42d3-a456-426614174001',
+      content: 'plaintext with an encrypted flag',
+      type: 'text',
+      encrypted: true,
+    }),
+    { status: 400, message: 'Text and sticker messages must be end-to-end encrypted.' },
+  )
+  assert.equal(client.calls.length, 0)
 })
 
 test('message polling advances its authenticated composite cursor without skipping ties', async () => {
@@ -183,38 +221,27 @@ test('chat upload completion verifies Storage’s actual object size and content
   assert.deepEqual(result, { fileUrl: 'https://storage.example/signed-file', scanStatus: 'unavailable' })
 })
 
-test('admin dashboard rejects a non-admin before reading workspace data', async () => {
-  const client = makeClient((sql) => {
-    assert.match(sql, /public\.has_role/)
-    return { rows: [{ is_admin: false }] }
-  })
-
-  await assert.rejects(
-    executeUserDataOperation(client, { supabaseUserId: userId }, { action: 'admin.dashboard' }),
-    { status: 403 },
-  )
-  assert.equal(client.calls.length, 1)
-})
-
-test('admin member update requires admin role and calls the existing guarded RPC', async () => {
-  const targetId = '123e4567-e89b-42d3-a456-426614174001'
-  const client = makeClient((sql, values) => {
-    if (sql.includes('public.has_role')) return { rows: [{ is_admin: true }] }
-    assert.match(sql, /public\.admin_update_member/)
-    assert.deepEqual(values, [targetId, 'Ada', 'Lovelace', ''])
-    return { rows: [] }
-  })
-
-  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
-    action: 'admin.member.update',
-    memberId: targetId,
-    firstName: 'Ada',
-    lastName: 'Lovelace',
-    bio: '',
-  })
-
-  assert.deepEqual(result, { ok: true })
-  assert.equal(client.calls.length, 1)
+test('Appwrite provider blocks every privileged admin action until provider MFA is supported', async () => {
+  const actions = [
+    'admin.verify',
+    'admin.dashboard',
+    'admin.members.list',
+    'admin.member.update',
+    'admin.role.set',
+    'admin.premium.set',
+    'admin.diagnostics',
+    'verification.admin.queue',
+    'verification.admin.review',
+    'verification.admin.notify',
+  ]
+  for (const action of actions) {
+    const client = makeClient(() => assert.fail(`${action} must be rejected before database access`))
+    await assert.rejects(
+      executeUserDataOperation(client, { supabaseUserId: userId }, { action }),
+      { status: 403 },
+    )
+    assert.equal(client.calls.length, 0, `${action} must not access the database`)
+  }
 })
 
 test('identity uploads are scoped to the verified identity and reject invalid sizes', async () => {
@@ -312,57 +339,66 @@ test('verification submission checks actual private object metadata before inser
   assert.equal(client.calls.length, 1)
 })
 
-test('identity review rejects non-admins before attempting a status update', async () => {
+test('Appwrite security alerts reject admin accounts because provider MFA is unavailable', async () => {
   const client = makeClient((sql) => {
     assert.match(sql, /public\.has_role/)
-    return { rows: [{ is_admin: false }] }
+    return { rows: [{ is_admin: true }] }
   })
+  const admin = {
+    rpc: async () => assert.fail('Admin alert denial must happen before rate limiting'),
+  }
 
   await assert.rejects(
     executeUserDataOperation(client, { supabaseUserId: userId }, {
-      action: 'verification.admin.review',
-      id: '123e4567-e89b-42d3-a456-426614174001',
-      status: 'approved',
-    }),
+      action: 'security.alert.send',
+    }, admin, { email: 'admin@example.test', emailVerification: true }),
     { status: 403 },
   )
   assert.equal(client.calls.length, 1)
 })
 
-test('premium member grants are admin-guarded and routed through the audited RPC', async () => {
-  const targetId = '123e4567-e89b-42d3-a456-426614174001'
-  const client = makeClient((sql, values) => {
-    if (sql.includes('public.has_role')) return { rows: [{ is_admin: true }] }
-    assert.match(sql, /public\.admin_set_premium_member/)
-    assert.deepEqual(values, [targetId, true, null])
-    return { rows: [] }
-  })
-
-  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
-    action: 'admin.premium.set',
-    memberId: targetId,
-    grant: true,
-  })
-
-  assert.deepEqual(result, { ok: true })
-  assert.equal(client.calls.length, 2)
-})
-
-test('premium member grants reject a non-admin before granting the badge', async () => {
+test('Appwrite member sign-in alerts are sent after the transaction with a session-scoped idempotency key', async () => {
   const client = makeClient((sql) => {
     assert.match(sql, /public\.has_role/)
     return { rows: [{ is_admin: false }] }
   })
+  const admin = {
+    async rpc(name, args) {
+      assert.equal(name, 'consume_auth_email_code_limit')
+      assert.equal(args.p_limit, 3)
+      return { data: true, error: null }
+    },
+  }
+  const previousApiKey = process.env.RESEND_API_KEY
+  const originalFetch = globalThis.fetch
+  let request
+  process.env.RESEND_API_KEY = 'test-resend-key'
+  globalThis.fetch = async (url, options) => {
+    request = { url, options }
+    return new Response(JSON.stringify({ id: 'resend-id' }), { status: 201 })
+  }
 
-  await assert.rejects(
-    executeUserDataOperation(client, { supabaseUserId: userId }, {
-      action: 'admin.premium.set',
-      memberId: '123e4567-e89b-42d3-a456-426614174001',
-      grant: true,
-    }),
-    { status: 403 },
+  try {
+    const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
+      action: 'security.alert.send',
+    }, admin, {
+      email: 'member@example.test',
+      emailVerification: true,
+      authSessionFingerprint: 'session-fingerprint',
+    })
+    const postCommit = Object.getOwnPropertySymbols(result).find((symbol) => String(symbol) === 'Symbol(postCommit)')
+    assert.equal(await result[postCommit](), true)
+  } finally {
+    globalThis.fetch = originalFetch
+    if (previousApiKey === undefined) delete process.env.RESEND_API_KEY
+    else process.env.RESEND_API_KEY = previousApiKey
+  }
+  assert.equal(request.url, 'https://api.resend.com/emails')
+  assert.equal(
+    request.options.headers['Idempotency-Key'],
+    `security-alert/${userId}/session-fingerprint`,
   )
-  assert.equal(client.calls.length, 1)
+  assert.deepEqual(JSON.parse(request.options.body).to, ['member@example.test'])
 })
 
 test('batch verification badges resolve every directory member in one query', async () => {

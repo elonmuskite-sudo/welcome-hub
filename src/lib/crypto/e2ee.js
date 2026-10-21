@@ -1,4 +1,5 @@
 import { supabase } from '../supabase.js'
+import { E2EE_PROTOCOL } from './envelope.js'
 
 // E2EE protocol: ECDH P-256 key agreement deriving an AES-256-GCM key.
 // Private keys stay on the device (localStorage); only public keys are published
@@ -6,12 +7,11 @@ import { supabase } from '../supabase.js'
 // list_chat_public_keys RPC.
 const KEY_STORAGE = 'nexus_e2ee_keys'
 const ENCRYPTION_ENABLED_KEY = 'nexus_e2ee_enabled'
-// Marks that this device has already committed to an E2EE default, so an
-// account that predates automatic enablement is never silently switched on.
+// Records that this device is enforcing mandatory E2EE for text messages.
 const DEFAULT_DECISION_KEY = 'nexus_e2ee_default_decided'
 // Set once the "encrypted by default" notice has been acknowledged.
 const NOTICE_SEEN_KEY = 'nexus_e2ee_notice_seen'
-const PROTOCOL = 'ECDH-P256+AES-256-GCM'
+const PROTOCOL = E2EE_PROTOCOL
 
 export const NO_PEER_KEY_MESSAGE = 'This contact has not shared an encryption key yet.'
 export const ENCRYPTION_FAILED_MESSAGE = 'End-to-end encryption failed. Please try again.'
@@ -77,25 +77,22 @@ export async function initializeE2EE() {
 }
 
 export function isE2EEEnabled() {
-  return localStorage.getItem(ENCRYPTION_ENABLED_KEY) === 'true'
+  return true
 }
 
-export function setE2EEEnabled(enabled) {
-  localStorage.setItem(ENCRYPTION_ENABLED_KEY, String(enabled))
+export function setE2EEEnabled() {
+  localStorage.setItem(ENCRYPTION_ENABLED_KEY, 'true')
 }
 
-// Accounts that predate automatic enablement keep whatever they had. Called on
-// every signed-in app boot: the first run commits this device to the legacy
-// opt-in value, so the new default can never switch an existing user on.
+// Enforce mandatory encryption on every signed-in app boot.
 export function applyE2EEDefaultForExistingAccount() {
-  if (localStorage.getItem(DEFAULT_DECISION_KEY) !== null) return isE2EEEnabled()
-  localStorage.setItem(DEFAULT_DECISION_KEY, isE2EEEnabled() ? 'true' : 'false')
-  return isE2EEEnabled()
+  setE2EEEnabled(true)
+  localStorage.setItem(DEFAULT_DECISION_KEY, 'true')
+  return true
 }
 
-// Signup path: new accounts are end-to-end encrypted by default. The key pair is
-// generated and published before the account reaches the dashboard. The decision
-// is recorded first so a failed run can never be re-derived as "default on".
+// Signup provisions the device key before the account reaches the dashboard.
+// The mandatory-encryption decision is recorded before attempting key creation.
 export async function provisionE2EEForNewAccount() {
   localStorage.setItem(DEFAULT_DECISION_KEY, 'true')
   setE2EEEnabled(true)
@@ -104,10 +101,8 @@ export async function provisionE2EEForNewAccount() {
   try {
     keys = await initializeE2EE()
   } catch (error) {
-    // No usable key material on this device. Fall back to the legacy opt-in
-    // behaviour rather than claim encryption we cannot actually deliver.
-    setE2EEEnabled(false)
-    localStorage.setItem(DEFAULT_DECISION_KEY, 'false')
+    // No usable key material on this device.
+    // Sending remains blocked until encryption keys are available.
     return { ok: false, error }
   }
 
@@ -222,8 +217,6 @@ async function getChatKey(chatId) {
 }
 
 export async function encryptMessage(chatId, plaintext) {
-  if (!isE2EEEnabled()) return { encrypted: false, content: plaintext }
-
   try {
     const key = await getChatKey(chatId)
     const iv = crypto.getRandomValues(new Uint8Array(12))
@@ -253,7 +246,7 @@ export async function encryptMessage(chatId, plaintext) {
 // payload, or a payload from another key) so the caller can decide whether to
 // retry later or display a placeholder. Never returns a fake plaintext string.
 export async function decryptMessage(chatId, content, isEncrypted) {
-  if (!isEncrypted || !isE2EEEnabled()) return content
+  if (!isEncrypted) return content
 
   const { iv, data } = JSON.parse(content)
   const key = await getChatKey(chatId)

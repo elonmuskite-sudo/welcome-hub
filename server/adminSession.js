@@ -31,7 +31,7 @@ function signaturesMatch(expected, provided) {
 
 export async function createAdminSessionToken(userId, secret, ttlSeconds = ADMIN_SESSION_TTL_SECONDS) {
   const expiresAt = Date.now() + ttlSeconds * 1000
-  const payload = `${userId}.${expiresAt}`
+  const payload = `${userId}.aal2.${expiresAt}`
   return `${payload}.${await sign(secret, payload)}`
 }
 
@@ -39,10 +39,10 @@ export async function createAdminSessionToken(userId, secret, ttlSeconds = ADMIN
 export async function verifyAdminSessionToken(token, secret) {
   if (!token || !secret) return null
   const parts = String(token).split('.')
-  if (parts.length !== 3) return null
-  const [userId, expiresAt, signature] = parts
-  if (!userId || !expiresAt) return null
-  const expected = await sign(secret, `${userId}.${expiresAt}`)
+  if (parts.length !== 4) return null
+  const [userId, assuranceLevel, expiresAt, signature] = parts
+  if (!userId || assuranceLevel !== 'aal2' || !expiresAt) return null
+  const expected = await sign(secret, `${userId}.${assuranceLevel}.${expiresAt}`)
   if (!signaturesMatch(expected, signature)) return null
   const expiry = Number(expiresAt)
   if (!Number.isFinite(expiry) || expiry <= Date.now()) return null

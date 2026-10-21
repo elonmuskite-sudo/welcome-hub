@@ -164,7 +164,7 @@ export default function VerifyEmail() {
               </p>
               <p className="mt-1 text-sm text-muted-foreground">{provisioningError}</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Text messages will not be end-to-end encrypted until you enable E2EE in Settings → Privacy.
+                Text messages cannot be sent until encryption keys are available. You can retry key setup in Settings → Privacy & Security.
               </p>
               <ChatButton
                 type="button"

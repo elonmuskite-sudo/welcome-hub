@@ -7,7 +7,7 @@ import MessageBubble from './MessageBubble'
 import { useSetting } from '../../hooks/useSetting'
 import { useSyncStatus } from '../../hooks/useSyncStatus'
 import { getWallpaperById } from '../../lib/wallpapers'
-import { encryptMessage, decryptMessage, isE2EEEnabled, NO_PEER_KEY_MESSAGE } from '../../lib/crypto/e2ee'
+import { encryptMessage, decryptMessage, NO_PEER_KEY_MESSAGE } from '../../lib/crypto/e2ee'
 import { useCall } from '../../lib/CallContext'
 import { sendChatMessage, toggleMessageReaction, sendReadReceipt } from '../../lib/persistence'
 import { isChatServiceAvailable, newId } from '../../lib/persistence'
@@ -17,6 +17,7 @@ import ChatButton from './ChatButton'
 import VerificationBadge from './VerificationBadge'
 import { SyncSpinner } from '../SyncIndicator'
 import { peerIdOf, chatDisplayName } from '../../lib/chatPreview'
+import { requiresE2EEEncryption } from '../../lib/crypto/envelope'
 import { resolveMessages, decodeContent, encodeReply } from '../../lib/chatProtocol'
 
 // Single placeholder for any encrypted message we cannot read yet (missing peer
@@ -155,7 +156,6 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
   }, [messages])
 
   useEffect(() => {
-    if (!isE2EEEnabled()) return
     const pending = messages.filter((msg) => msg.encrypted && !decryptedMessages[msg.id] && !decryptAttemptsRef.current.has(msg.id))
     if (pending.length === 0) return
     pending.forEach((msg) => decryptAttemptsRef.current.add(msg.id))
@@ -197,12 +197,14 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
       return false
     }
 
-    let content = messageData.content || messageData
+    const originalContent = messageData.content || messageData
+    let content = originalContent
     const type = messageData.type || 'text'
     if (type === 'text') content = encodeReply(content, reply)
+    const plaintextContent = content
     let encrypted = false
 
-    if (isE2EEEnabled() && type === 'text') {
+    if (requiresE2EEEncryption(type)) {
       let result
       try {
         result = await encryptMessage(chat.id, content)
@@ -211,6 +213,10 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
           ? 'This contact has not shared an encryption key yet.'
           : 'End-to-end encryption failed. Please try again.'
         setSendError(`Message not sent: ${reason}`)
+        return false
+      }
+      if (!result.encrypted) {
+        setSendError('Message not sent: end-to-end encryption is required.')
         return false
       }
       content = result.content
@@ -232,7 +238,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
     if (encrypted) {
       setDecryptedMessages((prev) => ({
         ...prev,
-        [newMessage.id]: encodeReply(messageData.content || messageData, reply),
+        [newMessage.id]: plaintextContent,
       }))
     }
 

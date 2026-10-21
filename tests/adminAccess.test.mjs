@@ -29,6 +29,7 @@ test('admin session tokens round-trip and carry the admin user id', async () => 
   const token = await createAdminSessionToken(USER_ID, SECRET)
   const session = await verifyAdminSessionToken(token, SECRET)
   assert.equal(session?.userId, USER_ID)
+  assert.equal(token.split('.')[1], 'aal2')
 })
 
 test('a tampered or foreign-signed token is rejected', async () => {
@@ -38,9 +39,10 @@ test('a tampered or foreign-signed token is rejected', async () => {
   assert.equal(await verifyAdminSessionToken(`${USER_ID}.${Date.now() + 1000}.deadbeef`, SECRET), null)
   assert.equal(await verifyAdminSessionToken('', SECRET), null)
   assert.equal(await verifyAdminSessionToken(token, ''), null)
-  // The signature covers the user id, so swapping it invalidates the token.
-  const [userId, expiresAt, signature] = token.split('.')
-  assert.equal(await verifyAdminSessionToken(`${userId}1.${expiresAt}.${signature}`, SECRET), null)
+  const [tokenUserId, assuranceLevel, tokenExpiry, tokenSignature] = token.split('.')
+  assert.equal(await verifyAdminSessionToken(`${tokenUserId}1.${assuranceLevel}.${tokenExpiry}.${tokenSignature}`, SECRET), null)
+  assert.equal(await verifyAdminSessionToken(`${tokenUserId}.aal1.${tokenExpiry}.${tokenSignature}`, SECRET), null)
+  assert.equal(await verifyAdminSessionToken(`${tokenUserId}.${tokenExpiry}.${tokenSignature}`, SECRET), null)
 })
 
 test('an expired token is rejected', async () => {
@@ -114,6 +116,8 @@ test('the gate fails closed when the signing secret is not configured', async ()
 test('the admin session endpoint and route guards exist in the app', () => {
   const endpoint = fs.readFileSync(new URL('../api/admin/session.js', import.meta.url), 'utf8')
   assert.match(endpoint, /admin\.auth\.getUser\(token\)/)
+  assert.match(endpoint, /admin\.auth\.getClaims\(token\)/)
+  assert.match(endpoint, /claims\.aal !== 'aal2'/)
   assert.match(endpoint, /has_role/)
   assert.match(endpoint, /adminSessionSetCookie/)
   assert.match(endpoint, /ADMIN_SESSION_SECRET/)
@@ -125,4 +129,11 @@ test('the admin session endpoint and route guards exist in the app', () => {
 
   const guard = fs.readFileSync(new URL('../src/components/AdminGuard.jsx', import.meta.url), 'utf8')
   assert.match(guard, /Navigate to="\/admin\/login"/)
+  assert.match(guard, /getAuthenticatorAssuranceLevel/)
+  assert.match(guard, /isAppwriteAuthEnabled\(\)[\s\S]*Promise\.resolve\(false\)/)
+
+  const login = fs.readFileSync(new URL('../src/pages/AdminLogin.jsx', import.meta.url), 'utf8')
+  assert.match(login, /prepareAdminMfa/)
+  assert.match(login, /verifyAdminMfaCode/)
+  assert.match(login, /Privileged admin sign-in is disabled with Appwrite authentication/)
 })

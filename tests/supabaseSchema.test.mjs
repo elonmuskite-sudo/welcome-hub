@@ -58,6 +58,24 @@ test('Appwrite identity links remain inaccessible to browser roles', () => {
   }
 })
 
+test('text messages require a versioned encrypted payload in every database write', () => {
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261021000131_enforce_encrypted_text_messages.sql'),
+    'utf8',
+  )
+  for (const sql of [schema, migration]) {
+    assert.match(sql, /messages_text_requires_encryption/i)
+    assert.match(sql, /type in \('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document'\) or \(/i)
+    assert.match(sql, /encrypted is true/i)
+    assert.match(sql, /ECDH-P256\+AES-256-GCM/i)
+    assert.match(sql, /\(content::jsonb - 'alg' - 'iv' - 'data'\) = '\{\}'::jsonb/i)
+    assert.match(sql, /->> 'iv'/i)
+    assert.match(sql, /->> 'data'/i)
+  }
+  assert.match(migration, /not valid/i)
+})
+
 test('schema dry-run rejects non-PostgreSQL URLs', () => {
   assert.throws(
     () => inspectSupabaseSchema({ databaseUrl: 'https://example.invalid/database', root }),

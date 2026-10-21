@@ -42,6 +42,20 @@ test case 2 starts from a genuinely empty thread.
 4. Tap **Sign in**. **Do not** tap "Create account" — that path sends an email
    code and is not needed for either demo account.
 
+These demo accounts use the regular member role and do not receive privileged
+admin access. Admin/reviewer accounts with privileged dashboard access must use
+Supabase Auth and complete the required TOTP authenticator setup or challenge
+before any admin route is available. Never put authenticator secrets or OTP
+codes in the store review notes. The opt-in Appwrite provider does not yet
+support privileged admin routes or identity-review decisions.
+
+Successful sign-ins send a security alert to the account's confirmed email
+address. Privileged admin alerts are sent only after TOTP verification.
+Supabase identity-review decisions send an approved/rejected status email to
+the reviewed account's confirmed email address; SMS is not used. Appwrite
+identity-review decisions remain unavailable until provider-specific MFA is
+implemented.
+
 ### Suggested review test cases
 
 | # | Test | Steps | Expected |
@@ -84,36 +98,35 @@ Nexus Chat is **completely free**. There is nothing to buy and no way to pay us.
 
 ## 2. End-to-end encryption (E2EE)
 
-Text-message bodies are end-to-end encrypted on the device **when E2EE is
-enabled**. New accounts have E2EE enabled by default when setup succeeds;
-existing users can change the setting in **Settings → Privacy**.
+Text-message and sticker bodies must be end-to-end encrypted on the device. Encryption is
+mandatory for existing and new accounts and cannot be disabled.
 
 - Protocol: **ECDH P-256** key agreement deriving an **AES-256-GCM** key
   (see `src/lib/crypto/e2ee.js`, protocol tag `ECDH-P256+AES-256-GCM`).
 - Private keys are generated and stored **on the device only** and never leave it.
 - For encrypted text messages, the server stores **ciphertext** and cannot
   decrypt the message body.
-- If the recipient key is unavailable or encryption fails, the text message is
-  **not sent**. The sender sees an error and can retry after encryption is ready.
+- If the sender or recipient key is unavailable or encryption fails, the text
+  message is **not sent**. The sender sees an error and can retry after encryption is ready.
 - Attachments and voice notes are not covered by E2EE. Do not claim these are
   end-to-end encrypted.
-- E2EE is enabled by default for a new account when key setup succeeds; the
-  outcome is recorded server-side as `members.e2ee_enabled`.
+- The outcome is recorded server-side as `members.e2ee_enabled`; a failed key
+  publication is recorded with the key-published status off.
 
 **How to verify:**
 1. Sign in and open a conversation.
-2. Open **Settings → Privacy & Security** — the end-to-end encryption control is
-   on, with a security code shown.
+2. Open **Settings → Privacy & Security** — text-message encryption is marked
+   required, with a security code shown.
 3. Send a message from the demo account to the second demo account; the message
    sends encrypted (keys are exchanged automatically on first contact).
 
 **Notes for review:**
-- E2EE applies only to **text messages while enabled**. Public social-feed posts
+- E2EE applies to **all text messages**. Public social-feed posts
   are not encrypted (they are public by nature), and attachments and voice notes
   are not end-to-end encrypted.
 - Verify fail-closed behavior by attempting to send while the recipient key is
   unavailable: no message should be created or delivered; the sender sees an
-  error instead.
+  error instead. There is no plaintext opt-out.
 
 ---
 

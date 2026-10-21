@@ -189,7 +189,28 @@ create table public.chat_members (
 create table public.messages (
   id uuid primary key default gen_random_uuid(), chat_id uuid not null references public.chats(id) on delete cascade,
   sender_id uuid, content text not null check (char_length(content) between 1 and 65535), type text not null default 'text',
-  file_url text, file_name text, duration numeric, encrypted boolean not null default false, created_at timestamptz not null default now()
+  file_url text, file_name text, duration numeric, encrypted boolean not null default false, created_at timestamptz not null default now(),
+  constraint messages_text_requires_encryption check (
+    type in ('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document') or (
+      encrypted is true
+      and jsonb_typeof(content::jsonb) = 'object'
+      and (content::jsonb - 'alg' - 'iv' - 'data') = '{}'::jsonb
+      and content::jsonb ->> 'alg' = 'ECDH-P256+AES-256-GCM'
+      and content::jsonb ->> 'alg' is not null
+      and content::jsonb ->> 'iv' is not null
+      and content::jsonb ->> 'data' is not null
+      and (content::jsonb ->> 'iv') ~ '^[A-Za-z0-9+/]{16}$'
+      and (content::jsonb ->> 'data') ~ '^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$'
+      and length(content::jsonb ->> 'data') >= 24
+      and mod(length(content::jsonb ->> 'data'), 4) = 0
+      and (3 * (length(content::jsonb ->> 'data') / 4)
+        - case
+            when right(content::jsonb ->> 'data', 2) = '==' then 2
+            when right(content::jsonb ->> 'data', 1) = '=' then 1
+            else 0
+          end) >= 17
+    )
+  )
 );
 create index idx_chat_members_profile on public.chat_members(profile_id);
 create index idx_messages_chat_created on public.messages(chat_id, created_at);
@@ -846,4 +867,3 @@ grant execute on function public.list_member_profiles(uuid[]) to authenticated, 
 --           demo2 now renders "Demo Reviewer Two" instead of the
 --           "Nexus member" fallback produced by the previous direct table read.
 -- ===========================================================================
-

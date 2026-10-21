@@ -223,6 +223,72 @@ export async function sendWelcomeEmail() {
   }
 }
 
+async function sendSystemEmail(action, payload = {}) {
+  if (!supabase) throw new Error('System email delivery is not configured.')
+  const { data, error } = await supabase.functions.invoke('system-email', { body: { action, ...payload } })
+  if (!error && !data?.error) return data
+
+  const status = error?.context instanceof Response ? error.context.status : 0
+  const requestFailedBeforeResponse = !error?.context
+  const isWebRuntime = typeof window !== 'undefined' && ['http:', 'https:'].includes(window.location.protocol)
+  if (isWebRuntime && (requestFailedBeforeResponse || [404, 503].includes(status))) {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) throw sessionError
+    if (!session?.access_token) throw new Error('Sign in required to send this notification.')
+
+    const response = await fetch('/api/notifications/system-email', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ action, ...payload }),
+    })
+    let result
+    try {
+      result = await response.json()
+    } catch {
+      throw new Error(`System email delivery returned HTTP ${response.status}.`)
+    }
+    if (!response.ok) throw new Error(result?.error || 'System email delivery failed.')
+    return result
+  }
+
+  let detail = data?.error || error?.message || 'System email delivery failed.'
+  if (error?.context instanceof Response) {
+    try {
+      const body = await error.context.clone().json()
+      detail = body?.error || detail
+    } catch {
+      // Keep the SDK error when the function response is not JSON.
+    }
+  }
+  throw new Error(detail)
+}
+
+export async function sendSecurityAlertEmail() {
+  if (isAppwriteAuthEnabled()) {
+    const result = await appwriteData('security.alert.send')
+    if (result?.emailNotificationSent !== true) {
+      throw new Error('The sign-in alert email could not be delivered.')
+    }
+    return result
+  }
+  return sendSystemEmail('security-alert')
+}
+
+export async function sendIdentityReviewEmail(verificationId) {
+  if (isAppwriteAuthEnabled()) {
+    const result = await appwriteData('verification.admin.notify', { id: verificationId })
+    if (result?.emailNotificationSent !== true) {
+      throw new Error('The identity review status email could not be delivered.')
+    }
+    return result
+  }
+  return sendSystemEmail('identity-review', { verificationId })
+}
+
 export async function signInWithEmail(email, password) {
   if (isAppwriteAuthEnabled()) {
     await appwriteAccount.createEmailPasswordSession(String(email || '').trim().toLowerCase(), password)

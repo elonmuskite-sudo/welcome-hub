@@ -1,6 +1,7 @@
 import { findMemberByNexusId, supabase } from './supabase.js'
 import { appwriteData, isAppwriteAuthEnabled } from './appwrite.js'
 import { reactionContent, receiptContent } from './chatProtocol.js'
+import { isEncryptedTextEnvelope, requiresE2EEEncryption } from './crypto/envelope.js'
 import { recordSyncTiming, withSync } from './syncStatus.js'
 
 const STORAGE_KEY = 'nexus-chat-state-v1'
@@ -247,6 +248,11 @@ export async function getChats(userId) {
 }
 
 export async function sendChatMessage(chatId, message) {
+  const type = message.type || 'text'
+  if (requiresE2EEEncryption(type) && (message.encrypted !== true || !isEncryptedTextEnvelope(message.content))) {
+    throw new Error('Text and sticker messages must be end-to-end encrypted. The message was not sent.')
+  }
+
   if (isAppwriteAuthEnabled()) {
     if (typeof message.content !== 'string' || !message.content.trim() || message.content.length > 65535) throw new Error('Message must contain between 1 and 65,535 characters.')
     if (message.file_url?.startsWith('blob:')) throw new Error('Attachment storage is not connected. This file has not been sent.')
@@ -254,7 +260,7 @@ export async function sendChatMessage(chatId, message) {
       id: UUID_REGEX.test(String(message.id || '')) ? message.id : newId(),
       chatId: String(chatId),
       content: message.content,
-      type: message.type || 'text',
+      type,
       fileUrl: message.file_url || null,
       fileName: message.file_name || null,
       duration: message.duration || null,
@@ -271,7 +277,7 @@ export async function sendChatMessage(chatId, message) {
   const id = UUID_REGEX.test(String(message.id || '')) ? message.id : newId()
   const { error } = await supabase.from('messages').insert({
     id, chat_id: String(chatId), sender_id: String(message.sender_id), content: message.content,
-    type: message.type || 'text', file_url: message.file_url || null, file_name: message.file_name || null,
+    type, file_url: message.file_url || null, file_name: message.file_name || null,
     duration: message.duration || null, encrypted: Boolean(message.encrypted),
     created_at: message.created_at || new Date().toISOString(),
   })

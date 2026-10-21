@@ -11,7 +11,8 @@ import SyncIndicator from '../components/SyncIndicator'
 import Header from '../components/Header'
 import { requestNotificationPermission, showSystemNotification } from '../lib/notifications'
 import { startRealtimeListeners, stopRealtimeListeners } from '../lib/persistence'
-import { isE2EEEnabled, publishMyPublicKey, applyE2EEDefaultForExistingAccount, shouldShowE2EEDefaultNotice, dismissE2EEDefaultNotice } from '../lib/crypto/e2ee'
+import { publishMyPublicKey, applyE2EEDefaultForExistingAccount, shouldShowE2EEDefaultNotice, dismissE2EEDefaultNotice } from '../lib/crypto/e2ee'
+import { syncE2EEStatus } from '../lib/persistence'
 import { useViewportInsets } from '../hooks/useViewportInsets'
 
 export default function ChatLayout() {
@@ -32,12 +33,14 @@ export default function ChatLayout() {
     }
 
     initNotifications()
-    // Accounts that predate automatic enablement keep their existing opt-in
-    // status; only accounts provisioned at signup run encrypted by default.
     applyE2EEDefaultForExistingAccount()
-    // Republish the device public key on launch so contacts can always find it.
-    // Best-effort: a failure never blocks the chat UI.
-    if (isE2EEEnabled()) publishMyPublicKey().catch(() => {})
+    // Republish the key and mirror mandatory encryption status for this device.
+    void publishMyPublicKey()
+      .then(() => syncE2EEStatus(true, true))
+      .catch((error) => {
+        console.error('Could not publish the device encryption key:', error)
+        void syncE2EEStatus(true, false)
+      })
     setShowE2eeNotice(shouldShowE2EEDefaultNotice())
     const channel = startRealtimeListeners()
     return () => stopRealtimeListeners(channel)
@@ -67,7 +70,7 @@ export default function ChatLayout() {
       {showE2eeNotice && (
         <div role="status" className="flex items-start gap-3 border-b border-primary/30 bg-primary/10 px-4 py-3 text-sm text-foreground">
           <p className="flex-1">
-            Your messages are end-to-end encrypted by default on this device. Your private key never leaves this browser.
+            Text messages require end-to-end encryption on this device. Sending is blocked when encryption keys are unavailable. Your private key never leaves this device.
           </p>
           <ChatButton
             type="button"

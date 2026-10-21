@@ -1,0 +1,40 @@
+# Internal pre-release validation
+
+**Run date:** 2026-10-21  
+**Decision:** Not approved for full production rollout. Automated checks pass, but device installation and live reviewer-account testing require physical/supported devices, a live Supabase project, and test accounts that are not available in this workspace.
+
+## Results
+
+| Area | Result | Evidence and limits |
+| --- | --- | --- |
+| Automated regression tests | **PASS** | `node --test tests/*.test.mjs`: 194 passed, 0 failed. Includes encryption failure cases, Appwrite gateway rejection, message persistence guards, TOTP enrollment/challenge/session checks, admin-route authorization, Resend notification authorization/templates/idempotency, and schema checks. |
+| Production web build | **PASS** | `npm run build` completed. Vite reported an existing chunk-size warning for a bundle larger than 1 MB. |
+| Android package build | **PASS** | `npx cap copy android` and `android\\gradlew.bat assembleDebug --no-daemon` succeeded after the email-notification changes. Output: `android/app/build/outputs/apk/debug/app-debug.apk`. This verifies compilation/package creation, not installation or runtime behavior on a device. |
+| iOS simulator tooling | **CONFIGURED; FIRST RUN PENDING** | `.github/workflows/ios-simulator.yml` uses a GitHub-hosted macOS/Xcode runner to build the Capacitor app, install and launch it on available iPhone and iPad simulators, and retain screenshots. This Windows workspace cannot execute Xcode locally; the workflow must pass in GitHub Actions before its simulator smoke test is counted as verified. Simulator coverage does not replace physical-device or full OS-version-matrix testing. |
+| Device and OS compatibility | **PARTIALLY UNVERIFIED** | No Android device is attached, and the local Windows environment has no Xcode/iOS build environment. The hosted workflow provides an alternative smoke-test path for the runner's available iPhone and iPad simulator models and iOS runtime, but it has not yet run and cannot verify the full supported device/OS matrix or physical devices. |
+| Reviewer sign-in and MFA | **IMPLEMENTED; NOT RUN LIVE** | Supabase admin sign-in now requires a TOTP authenticator setup or challenge. The server validates the signed Supabase JWT at AAL2 before minting an admin session, and admin routes independently check AAL2 and role. Automated flow, session, and authorization tests pass; live enrollment/login requires a connected Supabase project and reviewer accounts. Privileged admin routes fail closed if the opt-in Appwrite auth provider is selected because its provider-specific MFA workflow is not implemented. |
+| Resend email notifications | **IMPLEMENTED; NOT RUN LIVE** | Existing verification codes continue through Resend. Successful password/email-code sign-ins trigger a server-verified security alert to the confirmed account address; Supabase admin alerts require AAL2. Supabase identity-review status emails use the reviewed account’s verified address, are idempotent, and have an explicit retry control after delivery failure. The Appwrite gateway supports member sign-in alerts, but privileged admin alerts and identity-review actions fail closed until provider-specific MFA is implemented. Automated authorization, recipient-fixing, template escaping, and delivery request tests pass. A live Resend account/domain and production secrets are required to verify delivery and rendering. |
+| SMS delivery and rendering | **DEFERRED / NOT IMPLEMENTED** | The user selected deferring SMS provider integration. Email OTP remains the configured verification channel. No SMS verification, alert, or status delivery, device rendering, or carrier compliance was tested. |
+| Mandatory encrypted text messaging | **PASS IN AUTOMATED TESTS** | The client refuses to disable E2EE and fails closed when key provisioning, recipient-key lookup, key validation, or encryption fails. Persistence and the Appwrite gateway reject plaintext or malformed protected-message envelopes; the canonical Supabase schema and migration enforce the envelope shape for new writes. Historical plaintext messages remain readable. |
+| Migration validation | **PASS, DRY RUN ONLY** | `npm run db:setup:dry` validated all 31 checked-in migrations without connecting to or changing a database. The production Supabase project was not modified. |
+
+**Test-runner note:** There is no `npm test` script. The repository test suite is run explicitly with `node --test tests/*.test.mjs`; unscoped `node --test` also discovers the root `test-npm.js` helper, which fails because it uses CommonJS `require` in this ESM package.
+
+## Defect addressed
+
+Text could previously be sent through paths outside the chat composer, including feed sharing and direct persistence/gateway calls, without a reliable encryption requirement. The client, shared persistence boundary, Appwrite gateway, and database schema now reject protected text/sticker writes without a versioned envelope. The E2EE opt-out was removed, and key/encryption failures block sending instead of falling back to plaintext.
+
+Envelope validation at server/database boundaries checks structure and the encrypted flag; it cannot cryptographically prove that a malicious custom client generated the ciphertext with WebCrypto. Normal application send paths perform actual encryption and fail closed. This limitation should be considered in any threat model requiring cryptographic attestation from arbitrary clients.
+
+The Resend notification service is shared between the Supabase Edge Function and the web API fallback so native clients do not depend on same-origin API paths. Recipients are resolved from verified server-side account/review records, with role/AAL2 checks, rate limiting, and idempotency. Appwrite privileged review and admin-alert actions are explicitly unavailable until its provider-specific MFA workflow is supported.
+
+## Rollout blockers and required follow-up
+
+1. Run installation and runtime smoke tests across the supported Android/iOS device and OS matrix, including fresh install and upgrade paths.
+2. Create/assign reviewer accounts in the live Supabase project and execute live password sign-in, TOTP enrollment/challenge, and positive/negative role-permission tests.
+3. Configure `RESEND_API_KEY` and a verified `RESEND_FROM` sender in the production server environment; execute a live password sign-in, email-code sign-in, and identity-review decision, then verify recipient, delivery, and rendering. SMS remains deferred; if it becomes a rollout requirement, select/configure a provider and validate consent, templates, delivery, rendering, and carrier requirements end to end.
+4. Have the production Supabase project operator review and apply the pending migration, then verify that new unencrypted protected-message writes are rejected. The migration has not been applied to production.
+
+The iOS alternative is available in GitHub Actions as **iOS simulator smoke test** (manual dispatch is supported); it requires no signing credentials. To have the built app use a staging Supabase project, set the repository Actions variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to that project's browser-safe URL and anon/publishable key. Without those optional variables the app still builds and launches, but backend-dependent flows cannot be tested. The workflow covers simulator install/launch on an iPhone and iPad, not physical hardware or the complete OS/device matrix; run additional physical tests through an available device lab before rollout.
+
+Do not treat this report as a production rollout sign-off until the unrun checks and required follow-up are complete.

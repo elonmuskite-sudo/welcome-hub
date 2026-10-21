@@ -32,7 +32,7 @@ function PrivacyContent() {
       <Section title="Information we collect">
         <p><strong className="text-foreground">Account details.</strong> Your name, email address and a generated member number. We use these to create and secure your account.</p>
         <p><strong className="text-foreground">Profile details you provide.</strong> An optional avatar, bio and interests.</p>
-        <p><strong className="text-foreground">Messages and media.</strong> Text messages are end-to-end encrypted on your device only while E2EE is enabled in Settings → Privacy. New accounts have it enabled by default when setup succeeds. If E2EE is off, text messages are not end-to-end encrypted. Attachments and voice notes are not covered by E2EE; we store files so they can be delivered to recipients.</p>
+        <p><strong className="text-foreground">Messages and media.</strong> Text and sticker messages must be end-to-end encrypted on your device. If encryption or a recipient key is unavailable, the message is not sent. Private keys stay on your device. Attachments and voice notes are not covered by E2EE; we store files so they can be delivered to recipients.</p>
         <p><strong className="text-foreground">Contacts and feed content.</strong> The contacts you save and any posts, comments or reactions you publish in the social feed.</p>
         <p><strong className="text-foreground">Identity verification (optional).</strong> If you choose manual verification, you upload a government ID and a selfie. Instant verification runs on your device using face matching. We only keep what is needed to review and record the outcome.</p>
         <p><strong className="text-foreground">Technical data.</strong> Basic device and connection information needed to deliver messages reliably and keep the service secure.</p>
@@ -67,7 +67,7 @@ function PrivacyContent() {
       </Section>
 
       <Section title="Security">
-        <p>Data is encrypted in transit. Text messages use end-to-end encryption only when E2EE is enabled; keys are generated and held on your device. If a recipient key is unavailable or encryption fails, the app does not send that text message. Attachments and voice notes are not end-to-end encrypted. Staff access to account records is limited and audited.</p>
+        <p>Data is encrypted in transit. Text messages require end-to-end encryption; keys are generated and held on your device. If your key, a recipient key, or encryption is unavailable, the app does not send that text message. Attachments and voice notes are not end-to-end encrypted. Staff access to account records is limited and audited.</p>
       </Section>
 
       <Section title="Changes to this policy">

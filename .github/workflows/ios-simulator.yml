@@ -1,0 +1,118 @@
+name: iOS simulator smoke test
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-simulator.yml'
+      - 'ios/**'
+      - 'src/**'
+      - 'public/**'
+      - 'scripts/**'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.js'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ios-simulator.yml'
+      - 'ios/**'
+      - 'src/**'
+      - 'public/**'
+      - 'scripts/**'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator-smoke:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      VITE_AUTH_PROVIDER: supabase
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Record available Apple tooling
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Build iOS simulator app
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Install and launch on iPhone and iPad simulators
+        run: |
+          set -euo pipefail
+          app_path="$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator/App.app"
+          mkdir -p "$RUNNER_TEMP/ios-simulator-screenshots"
+
+          for family in iPhone iPad; do
+            simulator_id="$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          family = sys.argv[1]
+          devices = [
+              device
+              for runtime_devices in data["devices"].values()
+              for device in runtime_devices
+              if device.get("isAvailable") and device.get("name", "").startswith(family)
+          ]
+          if not devices:
+              raise SystemExit(f"No available {family} simulator on this Xcode runner")
+          print(devices[0]["udid"])
+          ' "$family")"
+
+            echo "Booting $family simulator $simulator_id"
+            xcrun simctl boot "$simulator_id"
+            xcrun simctl bootstatus "$simulator_id" -b
+            xcrun simctl install "$simulator_id" "$app_path"
+            xcrun simctl launch "$simulator_id" com.nexus.chat.app
+            sleep 10
+            xcrun simctl io "$simulator_id" screenshot \
+              "$RUNNER_TEMP/ios-simulator-screenshots/${family}.png"
+            xcrun simctl shutdown "$simulator_id"
+          done
+
+      - name: Upload simulator launch screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-smoke-screenshots
+          path: ${{ runner.temp }}/ios-simulator-screenshots/
+          if-no-files-found: ignore
+          retention-days: 7

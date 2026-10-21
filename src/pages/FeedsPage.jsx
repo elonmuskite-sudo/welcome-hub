@@ -21,6 +21,7 @@ import Avatar from '../components/chat/Avatar'
 import FeedTimestamp from '../components/FeedTimestamp'
 import ReportDialog from '../components/ReportDialog'
 import { useAuth } from '../lib/AuthContext'
+import { encryptMessage } from '../lib/crypto/e2ee'
 import { useNow } from '../lib/useNow'
 import { blockUser } from '../lib/moderation'
 import { createChat, getChats, sendChatMessage, getContacts, searchUserByNexusId } from '../lib/persistence'
@@ -375,7 +376,14 @@ export default function FeedsPage() {
         })
       }
       const content = `📢 Shared post by ${activeShareFeed.userName}:\n\n"${activeShareFeed.content}"`
-      await sendChatMessage(chat.id, { content, type: 'text', sender_id: String(user.id) })
+      const encrypted = await encryptMessage(chat.id, content)
+      if (!encrypted.encrypted) throw new Error('Text messages must be end-to-end encrypted.')
+      await sendChatMessage(chat.id, {
+        content: encrypted.content,
+        type: 'text',
+        sender_id: String(user.id),
+        encrypted: true,
+      })
       setSharedStatus((prev) => ({ ...prev, [contact.id]: true }))
     } catch (shareSendError) {
       setShareError(shareSendError?.message || 'The post could not be delivered.')

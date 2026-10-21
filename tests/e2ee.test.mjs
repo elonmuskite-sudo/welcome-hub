@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isEncryptedTextEnvelope, requiresE2EEEncryption } from '../src/lib/crypto/envelope.js'
 
 // Minimal localStorage for the E2EE key store (the module only touches it
 // inside functions, so installing the stub before calling is enough).
@@ -55,11 +56,71 @@ async function deriveAes(privateKey, peerPublicBase64) {
   return crypto.subtle.deriveKey({ name: 'ECDH', public: peer }, privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
 }
 
-test('with E2EE off, messages pass through unchanged', async () => {
+test('attempting to disable E2EE never sends plaintext', async () => {
   setE2EEEnabled(false)
-  assert.equal(isE2EEEnabled(), false)
-  assert.deepEqual(await encryptMessage('chat-off', 'hello plain'), { encrypted: false, content: 'hello plain' })
+  assert.equal(isE2EEEnabled(), true)
+  clearPeerKeyCache()
+  await assert.rejects(
+    () => encryptMessage('chat-off', 'hello plain'),
+    new RegExp(NO_PEER_KEY_MESSAGE),
+  )
   assert.equal(await decryptMessage('chat-off', 'hello plain', false), 'hello plain')
+})
+
+test('text remains encrypted after a disable attempt when recipient key exists', async () => {
+  setE2EEEnabled(false)
+  clearPeerKeyCache()
+  registerPeerPublicKey('chat-after-disable', (await makeParty()).publicKey)
+  const result = await encryptMessage('chat-after-disable', 'must stay encrypted')
+  assert.equal(result.encrypted, true)
+  assert.ok(!result.content.includes('must stay encrypted'))
+})
+
+test('the encrypted-envelope validator rejects plaintext and malformed envelopes', () => {
+  assert.equal(isEncryptedTextEnvelope(JSON.stringify({
+    alg: 'ECDH-P256+AES-256-GCM',
+    iv: 'AAAAAAAAAAAAAAAA',
+    data: `${'A'.repeat(23)}=`,
+  })), true)
+  assert.equal(isEncryptedTextEnvelope(JSON.stringify({
+    alg: 'ECDH-P256+AES-256-GCM',
+    iv: 'AAAAAAAAAAAAAAAA',
+    data: `${'A'.repeat(23)}=`,
+    plaintext: 'must not be accepted as an envelope extension',
+  })), false)
+  assert.equal(isEncryptedTextEnvelope('plaintext'), false)
+  assert.equal(isEncryptedTextEnvelope(JSON.stringify({ alg: 'other', iv: 'AAAAAAAAAAAAAAAA', data: `${'A'.repeat(23)}=` })), false)
+  assert.equal(isEncryptedTextEnvelope(JSON.stringify({ alg: 'ECDH-P256+AES-256-GCM', iv: 'bad', data: `${'A'.repeat(23)}=` })), false)
+  assert.equal(isEncryptedTextEnvelope(JSON.stringify({ alg: 'ECDH-P256+AES-256-GCM', iv: 'AAAAAAAAAAAAAAAA', data: 'short' })), false)
+  assert.equal(requiresE2EEEncryption('sticker'), true)
+  assert.equal(requiresE2EEEncryption('system'), true)
+  assert.equal(requiresE2EEEncryption('image'), false)
+  assert.equal(requiresE2EEEncryption('receipt'), false)
+})
+
+test('persistence rejects plaintext before any chat-service request', async () => {
+  const { sendChatMessage } = await import('../src/lib/persistence.js')
+  await assert.rejects(
+    sendChatMessage('chat-plaintext', {
+      type: 'text',
+      content: 'must never be transmitted as plaintext',
+      sender_id: 'user-id',
+    }),
+    /Text and sticker messages must be end-to-end encrypted/,
+  )
+})
+
+test('ChatView encrypts text and rejects failed encryption before message persistence', () => {
+  const chatView = fs.readFileSync(path.join(root, 'src', 'components', 'chat', 'ChatView.jsx'), 'utf8')
+  const sendHandler = chatView.slice(
+    chatView.indexOf('const handleSendMessage'),
+    chatView.indexOf('const handleReact'),
+  )
+  const encryptionPosition = sendHandler.indexOf('await encryptMessage(chat.id, content)')
+  const persistencePosition = sendHandler.indexOf('await sendChatMessage(chat.id, newMessage)')
+  assert.match(sendHandler, /if \(type === 'text'\)/)
+  assert.match(sendHandler, /if \(!result\.encrypted\)/)
+  assert.ok(encryptionPosition >= 0 && encryptionPosition < persistencePosition)
 })
 
 test('a missing contact key prevents sending plaintext', async () => {
@@ -176,27 +237,27 @@ test('a new account is provisioned encrypted by default with a device key pair',
   assert.ok(store.get('nexus_e2ee_keys'), 'the key material is stored on the device')
 })
 
-test('a failed provisioning falls back to opt-in and pins the decision', async () => {
+test('failed key provisioning keeps encryption mandatory and pins the decision', async () => {
   store.clear()
   // Unreadable key material makes initializeE2EE throw, so provisioning cannot
   // claim encryption it cannot deliver.
   store.set('nexus_e2ee_keys', '{not valid json')
   const result = await provisionE2EEForNewAccount()
   assert.equal(result.ok, false)
-  assert.equal(isE2EEEnabled(), false)
-  assert.equal(isE2EEProvisionedForDevice(), false)
-  assert.equal(store.get('nexus_e2ee_default_decided'), 'false')
+  assert.equal(isE2EEEnabled(), true)
+  assert.equal(isE2EEProvisionedForDevice(), true)
+  assert.equal(store.get('nexus_e2ee_enabled'), 'true')
+  assert.equal(store.get('nexus_e2ee_default_decided'), 'true')
 })
 
-test('an existing disabled account is never switched on by the new default', () => {
+test('an existing disabled account is switched to mandatory E2EE', () => {
   store.clear()
   setE2EEEnabled(false)
-  assert.equal(applyE2EEDefaultForExistingAccount(), false)
-  assert.equal(isE2EEEnabled(), false)
-  // The decision is pinned on first boot, so a later boot cannot re-derive it.
-  assert.equal(store.get('nexus_e2ee_default_decided'), 'false')
-  assert.equal(applyE2EEDefaultForExistingAccount(), false)
-  assert.equal(isE2EEEnabled(), false)
+  assert.equal(applyE2EEDefaultForExistingAccount(), true)
+  assert.equal(isE2EEEnabled(), true)
+  assert.equal(store.get('nexus_e2ee_default_decided'), 'true')
+  assert.equal(applyE2EEDefaultForExistingAccount(), true)
+  assert.equal(isE2EEEnabled(), true)
 })
 
 test('an existing encrypted account keeps encryption on', () => {
@@ -213,10 +274,10 @@ test('the encrypted-by-default notice is shown once and can be dismissed', () =>
   assert.equal(shouldShowE2EEDefaultNotice(), true)
   dismissE2EEDefaultNotice()
   assert.equal(shouldShowE2EEDefaultNotice(), false)
-  // Never shown when encryption is off.
+  // An attempted disable does not turn the required-encryption notice off.
   setE2EEEnabled(false)
   store.delete('nexus_e2ee_notice_seen')
-  assert.equal(shouldShowE2EEDefaultNotice(), false)
+  assert.equal(shouldShowE2EEDefaultNotice(), true)
 })
 
 test('post-signup audits: a subsequent app boot keeps encryption on and the key unchanged', async () => {
