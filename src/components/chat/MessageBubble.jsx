@@ -2,7 +2,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
-import { ArrowLeft, FileText, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck, Save, X } from 'lucide-react'
+import { ArrowLeft, FileText, Film, Image as ImageIcon, Music, Paperclip, SmilePlus, Reply, Copy, Check, CheckCheck, Save, X } from 'lucide-react'
 import ChatButton from './ChatButton'
 import { REACTIONS, decodeContent } from '../../lib/chatProtocol'
 import { resolveChatFileUrl, saveReceivedChatFile } from '../../lib/storageManager'
@@ -22,8 +22,6 @@ function formatTime(dateString) {
 function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, reacting, receiptsEnabled = true }) {
   const [showReactions, setShowReactions] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [resolvedFileUrl, setResolvedFileUrl] = useState('')
-  const [fileUrlError, setFileUrlError] = useState(false)
   const [preview, setPreview] = useState(null)
   const [saveState, setSaveState] = useState({ status: 'idle', percent: 0, error: '' })
   const decoded = decodeContent(message.content)
@@ -36,22 +34,24 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
   const canSaveAttachment = !isOwn
     && Boolean(message.file_url)
     && ['image', 'video', 'audio', 'voice', 'file', 'document'].includes(message.type)
-  const hasPreviewModal = ['image', 'file', 'document'].includes(message.type)
-
-  useEffect(() => {
-    let active = true
-    setResolvedFileUrl('')
-    setFileUrlError(false)
-    if (!message.file_url) return () => { active = false }
-    if (message.type === 'document' || message.type === 'file') return () => { active = false }
-    resolveChatFileUrl(message.file_url, chatId)
-      .then((url) => { if (active) setResolvedFileUrl(url) })
-      .catch((error) => {
-        console.error('Could not load chat attachment', error)
-        if (active) setFileUrlError(true)
-      })
-    return () => { active = false }
-  }, [message.file_url, message.type, chatId])
+  const hasPreviewModal = ['image', 'video', 'audio', 'voice', 'file', 'document'].includes(message.type)
+  const AttachmentIcon = message.type === 'image'
+    ? ImageIcon
+    : message.type === 'video'
+      ? Film
+      : message.type === 'audio' || message.type === 'voice'
+        ? Music
+        : FileText
+  const attachmentType = message.type === 'image'
+    ? 'Image'
+    : message.type === 'video'
+      ? 'Video'
+      : message.type === 'voice'
+        ? 'Voice note'
+        : message.type === 'audio'
+          ? 'Audio'
+          : 'Document'
+  const attachmentName = message.file_name || decoded.text || attachmentType
 
   const closePreview = useCallback(() => setPreview(null), [])
 
@@ -111,9 +111,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
     const requestId = `${message.id}-${Date.now()}`
     setPreview({ requestId, type, url: '', loading: true, error: false })
     try {
-      const url = type === 'image' && resolvedFileUrl
-        ? resolvedFileUrl
-        : await resolveChatFileUrl(message.file_url, chatId)
+      const url = await resolveChatFileUrl(message.file_url, chatId)
       setPreview((current) => current?.requestId === requestId
         ? { ...current, url, loading: false }
         : current)
@@ -123,7 +121,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
         ? { ...current, loading: false, error: true }
         : current)
     }
-  }, [message.id, message.file_url, chatId, resolvedFileUrl])
+  }, [message.id, message.file_url, chatId])
 
   useEffect(() => {
     if (!preview) return undefined
@@ -145,59 +143,29 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
         return <p className="text-xs sm:text-sm whitespace-pre-wrap break-words leading-relaxed">{decoded.text}</p>
 
       case 'image':
-        if (!message.file_url) return <p className="text-xs">Image preview unavailable</p>
-        if (fileUrlError) return <p className="text-xs">Image preview unavailable</p>
-        if (!resolvedFileUrl) return <p className="text-xs opacity-70">Loading image…</p>
-        return (
-          <button type="button" onClick={() => openPreview('image')} className="block rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
-            <img
-              src={resolvedFileUrl}
-              alt="Shared image; tap to preview"
-              className="w-full max-w-xs sm:max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition"
-            />
-          </button>
-        )
-
       case 'video':
-        if (!message.file_url) return <p className="text-xs">Video preview unavailable</p>
-        if (fileUrlError) return <p className="text-xs">Video preview unavailable</p>
-        if (!resolvedFileUrl) return <p className="text-xs opacity-70">Loading video…</p>
-        return (
-          <div className="max-w-xs sm:max-w-sm">
-            <video
-              src={resolvedFileUrl}
-              controls
-              className="rounded-lg w-full"
-              preload="metadata"
-            />
-            {message.file_name && (
-              <p className="text-xs mt-1 opacity-75 flex items-center gap-1">
-                <Film className="w-3 h-3 flex-shrink-0" />
-                <span className="truncate">{message.file_name}</span>
-              </p>
-            )}
-          </div>
-        )
-
       case 'audio':
       case 'voice':
-        if (!message.file_url) return <p className="text-xs">Audio preview unavailable</p>
-        if (fileUrlError) return <p className="text-xs">Audio preview unavailable</p>
-        if (!resolvedFileUrl) return <p className="text-xs opacity-70">Loading audio…</p>
+      case 'document':
+      case 'file':
+        if (!message.file_url) return <p className="text-xs">Attachment unavailable</p>
         return (
-          <div className="flex items-center gap-2 min-w-0 max-w-full">
-            <Music className="w-4 h-4 flex-shrink-0" />
-            <audio
-              src={resolvedFileUrl}
-              controls
-              preload="metadata"
-              aria-label={message.type === 'voice' ? 'Voice note' : (message.file_name || 'Audio attachment')}
-              className="h-8 w-52 max-w-full min-w-0"
-            />
-            {message.duration && (
-              <span className="text-xs opacity-75 flex-shrink-0">{message.duration}s</span>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={() => openPreview(message.type)}
+            className="flex w-full min-w-52 max-w-sm items-center gap-3 rounded-lg border border-current/10 bg-background/10 p-3 text-left transition-colors hover:bg-background/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            <AttachmentIcon className="h-6 w-6 flex-shrink-0 opacity-80" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">
+                {attachmentName}
+              </p>
+              <p className="mt-0.5 text-xs opacity-75">
+                {attachmentType}{message.duration ? ` · ${Math.round(message.duration)}s` : ''} · Tap to open
+              </p>
+            </div>
+            <Paperclip className="ml-auto h-4 w-4 flex-shrink-0 opacity-60" />
+          </button>
         )
 
       case 'sticker':
@@ -207,32 +175,10 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
           </span>
         )
 
-      case 'document':
-      case 'file':
-        if (!message.file_url) return <p className="text-xs">File preview unavailable</p>
-        return (
-          <button
-            type="button"
-            onClick={() => openPreview('document')}
-            className="flex w-full items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg bg-background/10 hover:bg-background/20 disabled:opacity-60 transition-colors text-left"
-          >
-            <FileText className="w-6 h-6 sm:w-8 sm:h-8 flex-shrink-0" />
-            <div className="min-w-0">
-              <p className="text-xs sm:text-sm font-medium truncate">
-                {message.file_name || message.content}
-              </p>
-              <p className="text-xs opacity-75 flex items-center gap-1">
-                <FileText className="w-3 h-3 flex-shrink-0" />
-                Tap to preview
-              </p>
-            </div>
-          </button>
-        )
-
       default:
         return <p className="text-xs sm:text-sm">{decoded.text}</p>
     }
-  }, [message.type, message.content, message.file_url, message.file_name, message.duration, decoded.text, resolvedFileUrl, fileUrlError, openPreview])
+  }, [message.type, message.content, message.file_url, message.duration, decoded.text, attachmentName, attachmentType, openPreview])
 
   return (
     <>
@@ -305,7 +251,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
               <span className="sm:hidden">Back</span>
             </button>
             <p className="min-w-0 flex-1 truncate text-sm font-medium">
-              {preview.type === 'image' ? 'Image preview' : (message.file_name || 'Document preview')}
+              {attachmentName}
             </p>
             {renderSaveButton()}
             <button
@@ -331,10 +277,20 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
             {!preview.loading && !preview.error && preview.url && preview.type === 'image' && (
               <img src={preview.url} alt={message.file_name || 'Shared image'} className="max-h-full max-w-full object-contain" />
             )}
-            {!preview.loading && !preview.error && preview.url && preview.type === 'document' && (
+            {!preview.loading && !preview.error && preview.url && preview.type === 'video' && (
+              <video src={preview.url} controls autoPlay className="max-h-full max-w-full rounded-md" preload="metadata" />
+            )}
+            {!preview.loading && !preview.error && preview.url && ['audio', 'voice'].includes(preview.type) && (
+              <div className="flex w-full max-w-xl flex-col items-center gap-4 rounded-lg border border-border bg-background p-6">
+                <Music className="h-10 w-10 text-primary" />
+                <p className="max-w-full truncate text-sm font-medium">{attachmentName}</p>
+                <audio src={preview.url} controls autoPlay className="w-full" preload="metadata" />
+              </div>
+            )}
+            {!preview.loading && !preview.error && preview.url && ['file', 'document'].includes(preview.type) && (
               <iframe
                 src={preview.url}
-                title={message.file_name || 'Shared document preview'}
+                title={attachmentName}
                 className="h-[75vh] min-h-[50vh] w-full rounded-md bg-white"
               />
             )}
