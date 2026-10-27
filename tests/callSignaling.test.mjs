@@ -8,6 +8,7 @@ import {
   callChannelName,
   createCallId,
   inboxChannelName,
+  isBroadcastAcknowledged,
   matchesCall,
 } from '../src/lib/callSignaling.js'
 
@@ -58,4 +59,11 @@ test('matchesCall only accepts the payload of the call in progress', () => {
   assert.equal(matchesCall({ callId: 'c1' }, null), false)
   // A stale hangup from an earlier call must not end the current one.
   assert.equal(matchesCall({ callId: 'c0' }, { id: 'c1' }), false)
+})
+
+test('only an acknowledged Realtime broadcast counts as sent', () => {
+  assert.equal(isBroadcastAcknowledged('ok'), true)
+  assert.equal(isBroadcastAcknowledged('timed out'), false)
+  assert.equal(isBroadcastAcknowledged('error'), false)
+  assert.equal(isBroadcastAcknowledged(undefined), false)
 })

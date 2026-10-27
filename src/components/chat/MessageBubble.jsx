@@ -122,6 +122,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
           </div>
         )
 
+      case 'audio':
       case 'voice':
         if (!message.file_url) return <p className="text-xs">Audio preview unavailable</p>
         if (fileUrlError) return <p className="text-xs">Audio preview unavailable</p>
@@ -132,6 +133,8 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
             <audio
               src={resolvedFileUrl}
               controls
+              preload="metadata"
+              aria-label={message.type === 'voice' ? 'Voice note' : (message.file_name || 'Audio attachment')}
               className="h-8 w-52 max-w-full min-w-0"
             />
             {message.duration && (

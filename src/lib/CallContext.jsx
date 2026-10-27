@@ -8,10 +8,13 @@ import {
   callChannelName,
   createCallId,
   inboxChannelName,
+  isBroadcastAcknowledged,
   matchesCall,
 } from './callSignaling'
 
 const RING_TIMEOUT_MS = 45000
+const CONNECTION_TIMEOUT_MS = 30000
+const DISCONNECT_GRACE_MS = 8000
 const ENDED_DISMISS_MS = 2500
 const SUBSCRIBE_TIMEOUT_MS = 8000
 const SEND_LINGER_MS = 1500
@@ -37,9 +40,11 @@ export function useCall() {
 function subscribeChannel(channel) {
   return new Promise((resolve) => {
     let settled = false
+    let timeoutId
     const finish = (status) => {
       if (settled) return
       settled = true
+      if (timeoutId) window.clearTimeout(timeoutId)
       resolve(status)
     }
     try {
@@ -49,8 +54,21 @@ function subscribeChannel(channel) {
     } catch {
       finish('CHANNEL_ERROR')
     }
-    if (typeof window !== 'undefined') window.setTimeout(() => finish('TIMED_OUT'), SUBSCRIBE_TIMEOUT_MS)
+    if (!settled && typeof window !== 'undefined') {
+      timeoutId = window.setTimeout(() => finish('TIMED_OUT'), SUBSCRIBE_TIMEOUT_MS)
+    }
   })
+}
+
+async function sendBroadcast(channel, event, payload) {
+  if (!channel) return false
+  try {
+    const status = await channel.send({ type: 'broadcast', event, payload })
+    return isBroadcastAcknowledged(status)
+  } catch (error) {
+    console.error(`Realtime call signal "${event}" failed`, error)
+    return false
+  }
 }
 
 // A short-lived channel pointed at one user's inbox. Realtime broadcast is not
@@ -59,16 +77,11 @@ function subscribeChannel(channel) {
 async function sendInbox(peerId, event, payload) {
   const name = inboxChannelName(peerId)
   if (!supabase || !name || typeof window === 'undefined') return false
-  const channel = supabase.channel(name, { config: { broadcast: { self: false } } })
+  const channel = supabase.channel(name, { config: { broadcast: { ack: true, self: false } } })
   const status = await subscribeChannel(channel)
   let delivered = false
   if (status === 'SUBSCRIBED') {
-    try {
-      await channel.send({ type: 'broadcast', event, payload })
-      delivered = true
-    } catch {
-      delivered = false
-    }
+    delivered = await sendBroadcast(channel, event, payload)
   }
   window.setTimeout(() => {
     try { supabase.removeChannel(channel) } catch { /* channel already gone */ }
@@ -105,6 +118,8 @@ export function CallProvider({ children }) {
   const remoteSetRef = useRef(false)
   const durationTimerRef = useRef(null)
   const ringTimerRef = useRef(null)
+  const connectionTimerRef = useRef(null)
+  const disconnectTimerRef = useRef(null)
   const dismissTimerRef = useRef(null)
 
   userIdRef.current = userId
@@ -124,10 +139,14 @@ export function CallProvider({ children }) {
   const cleanupMedia = useCallback(() => {
     if (typeof window !== 'undefined') {
       window.clearTimeout(ringTimerRef.current)
+      window.clearTimeout(connectionTimerRef.current)
+      window.clearTimeout(disconnectTimerRef.current)
       window.clearTimeout(dismissTimerRef.current)
       window.clearInterval(durationTimerRef.current)
     }
     ringTimerRef.current = null
+    connectionTimerRef.current = null
+    disconnectTimerRef.current = null
     dismissTimerRef.current = null
     durationTimerRef.current = null
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -173,6 +192,8 @@ export function CallProvider({ children }) {
     if (!current || current.state === 'connected') return
     if (typeof window !== 'undefined') {
       window.clearTimeout(ringTimerRef.current)
+      window.clearTimeout(connectionTimerRef.current)
+      window.clearTimeout(disconnectTimerRef.current)
       window.clearInterval(durationTimerRef.current)
     }
     ringTimerRef.current = null
@@ -186,6 +207,16 @@ export function CallProvider({ children }) {
       patchCall({ duration: Math.floor((Date.now() - active.startedAt) / 1000) })
     }, 1000)
   }, [patchCall])
+
+  const startConnectionTimer = useCallback((callId) => {
+    if (typeof window === 'undefined') return
+    window.clearTimeout(connectionTimerRef.current)
+    connectionTimerRef.current = window.setTimeout(() => {
+      if (callRef.current?.id === callId && callRef.current.state === 'connecting') {
+        endCallInternal({ error: 'The call could not connect. Check your network and try again.' })
+      }
+    }, CONNECTION_TIMEOUT_MS)
+  }, [endCallInternal])
 
   const ensureStream = useCallback(async () => {
     if (streamRef.current) return streamRef.current
@@ -202,10 +233,12 @@ export function CallProvider({ children }) {
     const pc = new RTCPeerConnection(ICE_SERVERS)
     pc.onicecandidate = (event) => {
       if (!event.candidate) return
-      callChannelRef.current?.send({
-        type: 'broadcast',
-        event: CALL_EVENTS.ICE,
-        payload: { callId: callRef.current?.id, candidate: event.candidate },
+      const activeCallId = callRef.current?.id
+      sendBroadcast(callChannelRef.current, CALL_EVENTS.ICE, {
+        callId: activeCallId,
+        candidate: event.candidate,
+      }).then((sent) => {
+        if (!sent) console.error('Realtime ICE candidate was not acknowledged')
       })
     }
     pc.ontrack = (event) => {
@@ -215,9 +248,22 @@ export function CallProvider({ children }) {
       audio.play?.().catch(() => {})
     }
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') markConnected()
+      if (pc.connectionState === 'connected') {
+        if (typeof window !== 'undefined') window.clearTimeout(disconnectTimerRef.current)
+        disconnectTimerRef.current = null
+        markConnected()
+      }
       else if (pc.connectionState === 'failed') endCallInternal({ error: 'The call connection failed' })
-      else if (pc.connectionState === 'disconnected') endCallInternal({ error: 'The call connection was lost' })
+      else if (pc.connectionState === 'disconnected' && typeof window !== 'undefined') {
+        if (disconnectTimerRef.current) return
+        const disconnectedCallId = callRef.current?.id
+        disconnectTimerRef.current = window.setTimeout(() => {
+          disconnectTimerRef.current = null
+          if (pcRef.current === pc && callRef.current?.id === disconnectedCallId && pc.connectionState === 'disconnected') {
+            endCallInternal({ error: 'The call connection was lost' })
+          }
+        }, DISCONNECT_GRACE_MS)
+      }
     }
     stream.getTracks().forEach((track) => pc.addTrack(track, stream))
     pcRef.current = pc
@@ -245,11 +291,11 @@ export function CallProvider({ children }) {
       await flushIce()
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
-      await callChannelRef.current?.send({
-        type: 'broadcast',
-        event: CALL_EVENTS.ANSWER,
-        payload: { callId: current.id, sdp: pc.localDescription },
+      const sent = await sendBroadcast(callChannelRef.current, CALL_EVENTS.ANSWER, {
+        callId: current.id,
+        sdp: pc.localDescription,
       })
+      if (!sent) throw new Error('The call answer was not acknowledged')
     } catch {
       endCallInternal({ error: 'The call could not be answered' })
     }
@@ -287,7 +333,7 @@ export function CallProvider({ children }) {
 
   const openCallChannel = useCallback(async (callId) => {
     if (!supabase) return null
-    const channel = supabase.channel(callChannelName(callId), { config: { broadcast: { self: false } } })
+    const channel = supabase.channel(callChannelName(callId), { config: { broadcast: { ack: true, self: false } } })
     bindCallChannel(channel)
     const status = await subscribeChannel(channel)
     if (status !== 'SUBSCRIBED') {
@@ -303,13 +349,13 @@ export function CallProvider({ children }) {
       const pc = await createPeerConnection()
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
-      await callChannelRef.current?.send({
-        type: 'broadcast',
-        event: CALL_EVENTS.OFFER,
-        payload: { callId, sdp: pc.localDescription },
+      const sent = await sendBroadcast(callChannelRef.current, CALL_EVENTS.OFFER, {
+        callId,
+        sdp: pc.localDescription,
       })
+      if (!sent) throw new Error('The call offer was not acknowledged')
     } catch {
-      endCallInternal({ error: 'Microphone access was denied or is unavailable' })
+      endCallInternal({ error: 'Could not start the call. Check microphone access and your connection.' })
     }
   }, [createPeerConnection, endCallInternal])
 
@@ -337,7 +383,7 @@ export function CallProvider({ children }) {
 
     const channel = await openCallChannel(id)
     if (!channel) {
-      setCallState(null)
+      endCallInternal({ error: 'Realtime calling is unavailable. Check your connection and try again.' }, false)
       return
     }
 
@@ -403,8 +449,9 @@ export function CallProvider({ children }) {
     if (typeof window !== 'undefined') window.clearTimeout(ringTimerRef.current)
     ringTimerRef.current = null
     patchCall({ state: 'connecting', error: '' })
+    startConnectionTimer(current.id)
     await startOffer(current.id)
-  }, [patchCall, startOffer])
+  }, [patchCall, startOffer, startConnectionTimer])
 
   const handleDecline = useCallback((payload) => {
     const current = callRef.current
@@ -451,6 +498,7 @@ export function CallProvider({ children }) {
     if (typeof window !== 'undefined') window.clearTimeout(ringTimerRef.current)
     ringTimerRef.current = null
     patchCall({ state: 'connecting', error: '' })
+    startConnectionTimer(current.id)
     primeAudio()
     try {
       await ensureStream()
@@ -459,8 +507,9 @@ export function CallProvider({ children }) {
       endCallInternal({ error: 'Microphone access is required to take the call' })
       return
     }
-    await sendInbox(current.peerId, CALL_EVENTS.READY, { callId: current.id })
-  }, [ensureStream, patchCall, endCallInternal])
+    const sent = await sendInbox(current.peerId, CALL_EVENTS.READY, { callId: current.id })
+    if (!sent) endCallInternal({ error: 'Could not signal the caller. Check your connection and try again.' })
+  }, [ensureStream, patchCall, endCallInternal, startConnectionTimer])
 
   const declineCall = useCallback(() => {
     const current = callRef.current

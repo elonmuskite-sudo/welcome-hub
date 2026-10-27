@@ -72,3 +72,7 @@ export function matchesCall(payload, call) {
   if (!payload || !call) return false
   return Boolean(payload.callId) && payload.callId === call.id
 }
+
+export function isBroadcastAcknowledged(status) {
+  return status === 'ok'
+}
