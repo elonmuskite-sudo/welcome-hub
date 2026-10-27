@@ -18,5 +18,7 @@ dist
 *.pem
 android/key.properties
 android/local.properties
+android-sdk/
+.playwright-browsers/
 .demo-accounts.local.json
 supabase/backups

@@ -1,10 +1,11 @@
 /* eslint-disable react/prop-types */
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
-import { FileText, ExternalLink, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck } from 'lucide-react'
+import { ArrowLeft, FileText, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck, X } from 'lucide-react'
 import ChatButton from './ChatButton'
 import { REACTIONS, decodeContent } from '../../lib/chatProtocol'
-import { openChatFile, resolveChatFileUrl } from '../../lib/storageManager'
+import { resolveChatFileUrl } from '../../lib/storageManager'
 
 function formatTime(dateString) {
   try {
@@ -21,9 +22,9 @@ function formatTime(dateString) {
 function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, reacting, receiptsEnabled = true }) {
   const [showReactions, setShowReactions] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [openingFile, setOpeningFile] = useState(false)
   const [resolvedFileUrl, setResolvedFileUrl] = useState('')
   const [fileUrlError, setFileUrlError] = useState(false)
+  const [preview, setPreview] = useState(null)
   const decoded = decodeContent(message.content)
   const groups = REACTIONS.map(emoji => ({ emoji, users: (message.reactions || []).filter(r => r.emoji === emoji).map(r => r.userId) })).filter(r => r.users.length)
   const copyText = async () => {
@@ -47,19 +48,39 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
     return () => { active = false }
   }, [message.file_url, message.type, chatId])
 
-  const handleOpenFile = useCallback(async () => {
-    if (openingFile) return
-    setOpeningFile(true)
-    setFileUrlError(false)
+  const closePreview = useCallback(() => setPreview(null), [])
+
+  const openPreview = useCallback(async (type) => {
+    const requestId = `${message.id}-${Date.now()}`
+    setPreview({ requestId, type, url: '', loading: true, error: false })
     try {
-      await openChatFile(message.file_url, chatId)
+      const url = type === 'image' && resolvedFileUrl
+        ? resolvedFileUrl
+        : await resolveChatFileUrl(message.file_url, chatId)
+      setPreview((current) => current?.requestId === requestId
+        ? { ...current, url, loading: false }
+        : current)
     } catch (error) {
-      console.error('Could not open chat attachment', error)
-      setFileUrlError(true)
-    } finally {
-      setOpeningFile(false)
+      console.error('Could not preview chat attachment', error)
+      setPreview((current) => current?.requestId === requestId
+        ? { ...current, loading: false, error: true }
+        : current)
     }
-  }, [openingFile, message.file_url, chatId])
+  }, [message.id, message.file_url, chatId, resolvedFileUrl])
+
+  useEffect(() => {
+    if (!preview) return undefined
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') closePreview()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [preview, closePreview])
 
   const renderContent = useMemo(() => {
     switch (message.type) {
@@ -71,12 +92,13 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
         if (fileUrlError) return <p className="text-xs">Image preview unavailable</p>
         if (!resolvedFileUrl) return <p className="text-xs opacity-70">Loading image…</p>
         return (
-          <img
-            src={resolvedFileUrl}
-            alt="Shared image"
-            className="w-full max-w-xs sm:max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition"
-            onClick={() => window.open(resolvedFileUrl, '_blank')}
-          />
+          <button type="button" onClick={() => openPreview('image')} className="block rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+            <img
+              src={resolvedFileUrl}
+              alt="Shared image; tap to preview"
+              className="w-full max-w-xs sm:max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition"
+            />
+          </button>
         )
 
       case 'video':
@@ -131,8 +153,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
         return (
           <button
             type="button"
-            onClick={handleOpenFile}
-            disabled={openingFile}
+            onClick={() => openPreview('document')}
             className="flex w-full items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg bg-background/10 hover:bg-background/20 disabled:opacity-60 transition-colors text-left"
           >
             <FileText className="w-6 h-6 sm:w-8 sm:h-8 flex-shrink-0" />
@@ -141,8 +162,8 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
                 {message.file_name || message.content}
               </p>
               <p className="text-xs opacity-75 flex items-center gap-1">
-                <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                {openingFile ? 'Opening…' : fileUrlError ? 'Could not open · tap to retry' : 'Tap to open'}
+                <FileText className="w-3 h-3 flex-shrink-0" />
+                Tap to preview
               </p>
             </div>
           </button>
@@ -151,9 +172,10 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
       default:
         return <p className="text-xs sm:text-sm">{decoded.text}</p>
     }
-  }, [message.type, message.content, message.file_url, message.file_name, message.duration, decoded.text, resolvedFileUrl, fileUrlError, openingFile, handleOpenFile])
+  }, [message.type, message.content, message.file_url, message.file_name, message.duration, decoded.text, resolvedFileUrl, fileUrlError, openPreview])
 
   return (
+    <>
     <div id={`message-${message.id}`} className={`chat-enter flex ${isOwn ? 'justify-end' : 'justify-start'} px-0`}>
       <div
         className={
@@ -191,6 +213,70 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
         {groups.length > 0 && <div className="flex flex-wrap gap-1 mt-2">{groups.map(({ emoji, users }) => <ChatButton key={emoji} title={`${emoji}: ${users.length} reaction${users.length > 1 ? 's' : ''}`} aria-pressed={users.includes(String(userId))} disabled={reacting} onClick={() => onReact?.(message, emoji)} className={`!min-h-7 px-2 text-xs border ${users.includes(String(userId)) ? 'bg-accent text-accent-foreground border-accent' : 'bg-card text-card-foreground border-border'}`}>{emoji} {users.length}</ChatButton>)}</div>}
       </div>
     </div>
+    {preview && createPortal(
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 sm:p-6"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closePreview()
+        }}
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-label={preview.type === 'image' ? 'Image preview' : 'Document preview'}
+          className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-2xl"
+        >
+          <header className="flex min-h-14 items-center gap-2 border-b border-border px-3 sm:px-4">
+            <button
+              type="button"
+              onClick={closePreview}
+              className="inline-flex min-h-10 items-center gap-2 rounded-md px-2 text-sm font-medium hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              aria-label="Back to conversation"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline">Back to conversation</span>
+              <span className="sm:hidden">Back</span>
+            </button>
+            <p className="min-w-0 flex-1 truncate text-sm font-medium">
+              {preview.type === 'image' ? 'Image preview' : (message.file_name || 'Document preview')}
+            </p>
+            <button
+              type="button"
+              onClick={closePreview}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              aria-label="Close preview"
+              title="Close preview"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </header>
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-black/5 p-2 sm:p-4">
+            {preview.loading && <p className="text-sm text-muted-foreground">Loading preview…</p>}
+            {preview.error && (
+              <div className="space-y-3 text-center">
+                <p role="alert" className="text-sm text-destructive">This file preview could not be loaded.</p>
+                <button type="button" onClick={() => openPreview(preview.type)} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+                  Try again
+                </button>
+              </div>
+            )}
+            {!preview.loading && !preview.error && preview.url && preview.type === 'image' && (
+              <img src={preview.url} alt={message.file_name || 'Shared image'} className="max-h-full max-w-full object-contain" />
+            )}
+            {!preview.loading && !preview.error && preview.url && preview.type === 'document' && (
+              <iframe
+                src={preview.url}
+                title={message.file_name || 'Shared document preview'}
+                className="h-[75vh] min-h-[50vh] w-full rounded-md bg-white"
+              />
+            )}
+          </div>
+        </section>
+      </div>,
+      document.body,
+    )}
+    </>
   )
 }
 
