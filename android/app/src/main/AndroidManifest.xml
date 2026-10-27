@@ -44,6 +44,7 @@
          File attachments use the system document picker (ACTION_GET_CONTENT), which
          needs no storage permission. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- Identity verification (on-device face match) captures a selfie via getUserMedia.
          Declared not-required so the app still installs on devices without a camera. -->

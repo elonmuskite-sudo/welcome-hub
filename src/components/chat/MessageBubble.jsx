@@ -264,7 +264,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
               <X className="h-5 w-5" />
             </button>
           </header>
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-black/5 p-2 sm:p-4">
+          <div className={`flex min-h-0 flex-1 items-center justify-center bg-black/5 p-2 sm:p-4 ${preview.type === 'image' ? 'overflow-hidden' : 'overflow-auto'}`}>
             {preview.loading && <p className="text-sm text-muted-foreground">Loading preview…</p>}
             {preview.error && (
               <div className="space-y-3 text-center">
@@ -275,7 +275,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
               </div>
             )}
             {!preview.loading && !preview.error && preview.url && preview.type === 'image' && (
-              <img src={preview.url} alt={message.file_name || 'Shared image'} className="max-h-full max-w-full object-contain" />
+              <img src={preview.url} alt={message.file_name || 'Shared image'} className="h-full w-full object-contain" />
             )}
             {!preview.loading && !preview.error && preview.url && preview.type === 'video' && (
               <video src={preview.url} controls autoPlay className="max-h-full max-w-full rounded-md" preload="metadata" />
