@@ -37,7 +37,6 @@ grant execute on function public.get_verification_badge(uuid) to anon, authentic
 create policy "ID docs own upload" on storage.objects for insert to authenticated with check (bucket_id='identity-docs' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "ID docs own or admin read" on storage.objects for select to authenticated using (bucket_id='identity-docs' and ((storage.foldername(name))[1] = auth.uid()::text or public.has_role(auth.uid(),'admin')));
 create policy "Chat files own upload" on storage.objects for insert to authenticated with check (bucket_id='chat-files' and (storage.foldername(name))[1] = auth.uid()::text);
-create policy "Chat files signed-in read" on storage.objects for select to authenticated using (bucket_id='chat-files');
 create policy "Chat files own delete" on storage.objects for delete to authenticated using (bucket_id='chat-files' and (storage.foldername(name))[1] = auth.uid()::text);
 -- from 20261012105808_722066b4-005b-47d7-aa9a-df0f18f3aeed.sql
 revoke execute on function public.has_role(uuid, public.app_role) from public, anon;
@@ -220,7 +219,24 @@ alter table public.chats enable row level security;
 alter table public.chat_members enable row level security;
 alter table public.messages enable row level security;
 create or replace function public.is_chat_member(_chat uuid, _user uuid) returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.chat_members where chat_id = _chat and profile_id = _user) $$;
+  select _user = (select auth.uid())
+    and exists (select 1 from public.chat_members where chat_id = _chat and profile_id = _user) $$;
+drop policy if exists "Chat files signed-in read" on storage.objects;
+create policy "Chat members read chat files" on storage.objects for select to authenticated
+using (
+  bucket_id = 'chat-files'
+  and (
+    (storage.foldername(name))[1] = (select auth.uid())::text
+    or case
+      when (storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        then public.is_chat_member(
+          ((storage.foldername(name))[2])::uuid,
+          (select auth.uid())
+        )
+      else false
+    end
+  )
+);
 create policy "View own chats" on public.chats for select to authenticated using (owner_id = auth.uid() or public.is_chat_member(id, auth.uid()));
 create policy "Create owned chats" on public.chats for insert to authenticated with check (owner_id = auth.uid());
 create policy "Owners update chats" on public.chats for update to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());

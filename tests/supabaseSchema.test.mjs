@@ -76,6 +76,23 @@ test('text messages require a versioned encrypted payload in every database writ
   assert.match(migration, /not valid/i)
 })
 
+test('chat file storage is restricted to the uploader or chat members', () => {
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261027133018_secure_chat_file_access.sql'),
+    'utf8',
+  )
+  for (const sql of [schema, migration]) {
+    assert.match(sql, /drop policy if exists "Chat files signed-in read" on storage\.objects/i)
+    assert.match(sql, /create policy "Chat members read chat files"/i)
+    assert.match(sql, /public\.is_chat_member/i)
+    assert.match(sql, /\(select auth\.uid\(\)\)/i)
+    assert.match(sql, /storage\.foldername\(name\)\)\[2\].*~\*/i)
+    assert.doesNotMatch(sql, /create policy "Chat files signed-in read"/i)
+  }
+  assert.match(migration, /_user = \(select auth\.uid\(\)\)/i)
+})
+
 test('schema dry-run rejects non-PostgreSQL URLs', () => {
   assert.throws(
     () => inspectSupabaseSchema({ databaseUrl: 'https://example.invalid/database', root }),
