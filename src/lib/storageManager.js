@@ -247,9 +247,9 @@ export async function uploadChatFile({ userId, chatId, file, kind = 'file', dura
 export async function resolveChatFileUrl(fileUrl, chatId) {
   const path = storagePathFromChatFileUrl(fileUrl)
   if (!path) return fileUrl
-  if (!chatId) throw new Error('The conversation for this attachment is unavailable.')
 
   if (isAppwriteAuthEnabled()) {
+    if (!chatId) throw new Error('The conversation for this attachment is unavailable.')
     const { fileUrl: signedUrl } = await appwriteData('storage.file.url', {
       chatId: String(chatId),
       storagePath: path,
@@ -260,21 +260,54 @@ export async function resolveChatFileUrl(fileUrl, chatId) {
   }
 
   if (!supabase) throw new Error('File storage is not configured.')
-  const { data: message, error: messageError } = await supabase
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError) throw new Error(userError.message || 'Could not verify access to this attachment.')
+  if (!user) throw new Error('Sign in to open this attachment.')
+
+  const { data: ownedFile, error: ownedFileError } = await supabase
+    .from('storage_files')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('storage_path', path)
+    .limit(1)
+    .maybeSingle()
+  if (ownedFileError) throw new Error(ownedFileError.message || 'Could not verify access to this attachment.')
+
+  let hasAccess = Boolean(ownedFile)
+  if (!hasAccess) {
+    if (!chatId) throw new Error('The conversation for this attachment is unavailable.')
+    const { data: message, error: messageError } = await supabase
     .from('messages')
     .select('id')
     .eq('chat_id', String(chatId))
     .eq('file_url', fileUrl)
     .limit(1)
     .maybeSingle()
-  if (messageError) throw new Error(messageError.message || 'Could not verify access to this attachment.')
-  if (!message) throw new Error('You no longer have access to this attachment.')
+    if (messageError) throw new Error(messageError.message || 'Could not verify access to this attachment.')
+    hasAccess = Boolean(message)
+  }
+  if (!hasAccess) throw new Error('You no longer have access to this attachment.')
 
   const { data, error } = await supabase.storage
     .from(BUCKET)
     .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
   if (error || !data?.signedUrl) throw new Error(error?.message || 'A secure attachment link could not be created.')
   return data.signedUrl
+}
+
+export async function openChatFile(fileUrl, chatId) {
+  if (typeof window === 'undefined') throw new Error('Attachments can only be opened in a browser.')
+  const viewer = window.open('about:blank', '_blank')
+  if (!viewer) throw new Error('Allow pop-ups to open this attachment.')
+  viewer.opener = null
+
+  try {
+    const url = await resolveChatFileUrl(fileUrl, chatId)
+    viewer.location.replace(url)
+  } catch (error) {
+    viewer.close()
+    throw error
+  }
 }
 
 export async function deleteStorageFiles(userId, fileIds) {

@@ -1,10 +1,10 @@
 /* eslint-disable react/prop-types */
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
-import { FileText, Download, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck } from 'lucide-react'
+import { FileText, ExternalLink, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck } from 'lucide-react'
 import ChatButton from './ChatButton'
 import { REACTIONS, decodeContent } from '../../lib/chatProtocol'
-import { resolveChatFileUrl } from '../../lib/storageManager'
+import { openChatFile, resolveChatFileUrl } from '../../lib/storageManager'
 
 function formatTime(dateString) {
   try {
@@ -21,6 +21,7 @@ function formatTime(dateString) {
 function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, reacting, receiptsEnabled = true }) {
   const [showReactions, setShowReactions] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [openingFile, setOpeningFile] = useState(false)
   const [resolvedFileUrl, setResolvedFileUrl] = useState('')
   const [fileUrlError, setFileUrlError] = useState(false)
   const decoded = decodeContent(message.content)
@@ -36,6 +37,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
     setResolvedFileUrl('')
     setFileUrlError(false)
     if (!message.file_url) return () => { active = false }
+    if (message.type === 'document' || message.type === 'file') return () => { active = false }
     resolveChatFileUrl(message.file_url, chatId)
       .then((url) => { if (active) setResolvedFileUrl(url) })
       .catch((error) => {
@@ -43,7 +45,21 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
         if (active) setFileUrlError(true)
       })
     return () => { active = false }
-  }, [message.file_url, chatId])
+  }, [message.file_url, message.type, chatId])
+
+  const handleOpenFile = useCallback(async () => {
+    if (openingFile) return
+    setOpeningFile(true)
+    setFileUrlError(false)
+    try {
+      await openChatFile(message.file_url, chatId)
+    } catch (error) {
+      console.error('Could not open chat attachment', error)
+      setFileUrlError(true)
+    } finally {
+      setOpeningFile(false)
+    }
+  }, [openingFile, message.file_url, chatId])
 
   const renderContent = useMemo(() => {
     switch (message.type) {
@@ -112,15 +128,12 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
       case 'document':
       case 'file':
         if (!message.file_url) return <p className="text-xs">File preview unavailable</p>
-        if (fileUrlError) return <p className="text-xs">File preview unavailable</p>
-        if (!resolvedFileUrl) return <p className="text-xs opacity-70">Loading attachment…</p>
         return (
-          <a
-            href={resolvedFileUrl}
-            download={message.file_name}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg bg-background/10 hover:bg-background/20 transition-colors"
+          <button
+            type="button"
+            onClick={handleOpenFile}
+            disabled={openingFile}
+            className="flex w-full items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg bg-background/10 hover:bg-background/20 disabled:opacity-60 transition-colors text-left"
           >
             <FileText className="w-6 h-6 sm:w-8 sm:h-8 flex-shrink-0" />
             <div className="min-w-0">
@@ -128,17 +141,17 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
                 {message.file_name || message.content}
               </p>
               <p className="text-xs opacity-75 flex items-center gap-1">
-                <Download className="w-3 h-3 flex-shrink-0" />
-                Tap to download
+                <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                {openingFile ? 'Opening…' : fileUrlError ? 'Could not open · tap to retry' : 'Tap to open'}
               </p>
             </div>
-          </a>
+          </button>
         )
 
       default:
         return <p className="text-xs sm:text-sm">{decoded.text}</p>
     }
-  }, [message.type, message.content, message.file_url, message.file_name, message.duration, decoded.text, resolvedFileUrl, fileUrlError])
+  }, [message.type, message.content, message.file_url, message.file_name, message.duration, decoded.text, resolvedFileUrl, fileUrlError, openingFile, handleOpenFile])
 
   return (
     <div id={`message-${message.id}`} className={`chat-enter flex ${isOwn ? 'justify-end' : 'justify-start'} px-0`}>

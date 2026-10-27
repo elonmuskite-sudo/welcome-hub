@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { HardDrive, Image, Video, Mic, Music, FileText, Sticker, Trash2, RefreshCw, LoaderCircle } from 'lucide-react'
+import { HardDrive, Image, Video, Mic, Music, FileText, Sticker, Trash2, RefreshCw, LoaderCircle, ExternalLink } from 'lucide-react'
 import { useAuth } from '../../../lib/AuthContext'
-import { getStorageUsage, deleteStorageFiles, formatBytes } from '../../../lib/storageManager'
+import { getStorageUsage, deleteStorageFiles, formatBytes, createChatFileReference, openChatFile } from '../../../lib/storageManager'
 import ChatButton from '../ChatButton'
 
 const TYPE_META = {
@@ -20,6 +20,7 @@ export default function DataStorageSettings() {
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(() => new Set())
   const [deleting, setDeleting] = useState(false)
+  const [openingFileId, setOpeningFileId] = useState(null)
 
   const refresh = useCallback(async () => {
     if (!user?.id) { setLoading(false); return }
@@ -66,6 +67,19 @@ export default function DataStorageSettings() {
       setError(err.message || 'Files could not be deleted.')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const openFile = async (file) => {
+    if (openingFileId) return
+    setError('')
+    setOpeningFileId(file.id)
+    try {
+      await openChatFile(createChatFileReference(file.storage_path), file.chat_id)
+    } catch (err) {
+      setError(err.message || 'This file could not be opened.')
+    } finally {
+      setOpeningFileId(null)
     }
   }
 
@@ -159,7 +173,7 @@ export default function DataStorageSettings() {
               const checked = selected.has(file.id)
               return (
                 <li key={file.id} className="border-t border-border first:border-t-0">
-                  <label className="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-muted/50 transition">
+                  <div className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition">
                     <input
                       type="checkbox"
                       checked={checked}
@@ -168,14 +182,24 @@ export default function DataStorageSettings() {
                       aria-label={`Select ${file.file_name}`}
                     />
                     <Icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-sm text-foreground">{file.file_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {meta.label} · {formatBytes(file.size_bytes)}
-                        {file.duration_seconds != null ? ` · ${Math.round(file.duration_seconds)}s` : ''}
-                      </p>
-                    </div>
-                  </label>
+                    <button
+                      type="button"
+                      onClick={() => openFile(file)}
+                      disabled={Boolean(openingFileId)}
+                      className="flex flex-1 min-w-0 items-center gap-2 text-left disabled:opacity-60"
+                    >
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate text-sm text-foreground">{file.file_name}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {meta.label} · {formatBytes(file.size_bytes)}
+                          {file.duration_seconds != null ? ` · ${Math.round(file.duration_seconds)}s` : ''}
+                        </span>
+                      </span>
+                      {openingFileId === file.id
+                        ? <LoaderCircle className="w-4 h-4 animate-spin flex-shrink-0" />
+                        : <ExternalLink className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
+                    </button>
+                  </div>
                 </li>
               )
             })}
