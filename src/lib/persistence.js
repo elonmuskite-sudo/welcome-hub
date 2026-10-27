@@ -33,7 +33,7 @@ function emit(name, detail) {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(name, detail ? { detail } : undefined))
 }
 const notifyContactsUpdate = () => emit('nexus-contacts:updated')
-const notifyChatUpdate = () => emit('nexus-chat:updated')
+const notifyChatUpdate = (detail = {}) => emit('nexus-chat:updated', { ...detail, cacheUpdated: true })
 const notifyChange = notifyChatUpdate
 
 // Reactions and receipts are protocol control rows: they are stored as messages
@@ -370,7 +370,7 @@ export async function appendMessages(chatId, messages) {
   const nextChats = applyMessagesToChats(chats, chatId, list)
   if (nextChats === chats) return null
   writeLocalChats(nextChats)
-  notifyChatUpdate()
+  notifyChatUpdate({ chatId: String(chatId) })
   return nextChats.find((item) => String(item.id) === String(chatId)) || null
 }
 
@@ -420,6 +420,15 @@ export function applyChatSyncBatch(remoteChats, messages) {
 
 export async function getChatById(chatId, userId) {
   return withSync('chat', () => loadChatById(chatId, userId))
+}
+
+export function getCachedChatById(chatId, userId) {
+  if (!userId) return null
+  const user = String(userId)
+  return readLocalChats().find((chat) => (
+    String(chat.id) === String(chatId)
+    && (String(chat.owner_id || '') === user || (chat.participant_ids || []).map(String).includes(user))
+  )) || null
 }
 
 // A full chat load replaces the cached row but never recomputes the contact-list

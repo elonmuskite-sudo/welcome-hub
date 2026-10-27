@@ -1,13 +1,15 @@
 import { supabase, isSupabaseConfigured } from './supabase'
 import { appwriteData, isAppwriteAuthEnabled } from './appwrite'
 import { UNSUPPORTED_FILE_MESSAGE, classifyFileType, formatBytes, isSupportedFile } from './chatAttachments'
+import { createChatFileReference, storagePathFromChatFileUrl } from './chatFileUrl'
 
 export { ATTACHMENT_ACCEPT, UNSUPPORTED_FILE_MESSAGE, classifyFileType, formatBytes, isSupportedFile } from './chatAttachments'
+export { createChatFileReference, storagePathFromChatFileUrl } from './chatFileUrl'
 
 export const STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024 // 5 GB per user
 export const MAX_VIDEO_DURATION_SECONDS = 45
 const BUCKET = 'chat-files'
-const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 365
+const SIGNED_URL_TTL_SECONDS = 60 * 60
 
 export function probeMediaDuration(file) {
   return new Promise((resolve) => {
@@ -165,9 +167,9 @@ export async function uploadChatFile({ userId, chatId, file, kind = 'file', dura
       report(100)
       // The gateway verifies the object and runs the server-side scan hook,
       // so it fails the call when a configured scanner flags the file.
-      const { fileUrl, scanStatus = 'unavailable' } = await appwriteData('storage.upload.finish', { fileId })
+      const { scanStatus = 'unavailable' } = await appwriteData('storage.upload.finish', { fileId })
       return {
-        fileUrl,
+        fileUrl: createChatFileReference(path),
         fileName: file.name || 'file',
         fileType,
         durationSeconds: duration,
@@ -233,13 +235,46 @@ export async function uploadChatFile({ userId, chatId, file, kind = 'file', dura
   }
 
   return {
-    fileUrl: signed.signedUrl,
+    fileUrl: createChatFileReference(path),
     fileName: file.name || 'file',
     fileType,
     durationSeconds: duration,
     storagePath: path,
     scanStatus: scan.status,
   }
+}
+
+export async function resolveChatFileUrl(fileUrl, chatId) {
+  const path = storagePathFromChatFileUrl(fileUrl)
+  if (!path) return fileUrl
+  if (!chatId) throw new Error('The conversation for this attachment is unavailable.')
+
+  if (isAppwriteAuthEnabled()) {
+    const { fileUrl: signedUrl } = await appwriteData('storage.file.url', {
+      chatId: String(chatId),
+      storagePath: path,
+      fileUrl,
+    })
+    if (!signedUrl) throw new Error('A secure attachment link could not be created.')
+    return signedUrl
+  }
+
+  if (!supabase) throw new Error('File storage is not configured.')
+  const { data: message, error: messageError } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('chat_id', String(chatId))
+    .eq('file_url', fileUrl)
+    .limit(1)
+    .maybeSingle()
+  if (messageError) throw new Error(messageError.message || 'Could not verify access to this attachment.')
+  if (!message) throw new Error('You no longer have access to this attachment.')
+
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+  if (error || !data?.signedUrl) throw new Error(error?.message || 'A secure attachment link could not be created.')
+  return data.signedUrl
 }
 
 export async function deleteStorageFiles(userId, fileIds) {

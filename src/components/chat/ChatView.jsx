@@ -25,7 +25,7 @@ import { resolveMessages, decodeContent, encodeReply } from '../../lib/chatProto
 const UNDECRYPTABLE_MESSAGE = '🔒 Encrypted message — unable to decrypt'
 
 // eslint-disable-next-line react/prop-types
-export default function ChatView({ chat, onBack, autoStartCall = false }) {
+export default function ChatView({ chat, onBack, autoStartCall = false, cacheWarning = false }) {
   const [messages, setMessages] = useState(chat?.messages || [])
   const [decryptedMessages, setDecryptedMessages] = useState({})
   const [sendError, setSendError] = useState('')
@@ -325,6 +325,11 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
         </div>
       </div>
 
+      {cacheWarning && (
+        <p role="status" className="border-b border-border bg-muted/60 chat-page-x py-2 text-xs text-muted-foreground">
+          Showing saved messages. Reconnect to refresh this conversation.
+        </p>
+      )}
       {showSearch && <div className="flex items-center gap-2 chat-page-x py-3 bg-card border-b border-border chat-enter"><Search className="w-4 h-4 text-muted-foreground" /><input autoFocus type="search" enterKeyHint="search" autoComplete="off" spellCheck="false" aria-label="Search messages" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search messages" className="flex-1 min-w-0 bg-muted text-foreground px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring" /><ChatButton title="Close search" onClick={() => { setSearch(''); setShowSearch(false) }} className="w-9"><X className="w-4 h-4" /></ChatButton></div>}
       <div className="flex-1 min-h-0 min-w-0 relative overflow-hidden" style={wallpaperStyle}>
         <div className="absolute inset-0 bg-card/60 dark:bg-background/70 pointer-events-none" />
@@ -356,6 +361,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
                   key={message.id}
                   message={message}
                   userId={user?.id}
+                  chatId={chat.id}
                   onReact={handleReact}
                   onReply={setReply}
                   reacting={reacting}

@@ -4,6 +4,7 @@ import { IdentityLinkError, linkAppwriteIdentity, verifyAppwriteSession } from '
 import { createDatabasePool, withAuthenticatedDatabaseTransaction } from './appwriteDatabase.js'
 import { isFileScanConfigured, scanFileBuffer, unavailableScan } from './fileScan.js'
 import { isEncryptedTextEnvelope, requiresE2EEEncryption } from '../src/lib/crypto/envelope.js'
+import { storagePathFromChatFileUrl } from '../src/lib/chatFileUrl.js'
 import { securityAlertEmail, sendSystemEmail } from './systemEmails.js'
 
 let poolPromise
@@ -169,15 +170,20 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
         [chatId, supabaseUserId],
       )
       if (!chats[0]) return { chat: null }
-      const { rows: messages } = await client.query(
-        `select id, chat_id, sender_id, content, type, file_url, file_name,
-                duration, encrypted, created_at
-           from public.messages
-          where chat_id = $1
-          order by created_at asc
-          limit 5000`,
-        [chatId],
-      )
+      const messages = []
+      for (let offset = 0; ; offset += 1000) {
+        const { rows } = await client.query(
+          `select id, chat_id, sender_id, content, type, file_url, file_name,
+                  duration, encrypted, created_at
+             from public.messages
+            where chat_id = $1
+            order by created_at asc, id asc
+            limit 1000 offset $2`,
+          [chatId, offset],
+        )
+        messages.push(...rows)
+        if (rows.length < 1000) break
+      }
       return { chat: { ...chats[0], messages } }
     }
     case 'chats.create': {
@@ -409,9 +415,34 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
           throw new GatewayError('This file was rejected because the virus scan flagged it as unsafe.', 422)
         }
       }
-      const { data, error } = await admin.storage.from('chat-files').createSignedUrl(rows[0].storage_path, 60 * 60 * 24 * 365)
+      return { scanStatus: scan.status }
+    }
+    case 'storage.file.url': {
+      const chatId = requiredString(body.chatId, 'Chat ID', 64)
+      if (!validUuid(chatId)) throw new GatewayError('Chat ID is invalid.')
+      const storagePath = requiredString(body.storagePath, 'Storage path', 1024)
+      const fileUrl = requiredString(body.fileUrl, 'Attachment reference', 4096)
+      if (storagePathFromChatFileUrl(fileUrl) !== storagePath) {
+        throw new GatewayError('The attachment reference is invalid.')
+      }
+      const { rows } = await client.query(
+        `select sf.storage_path
+           from public.storage_files sf
+           join public.chat_members cm on cm.chat_id = sf.chat_id
+          where sf.chat_id = $1
+            and sf.storage_path = $2
+            and cm.profile_id = $3
+            and exists (
+              select 1 from public.messages m
+               where m.chat_id = sf.chat_id and m.file_url = $4
+            )
+          limit 1`,
+        [chatId, storagePath, supabaseUserId, fileUrl],
+      )
+      if (!rows[0]) throw new GatewayError('You no longer have access to this attachment.', 404)
+      const { data, error } = await admin.storage.from('chat-files').createSignedUrl(storagePath, 60 * 60)
       if (error || !data?.signedUrl) throw new GatewayError('Could not create a secure file link.', 503)
-      return { fileUrl: data.signedUrl, scanStatus: scan.status }
+      return { fileUrl: data.signedUrl }
     }
     case 'storage.upload.cancel': {
       const fileId = requiredString(body.fileId, 'File ID', 64)

@@ -1,9 +1,10 @@
 /* eslint-disable react/prop-types */
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { FileText, Download, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck } from 'lucide-react'
 import ChatButton from './ChatButton'
 import { REACTIONS, decodeContent } from '../../lib/chatProtocol'
+import { resolveChatFileUrl } from '../../lib/storageManager'
 
 function formatTime(dateString) {
   try {
@@ -17,9 +18,11 @@ function formatTime(dateString) {
   }
 }
 
-function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, receiptsEnabled = true }) {
+function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, reacting, receiptsEnabled = true }) {
   const [showReactions, setShowReactions] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [resolvedFileUrl, setResolvedFileUrl] = useState('')
+  const [fileUrlError, setFileUrlError] = useState(false)
   const decoded = decodeContent(message.content)
   const groups = REACTIONS.map(emoji => ({ emoji, users: (message.reactions || []).filter(r => r.emoji === emoji).map(r => r.userId) })).filter(r => r.users.length)
   const copyText = async () => {
@@ -28,26 +31,46 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
   const timeLabel = useMemo(() => formatTime(message.created_at), [message.created_at])
   const isSticker = message.type === 'sticker'
 
+  useEffect(() => {
+    let active = true
+    setResolvedFileUrl('')
+    setFileUrlError(false)
+    if (!message.file_url) return () => { active = false }
+    resolveChatFileUrl(message.file_url, chatId)
+      .then((url) => { if (active) setResolvedFileUrl(url) })
+      .catch((error) => {
+        console.error('Could not load chat attachment', error)
+        if (active) setFileUrlError(true)
+      })
+    return () => { active = false }
+  }, [message.file_url, chatId])
+
   const renderContent = useMemo(() => {
     switch (message.type) {
       case 'text':
         return <p className="text-xs sm:text-sm whitespace-pre-wrap break-words leading-relaxed">{decoded.text}</p>
 
       case 'image':
+        if (!message.file_url) return <p className="text-xs">Image preview unavailable</p>
+        if (fileUrlError) return <p className="text-xs">Image preview unavailable</p>
+        if (!resolvedFileUrl) return <p className="text-xs opacity-70">Loading image…</p>
         return (
           <img
-            src={message.file_url}
+            src={resolvedFileUrl}
             alt="Shared image"
             className="w-full max-w-xs sm:max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition"
-            onClick={() => window.open(message.file_url, '_blank')}
+            onClick={() => window.open(resolvedFileUrl, '_blank')}
           />
         )
 
       case 'video':
+        if (!message.file_url) return <p className="text-xs">Video preview unavailable</p>
+        if (fileUrlError) return <p className="text-xs">Video preview unavailable</p>
+        if (!resolvedFileUrl) return <p className="text-xs opacity-70">Loading video…</p>
         return (
           <div className="max-w-xs sm:max-w-sm">
             <video
-              src={message.file_url}
+              src={resolvedFileUrl}
               controls
               className="rounded-lg w-full"
               preload="metadata"
@@ -62,11 +85,14 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
         )
 
       case 'voice':
+        if (!message.file_url) return <p className="text-xs">Audio preview unavailable</p>
+        if (fileUrlError) return <p className="text-xs">Audio preview unavailable</p>
+        if (!resolvedFileUrl) return <p className="text-xs opacity-70">Loading audio…</p>
         return (
           <div className="flex items-center gap-2 min-w-0 max-w-full">
             <Music className="w-4 h-4 flex-shrink-0" />
             <audio
-              src={message.file_url}
+              src={resolvedFileUrl}
               controls
               className="h-8 w-52 max-w-full min-w-0"
             />
@@ -85,9 +111,12 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
 
       case 'document':
       case 'file':
+        if (!message.file_url) return <p className="text-xs">File preview unavailable</p>
+        if (fileUrlError) return <p className="text-xs">File preview unavailable</p>
+        if (!resolvedFileUrl) return <p className="text-xs opacity-70">Loading attachment…</p>
         return (
           <a
-            href={message.file_url}
+            href={resolvedFileUrl}
             download={message.file_name}
             target="_blank"
             rel="noopener noreferrer"
@@ -109,7 +138,7 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
       default:
         return <p className="text-xs sm:text-sm">{decoded.text}</p>
     }
-  }, [message.type, message.content, message.file_url, message.file_name, message.duration, decoded.text])
+  }, [message.type, message.content, message.file_url, message.file_name, message.duration, decoded.text, resolvedFileUrl, fileUrlError])
 
   return (
     <div id={`message-${message.id}`} className={`chat-enter flex ${isOwn ? 'justify-end' : 'justify-start'} px-0`}>
