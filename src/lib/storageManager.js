@@ -8,8 +8,15 @@ export { createChatFileReference, storagePathFromChatFileUrl } from './chatFileU
 
 export const STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024 // 5 GB per user
 export const MAX_VIDEO_DURATION_SECONDS = 45
+export const STORAGE_USAGE_CHANGED_EVENT = 'nexus:storage-usage-changed'
 const BUCKET = 'chat-files'
 const SIGNED_URL_TTL_SECONDS = 60 * 60
+
+function announceStorageUsageChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(STORAGE_USAGE_CHANGED_EVENT))
+  }
+}
 
 export function probeMediaDuration(file) {
   return new Promise((resolve) => {
@@ -34,32 +41,46 @@ export function probeMediaDuration(file) {
 export async function getStorageUsage(userId) {
   if (isAppwriteAuthEnabled()) {
     if (!userId) throw new Error('Sign in to view storage usage.')
-    const { files = [], quotaBytes = STORAGE_QUOTA_BYTES, usedBytes = 0 } = await appwriteData('storage.usage')
-    const byType = {}
-    for (const file of files) {
-      const size = Number(file.size_bytes) || 0
-      byType[file.file_type] = (byType[file.file_type] || 0) + size
-    }
+    const {
+      files = [],
+      quotaBytes = STORAGE_QUOTA_BYTES,
+      usedBytes = 0,
+      byType = {},
+    } = await appwriteData('storage.usage')
     return { usedBytes, quotaBytes, byType, files }
   }
   if (!isSupabaseConfigured() || !userId) {
     return { usedBytes: 0, quotaBytes: STORAGE_QUOTA_BYTES, byType: {}, files: [] }
   }
-  const { data, error } = await supabase
+  const { data: fileList, error: fileListError } = await supabase
     .from('storage_files')
     .select('id, chat_id, file_name, file_type, mime_type, size_bytes, duration_seconds, storage_path, created_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(1000)
-  if (error) throw error
-
-  const files = data || []
+  if (fileListError) throw fileListError
+  const files = fileList || []
   const byType = {}
   let usedBytes = 0
-  for (const file of files) {
-    const size = Number(file.size_bytes) || 0
-    usedBytes += size
-    byType[file.file_type] = (byType[file.file_type] || 0) + size
+  const pageSize = 1000
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase
+      .from('storage_files')
+      .select('file_type, size_bytes')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+    if (error) throw error
+
+    const page = data || []
+    for (const file of page) {
+      const size = Number(file.size_bytes) || 0
+      usedBytes += size
+      byType[file.file_type] = (byType[file.file_type] || 0) + size
+    }
+    if (page.length < pageSize) break
   }
   // Every account has the same fixed quota; storage is not a purchasable upgrade.
   return { usedBytes, quotaBytes: STORAGE_QUOTA_BYTES, byType, files }
@@ -168,6 +189,7 @@ export async function uploadChatFile({ userId, chatId, file, kind = 'file', dura
       // The gateway verifies the object and runs the server-side scan hook,
       // so it fails the call when a configured scanner flags the file.
       const { scanStatus = 'unavailable' } = await appwriteData('storage.upload.finish', { fileId })
+      announceStorageUsageChanged()
       return {
         fileUrl: createChatFileReference(path),
         fileName: file.name || 'file',
@@ -234,6 +256,7 @@ export async function uploadChatFile({ userId, chatId, file, kind = 'file', dura
     throw new Error('This file was rejected because the virus scan flagged it as unsafe.')
   }
 
+  announceStorageUsageChanged()
   return {
     fileUrl: createChatFileReference(path),
     fileName: file.name || 'file',
@@ -310,12 +333,42 @@ export async function openChatFile(fileUrl, chatId) {
   }
 }
 
+export async function saveReceivedChatFile({
+  userId,
+  chatId,
+  fileUrl,
+  fileName,
+  kind = 'file',
+  durationSeconds = null,
+  onProgress,
+}) {
+  if (!userId) throw new Error('Sign in to save this attachment.')
+  const signedUrl = await resolveChatFileUrl(fileUrl, chatId)
+  const response = await fetch(signedUrl)
+  if (!response.ok) throw new Error(`The attachment download failed (HTTP ${response.status}).`)
+  const blob = await response.blob()
+  if (!blob.size) throw new Error('The downloaded attachment is empty.')
+  const file = new File([blob], String(fileName || 'saved-file'), {
+    type: blob.type || 'application/octet-stream',
+  })
+  return uploadChatFile({
+    userId,
+    chatId: null,
+    file,
+    kind,
+    durationSeconds,
+    onProgress,
+  })
+}
+
 export async function deleteStorageFiles(userId, fileIds) {
   if (!isSupabaseConfigured() || !userId) throw new Error('File storage is not configured.')
   const ids = (fileIds || []).filter(Boolean)
   if (!ids.length) return { deleted: 0 }
   if (isAppwriteAuthEnabled()) {
-    return appwriteData('storage.delete', { fileIds: ids })
+    const result = await appwriteData('storage.delete', { fileIds: ids })
+    if (result?.deleted) announceStorageUsageChanged()
+    return result
   }
 
   const { data: rows, error: readError } = await supabase
@@ -338,5 +391,6 @@ export async function deleteStorageFiles(userId, fileIds) {
     .in('id', ids)
   if (deleteError) throw deleteError
 
+  if (rows?.length) announceStorageUsageChanged()
   return { deleted: rows?.length || 0 }
 }

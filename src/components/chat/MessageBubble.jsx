@@ -2,10 +2,10 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
-import { ArrowLeft, FileText, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck, X } from 'lucide-react'
+import { ArrowLeft, FileText, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck, Save, X } from 'lucide-react'
 import ChatButton from './ChatButton'
 import { REACTIONS, decodeContent } from '../../lib/chatProtocol'
-import { resolveChatFileUrl } from '../../lib/storageManager'
+import { resolveChatFileUrl, saveReceivedChatFile } from '../../lib/storageManager'
 
 function formatTime(dateString) {
   try {
@@ -25,6 +25,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
   const [resolvedFileUrl, setResolvedFileUrl] = useState('')
   const [fileUrlError, setFileUrlError] = useState(false)
   const [preview, setPreview] = useState(null)
+  const [saveState, setSaveState] = useState({ status: 'idle', percent: 0, error: '' })
   const decoded = decodeContent(message.content)
   const groups = REACTIONS.map(emoji => ({ emoji, users: (message.reactions || []).filter(r => r.emoji === emoji).map(r => r.userId) })).filter(r => r.users.length)
   const copyText = async () => {
@@ -32,6 +33,10 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
   }
   const timeLabel = useMemo(() => formatTime(message.created_at), [message.created_at])
   const isSticker = message.type === 'sticker'
+  const canSaveAttachment = !isOwn
+    && Boolean(message.file_url)
+    && ['image', 'video', 'audio', 'voice', 'file', 'document'].includes(message.type)
+  const hasPreviewModal = ['image', 'file', 'document'].includes(message.type)
 
   useEffect(() => {
     let active = true
@@ -49,6 +54,58 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
   }, [message.file_url, message.type, chatId])
 
   const closePreview = useCallback(() => setPreview(null), [])
+
+  const saveAttachment = useCallback(async () => {
+    if (!canSaveAttachment || saveState.status === 'saving' || saveState.status === 'saved') return
+    setSaveState({ status: 'saving', percent: 0, error: '' })
+    try {
+      await saveReceivedChatFile({
+        userId,
+        chatId,
+        fileUrl: message.file_url,
+        fileName: message.file_name || message.content || 'saved-file',
+        kind: message.type === 'document' ? 'file' : message.type,
+        durationSeconds: message.duration,
+        onProgress: (percent) => setSaveState((current) => ({ ...current, percent })),
+      })
+      setSaveState({ status: 'saved', percent: 100, error: '' })
+    } catch (error) {
+      console.error('Could not save received chat attachment', error)
+      setSaveState({
+        status: 'error',
+        percent: 0,
+        error: error.message || 'This file could not be saved to your storage.',
+      })
+    }
+  }, [
+    canSaveAttachment,
+    saveState.status,
+    userId,
+    chatId,
+    message.file_url,
+    message.file_name,
+    message.content,
+    message.type,
+    message.duration,
+  ])
+
+  const renderSaveButton = () => canSaveAttachment && (
+    <button
+      type="button"
+      onClick={saveAttachment}
+      disabled={saveState.status === 'saving' || saveState.status === 'saved'}
+      className="inline-flex min-h-9 items-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-60"
+    >
+      {saveState.status === 'saved'
+        ? <Check className="h-4 w-4" />
+        : <Save className={`h-4 w-4 ${saveState.status === 'saving' ? 'animate-pulse' : ''}`} />}
+      {saveState.status === 'saved'
+        ? 'Saved to storage'
+        : saveState.status === 'saving'
+          ? `Saving${saveState.percent ? ` ${saveState.percent}%` : '…'}`
+          : 'Save to my storage'}
+    </button>
+  )
 
   const openPreview = useCallback(async (type) => {
     const requestId = `${message.id}-${Date.now()}`
@@ -193,6 +250,12 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
       >
         {decoded.reply && <a href={`#message-${decoded.reply.id}`} className="block border-l-2 border-current bg-background/10 px-2 py-1 mb-2 rounded text-xs opacity-80 max-w-full truncate">{decoded.reply.preview}</a>}
         {renderContent}
+        {canSaveAttachment && !hasPreviewModal && (
+          <div className="mt-2">
+            {renderSaveButton()}
+            {saveState.error && <p role="alert" className="mt-1 text-xs text-destructive">{saveState.error}</p>}
+          </div>
+        )}
         {!isSticker && (
           <div className={`text-xs mt-1 opacity-70 ${isOwn ? 'text-primary-foreground' : 'text-muted-foreground'}`}>
             <span>{timeLabel}</span>
@@ -244,6 +307,7 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
             <p className="min-w-0 flex-1 truncate text-sm font-medium">
               {preview.type === 'image' ? 'Image preview' : (message.file_name || 'Document preview')}
             </p>
+            {renderSaveButton()}
             <button
               type="button"
               onClick={closePreview}
@@ -275,6 +339,11 @@ function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, react
               />
             )}
           </div>
+          {saveState.error && (
+            <p role="alert" className="border-t border-border px-4 py-2 text-sm text-destructive">
+              {saveState.error}
+            </p>
+          )}
         </section>
       </div>,
       document.body,

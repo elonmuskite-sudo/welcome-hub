@@ -93,6 +93,21 @@ test('chat file storage is restricted to the uploader or chat members', () => {
   assert.match(migration, /_user = \(select auth\.uid\(\)\)/i)
 })
 
+test('call push destinations are private to the owning account', () => {
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261027165720_call_push_subscriptions.sql'),
+    'utf8',
+  )
+  for (const sql of [schema, migration]) {
+    assert.match(sql, /create table(?: if not exists)? public\.call_push_subscriptions/i)
+    assert.match(sql, /enable row level security/i)
+    assert.match(sql, /using\s*\(\(select auth\.uid\(\)\)\s*=\s*user_id\)/i)
+    assert.match(sql, /with check\s*\(\(select auth\.uid\(\)\)\s*=\s*user_id\)/i)
+    assert.match(sql, /unique \(platform, endpoint\)/i)
+  }
+})
+
 test('schema dry-run rejects non-PostgreSQL URLs', () => {
   assert.throws(
     () => inspectSupabaseSchema({ databaseUrl: 'https://example.invalid/database', root }),

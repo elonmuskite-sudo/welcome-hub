@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase } from './supabase'
 import { useAuth } from './AuthContext'
 import { ICE_SERVERS } from './callIce'
+import { notifyCallPush } from './callPush'
 import {
   CALL_EVENTS,
   buildRingPayload,
@@ -121,6 +122,7 @@ export function CallProvider({ children }) {
   const connectionTimerRef = useRef(null)
   const disconnectTimerRef = useRef(null)
   const dismissTimerRef = useRef(null)
+  const pendingIncomingCallsRef = useRef(new Set())
 
   userIdRef.current = userId
 
@@ -363,7 +365,7 @@ export function CallProvider({ children }) {
 
   const initiateCall = useCallback(async (target = {}) => {
     const peerId = String(target.peerId || '').trim()
-    if (!supabase || !userIdRef.current || callRef.current || !peerId) return
+    if (!supabase || !userIdRef.current || callRef.current || pendingIncomingCallsRef.current.size || !peerId) return
 
     const id = createCallId()
     setCallState({
@@ -387,9 +389,11 @@ export function CallProvider({ children }) {
       return
     }
 
+    const expiresAt = Date.now() + RING_TIMEOUT_MS
     const delivered = await sendInbox(peerId, CALL_EVENTS.RING, buildRingPayload({
       callId: id,
       chatId: target.chatId,
+      expiresAt,
       caller: {
         id: userIdRef.current,
         name: user?.fullName || user?.firstName || user?.email,
@@ -400,11 +404,14 @@ export function CallProvider({ children }) {
       endCallInternal({ error: 'That contact could not be reached' })
       return
     }
+    void notifyCallPush({ chatId: target.chatId, callId: id, expiresAt }).catch((error) => {
+      console.error('Background call notification was not delivered.', error)
+    })
 
     if (typeof window !== 'undefined') {
       ringTimerRef.current = window.setTimeout(() => {
         if (callRef.current?.id === id && callRef.current.state === 'ringing') endCallInternal({ error: 'No answer' })
-      }, RING_TIMEOUT_MS)
+      }, Math.max(0, expiresAt - Date.now()))
     }
   }, [openCallChannel, setCallState, endCallInternal, user])
 
@@ -412,36 +419,88 @@ export function CallProvider({ children }) {
 
   const handleRing = useCallback(async (payload) => {
     if (!payload?.callId || !payload.fromUserId) return
-    if (callRef.current) {
+    const expiresAt = payload.expiresAt == null ? null : Number(payload.expiresAt)
+    if (expiresAt !== null && (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())) return
+    if (callRef.current?.id === String(payload.callId) || pendingIncomingCallsRef.current.has(String(payload.callId))) return
+    if (callRef.current || pendingIncomingCallsRef.current.size > 0) {
       sendInbox(payload.fromUserId, CALL_EVENTS.BUSY, { callId: payload.callId })
       return
     }
-    const channel = await openCallChannel(payload.callId)
-    if (!channel) {
-      sendInbox(payload.fromUserId, CALL_EVENTS.DECLINE, { callId: payload.callId })
-      return
-    }
-    setCallState({
-      id: String(payload.callId),
-      chatId: String(payload.chatId || ''),
-      direction: 'incoming',
-      peerId: String(payload.fromUserId),
-      peerName: payload.fromName || 'Contact',
-      peerAvatar: payload.fromAvatar || null,
-      state: 'ringing',
-      error: '',
-      muted: false,
-      startedAt: null,
-      duration: 0,
-    })
-    if (typeof window !== 'undefined') {
-      ringTimerRef.current = window.setTimeout(() => {
-        if (callRef.current?.id === payload.callId && callRef.current.state === 'ringing') {
-          endCallInternal({ error: 'Missed call' })
-        }
-      }, RING_TIMEOUT_MS)
+    const incomingId = String(payload.callId)
+    pendingIncomingCallsRef.current.add(incomingId)
+    try {
+      const channel = await openCallChannel(incomingId)
+      if (!channel) {
+        sendInbox(payload.fromUserId, CALL_EVENTS.DECLINE, { callId: payload.callId })
+        return
+      }
+      if (callRef.current) {
+        sendInbox(payload.fromUserId, CALL_EVENTS.BUSY, { callId: payload.callId })
+        if (callChannelRef.current === channel) callChannelRef.current = null
+        try { await supabase?.removeChannel(channel) } catch { /* channel already removed */ }
+        return
+      }
+      const ringDuration = expiresAt === null
+        ? RING_TIMEOUT_MS
+        : Math.min(RING_TIMEOUT_MS, expiresAt - Date.now())
+      if (ringDuration <= 0) {
+        if (callChannelRef.current === channel) callChannelRef.current = null
+        try { await supabase?.removeChannel(channel) } catch { /* channel already removed */ }
+        return
+      }
+      setCallState({
+        id: incomingId,
+        chatId: String(payload.chatId || ''),
+        direction: 'incoming',
+        peerId: String(payload.fromUserId),
+        peerName: payload.fromName || 'Contact',
+        peerAvatar: payload.fromAvatar || null,
+        state: 'ringing',
+        error: '',
+        muted: false,
+        startedAt: null,
+        duration: 0,
+      })
+      if (typeof window !== 'undefined') {
+        ringTimerRef.current = window.setTimeout(() => {
+          if (callRef.current?.id === incomingId && callRef.current.state === 'ringing') {
+            endCallInternal({ error: 'Missed call' })
+          }
+        }, ringDuration)
+      }
+    } finally {
+      pendingIncomingCallsRef.current.delete(incomingId)
     }
   }, [openCallChannel, setCallState, endCallInternal])
+
+  // A push notification click reopens the call route with the signed payload
+  // in the query string so the callee can rejoin the ephemeral Realtime topic.
+  useEffect(() => {
+    if (!userId || typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    const callId = url.searchParams.get('incomingCall')
+    const expiresAt = Number(url.searchParams.get('expiresAt'))
+    const fromUserId = url.searchParams.get('fromUserId')
+    const fromName = url.searchParams.get('fromName') || 'Contact'
+    const fromAvatar = url.searchParams.get('fromAvatar') || null
+    const chatId = url.pathname.match(/^\/app\/chat\/([^/]+)/)?.[1]
+    if (!callId || !fromUserId || !chatId) return
+    url.searchParams.delete('incomingCall')
+    url.searchParams.delete('expiresAt')
+    url.searchParams.delete('fromUserId')
+    url.searchParams.delete('fromName')
+    url.searchParams.delete('fromAvatar')
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
+    void handleRing({
+      callId,
+      chatId,
+      fromUserId,
+      fromName,
+      fromAvatar,
+      expiresAt,
+    })
+  }, [userId, handleRing])
 
   const handleReady = useCallback(async (payload) => {
     const current = callRef.current

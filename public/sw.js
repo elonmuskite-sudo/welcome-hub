@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nexus-chat-v4';
+const CACHE_NAME = 'nexus-chat-v5';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/logo.svg'];
 
 self.addEventListener('install', (event) => {
@@ -50,3 +50,42 @@ self.addEventListener('fetch', (event) => {
       }))
   );
 });
+
+self.addEventListener('push', (event) => {
+  let payload = {}
+  try {
+    payload = event.data?.json() || {}
+  } catch {
+    payload = { title: 'Incoming voice call', body: 'Open Nexus Chat to answer.' }
+  }
+  const data = payload.data || payload
+  const chatId = String(data.chatId || '')
+  const url = chatId
+    ? `/app/chat/${encodeURIComponent(chatId)}?incomingCall=${encodeURIComponent(String(data.callId || ''))}&expiresAt=${encodeURIComponent(String(data.expiresAt || ''))}&fromUserId=${encodeURIComponent(String(data.fromUserId || ''))}&fromName=${encodeURIComponent(String(data.fromName || 'Contact'))}&fromAvatar=${encodeURIComponent(String(data.fromAvatar || ''))}`
+    : '/app'
+
+  event.waitUntil(self.registration.showNotification(payload.title || 'Incoming voice call', {
+    body: payload.body || 'Open Nexus Chat to answer.',
+    icon: '/logo.png',
+    badge: '/logo.png',
+    tag: data.callId ? `call-${data.callId}` : 'nexus-call',
+    renotify: true,
+    requireInteraction: true,
+    data: { url },
+  }))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const targetUrl = new URL(event.notification.data?.url || '/app', self.location.origin).href
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    for (const client of windows) {
+      if (client.url.startsWith(self.location.origin) && 'navigate' in client) {
+        await client.navigate(targetUrl)
+        return client.focus()
+      }
+    }
+    return self.clients.openWindow(targetUrl)
+  })())
+})

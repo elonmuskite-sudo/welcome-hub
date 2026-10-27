@@ -27,6 +27,30 @@ grant select, insert, delete on public.storage_files to authenticated; grant all
 alter table public.storage_files enable row level security;
 create policy "Own files" on public.storage_files for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 
+create table public.call_push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  platform text not null check (platform in ('web', 'android', 'ios')),
+  endpoint text not null,
+  p256dh text,
+  auth text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint call_push_subscription_web_keys check (
+    (platform = 'web' and p256dh is not null and auth is not null)
+    or (platform in ('android', 'ios') and p256dh is null and auth is null)
+  ),
+  constraint call_push_subscription_endpoint_unique unique (platform, endpoint)
+);
+create index call_push_subscriptions_user_id_idx on public.call_push_subscriptions (user_id);
+grant select, insert, update, delete on public.call_push_subscriptions to authenticated;
+grant select, delete on public.call_push_subscriptions to service_role;
+alter table public.call_push_subscriptions enable row level security;
+create policy "Users manage their own call push subscriptions"
+  on public.call_push_subscriptions for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
 create or replace function public.get_verification_badge(_user_id uuid) returns text language sql stable security definer set search_path = public as $$
   select case
     when exists(select 1 from public.identity_verifications where user_id=_user_id and status='approved') then 'authenticated'

@@ -124,6 +124,26 @@ test('opening an Appwrite chat paginates and caches its complete message history
   assert.deepEqual(client.calls.slice(1).map(({ values }) => values), [[chatId, 0], [chatId, 1000]])
 })
 
+test('storage usage reports complete per-account totals and per-type breakdowns', async () => {
+  const client = makeClient((sql) => {
+    if (sql.includes('group by file_type')) {
+      return { rows: [{ file_type: 'image', used_bytes: '1200' }, { file_type: 'file', used_bytes: '800' }] }
+    }
+    if (sql.includes('sum(size_bytes)')) return { rows: [{ used_bytes: '2000' }] }
+    assert.match(sql, /from public\.storage_files/)
+    assert.match(sql, /limit 1000/)
+    return { rows: [{ id: 'file-1', size_bytes: 1200 }, { id: 'file-2', size_bytes: 800 }] }
+  })
+
+  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
+    action: 'storage.usage',
+  })
+
+  assert.equal(result.usedBytes, 2000)
+  assert.deepEqual(result.byType, { image: 1200, file: 800 })
+  assert.equal(result.files.length, 2)
+})
+
 test('storage upload preparation scopes the object path and database row to the verified user', async () => {
   const client = makeClient((sql, values) => {
     if (sql.includes('pg_advisory_xact_lock')) return { rows: [] }
@@ -534,7 +554,6 @@ test('E2EE status mirror records the provisioning outcome without touching messa
     assert.deepEqual(values, [true, true])
     return { rows: [] }
   })
-
   const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
     action: 'profile.setE2ee',
     enabled: true,
@@ -543,4 +562,51 @@ test('E2EE status mirror records the provisioning outcome without touching messa
 
   assert.deepEqual(result, { ok: true })
   assert.equal(client.calls.length, 1)
+})
+
+test('Appwrite push subscriptions are written under the authenticated identity', async () => {
+  const client = makeClient((sql, values) => {
+    assert.match(sql, /insert into public\.call_push_subscriptions/)
+    assert.match(sql, /where public\.call_push_subscriptions\.user_id = excluded\.user_id/)
+    assert.equal(values[0], userId)
+    assert.equal(values[1], 'web')
+    return { rowCount: 1, rows: [] }
+  })
+  const result = await executeUserDataOperation(client, { supabaseUserId: userId }, {
+    action: 'calls.push.register',
+    platform: 'web',
+    endpoint: 'https://push.example/subscription',
+    p256dh: 'public-key',
+    auth: 'auth-key',
+  })
+  assert.deepEqual(result, { ok: true })
+})
+
+test('Appwrite push subscription validation rejects malformed platform data before SQL', async () => {
+  const client = makeClient(() => assert.fail('Invalid subscription must be rejected before database access'))
+  await assert.rejects(
+    executeUserDataOperation(client, { supabaseUserId: userId }, {
+      action: 'calls.push.register',
+      platform: 'web',
+      endpoint: 'https://push.example/subscription',
+      p256dh: '',
+      auth: '',
+    }),
+    { status: 400, message: 'The push subscription is invalid.' },
+  )
+  assert.equal(client.calls.length, 0)
+})
+
+test('Appwrite background call requests reject expired deadlines before reading chat data', async () => {
+  const client = makeClient(() => assert.fail('Expired calls must be rejected before database access'))
+  await assert.rejects(
+    executeUserDataOperation(client, { supabaseUserId: userId }, {
+      action: 'calls.push.notify',
+      chatId: '123e4567-e89b-42d3-a456-426614174002',
+      callId: '123e4567-e89b-42d3-a456-426614174003',
+      expiresAt: Date.now() - 1,
+    }),
+    { status: 400, message: 'The call request is invalid or expired.' },
+  )
+  assert.equal(client.calls.length, 0)
 })

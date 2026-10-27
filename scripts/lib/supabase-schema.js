@@ -16,6 +16,7 @@ const REQUIRED_TABLES = [
   'public.chat_members',
   'public.messages',
   'public.storage_files',
+  'public.call_push_subscriptions',
   'public.auth_email_code_limits',
 ]
 const REQUIRED_FUNCTIONS = [
@@ -187,6 +188,22 @@ async function collectSchemaChecks(client) {
       && /(?:public\.)?is_chat_member/i.test(chatFilePolicyExpression)
       && /auth\.uid/i.test(chatFilePolicyExpression)
       && !filePolicies.some((policy) => policy.policyname === 'Chat files signed-in read')
+    ),
+  })
+  const { rows: pushPolicies } = await client.query(`
+    select policyname, qual, with_check
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'call_push_subscriptions'
+      and policyname = 'Users manage their own call push subscriptions'
+  `)
+  const pushPolicy = pushPolicies[0]
+  checks.push({
+    name: 'policy public.call_push_subscriptions restricts tokens to their owner',
+    pass: Boolean(
+      pushPolicy
+      && /auth\.uid/i.test(String(pushPolicy.qual || ''))
+      && /auth\.uid/i.test(String(pushPolicy.with_check || ''))
     ),
   })
   const { rows: realtimeTables } = await client.query(`

@@ -31,13 +31,14 @@ test('call control and handshake events stay separated', () => {
 test('createCallId returns a distinct id per call', () => {
   const ids = new Set(Array.from({ length: 100 }, () => createCallId()))
   assert.equal(ids.size, 100)
-  for (const id of ids) assert.ok(id.trim().length > 0)
+  for (const id of ids) assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
 })
 
 test('buildRingPayload trims values and defaults the caller name', () => {
   const payload = buildRingPayload({
     callId: ' c1 ',
     chatId: ' chat-9 ',
+    expiresAt: 12345,
     caller: { id: ' u2 ', name: '   ', avatar: null },
   })
   assert.deepEqual(payload, {
@@ -46,6 +47,7 @@ test('buildRingPayload trims values and defaults the caller name', () => {
     fromUserId: 'u2',
     fromName: 'Nexus user',
     fromAvatar: null,
+    expiresAt: 12345,
   })
   assert.equal(buildRingPayload({ caller: { id: 'u2', name: 'Ada', avatar: 'a.png' } }).fromAvatar, 'a.png')
 })

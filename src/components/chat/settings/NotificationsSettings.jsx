@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useSetting } from '../../../hooks/useSetting'
 import { listNotificationTones, playNotificationTone } from '../../../lib/notification-tones'
-import { Volume2, VolumeX, Bell, Play, Check, MessageSquareText } from 'lucide-react'
+import { Volume2, VolumeX, Bell, Play, Check, MessageSquareText, Phone } from 'lucide-react'
 import SettingsRow from './SettingsRow'
 import * as Switch from '@radix-ui/react-switch'
 import { supabase } from '../../../lib/supabase'
 import { isAppwriteAuthEnabled } from '../../../lib/appwrite'
+import { enableCallAlerts } from '../../../lib/callPush'
 
 export default function NotificationsSettings() {
   const [notificationSound, setNotificationSound] = useSetting('notificationSound', true)
@@ -20,6 +21,25 @@ export default function NotificationsSettings() {
   const [smsBusy, setSmsBusy] = useState(false)
   const [smsError, setSmsError] = useState('')
   const [smsNotice, setSmsNotice] = useState('')
+  const [callAlertsEnabled, setCallAlertsEnabled] = useState(() => {
+    try { return window.localStorage.getItem('nexus-call-alerts-enabled') === 'true' } catch { return false }
+  })
+  const [callAlertsBusy, setCallAlertsBusy] = useState(false)
+  const [callAlertsError, setCallAlertsError] = useState('')
+
+  const handleEnableCallAlerts = useCallback(async () => {
+    setCallAlertsBusy(true)
+    setCallAlertsError('')
+    try {
+      await enableCallAlerts()
+      window.localStorage.setItem('nexus-call-alerts-enabled', 'true')
+      setCallAlertsEnabled(true)
+    } catch (error) {
+      setCallAlertsError(error.message || 'Background call alerts could not be enabled.')
+    } finally {
+      setCallAlertsBusy(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (!supabase || isAppwriteAuthEnabled()) return undefined
@@ -149,6 +169,31 @@ export default function NotificationsSettings() {
 
   return (
     <div className="space-y-8">
+      <SettingsRow
+        label="Background call alerts"
+        description="Receive a push alert when someone calls while Nexus Chat is closed."
+        icon={<Phone className="w-5 h-5" />}
+      >
+        <div className="w-full space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-sm text-muted-foreground">
+              {callAlertsEnabled ? 'Enabled on this device' : 'Not enabled on this device'}
+            </p>
+            <button
+              type="button"
+              onClick={handleEnableCallAlerts}
+              disabled={callAlertsBusy}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+            >
+              {callAlertsBusy ? 'Enabling…' : callAlertsEnabled ? 'Refresh device registration' : 'Enable call alerts'}
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Allow system notifications. Calls can be answered after opening the app from the alert.
+          </p>
+          {callAlertsError && <p role="alert" className="text-sm text-destructive">{callAlertsError}</p>}
+        </div>
+      </SettingsRow>
       {supportsSmsSettings && (
         <section className="rounded-2xl border border-border bg-card p-5" aria-labelledby="sms-notifications-title">
           <div className="flex items-start gap-3">
