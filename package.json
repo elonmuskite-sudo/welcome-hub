@@ -84,7 +84,12 @@
     "tailwind-merge": "^3.0.2",
     "tailwindcss-animate": "^1.0.7",
     "web-push": "3.6.7",
-    "zod": "^3.24.2"
+    "zod": "^4.6.7"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.4"
+    }
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
@@ -110,6 +115,10 @@
     "wrangler": "^4.131.2"
   },
   "allowScripts": {
-    "sharp@0.32.6": true
+    "sharp@0.32.6": true,
+    "esbuild": true,
+    "@firebase/util": true,
+    "protobufjs": true,
+    "workerd": true
   }
 }
