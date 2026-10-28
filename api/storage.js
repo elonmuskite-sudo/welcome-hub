@@ -3,9 +3,11 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 // The three object-storage endpoints share a single Serverless Function so the
-// deployment stays inside the Hobby plan's twelve-function ceiling. The public
-// paths are unchanged: /api/storage/presign, /api/storage/confirm and
-// /api/storage/url.
+// deployment stays inside the Hobby plan's twelve-function ceiling. Vercel only
+// route-matches bracket segments for Next.js projects, so `/api/storage/:action`
+// is sent here by the rewrite in vercel.json, which turns the path segment into
+// the `action` query parameter. The public paths are unchanged:
+// /api/storage/presign, /api/storage/confirm and /api/storage/url.
 
 const MAX_BYTES = 10737418240
 const PRESIGN_TTL_SECONDS = 900

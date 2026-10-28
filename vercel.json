@@ -3,11 +3,12 @@
   "installCommand": "npm install --legacy-peer-deps",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "routes": [
-    {      "handle": "filesystem"
+  "rewrites": [
+    {      "source": "/api/storage/:action",
+      "destination": "/api/storage"
     },
-    {      "src": "/(.*)",
-      "dest": "/index.html"
+    {      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
