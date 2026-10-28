@@ -311,10 +311,15 @@ function applyMessagesToChats(chats, chatId, messages) {
   const index = chats.findIndex((item) => String(item.id) === String(chatId))
   if (index === -1) return chats
   const chat = chats[index]
+  const updatedChat = applyIncomingMessagesToChat(chat, messages)
+  const nextChats = chats.slice()
+  nextChats[index] = updatedChat
+  return nextChats
+}
+
+function applyIncomingMessagesToChat(chat, messages) {
   const existing = Array.isArray(chat.messages) ? chat.messages : []
-  // A Map keeps existing messages in place while upserting, so an update never
-  // reorders the thread and new messages append in arrival order.
-  const byId = new Map(existing.map((m) => [m.id, m]))
+  const byId = new Map(existing.map((message) => [String(message.id), message]))
   let lastMessage = chat.last_message
   let lastMessageTime = chat.last_message_time
   let lastMessageSenderId = chat.last_message_sender_id
@@ -323,15 +328,23 @@ function applyMessagesToChats(chats, chatId, messages) {
 
   for (const message of messages) {
     const nextMessage = {
-      id: message.id || `${Date.now()}`, sender_id: message.sender_id || 'me', content: message.content || '',
-      type: message.type || 'text', encrypted: Boolean(message.encrypted), file_url: message.file_url || null,
-      file_name: message.file_name || null, duration: message.duration || null,
+      id: message.id || `${Date.now()}`,
+      sender_id: message.sender_id || 'me',
+      content: message.content || '',
+      type: message.type || 'text',
+      encrypted: Boolean(message.encrypted),
+      file_url: message.file_url || null,
+      file_name: message.file_name || null,
+      duration: message.duration || null,
       created_at: message.created_at || new Date().toISOString(),
     }
-    byId.set(nextMessage.id, nextMessage)
-    // Reactions and receipts are protocol control rows: they never become the
-    // conversation's last message preview. The preview is the newest by
-    // timestamp, so a batch that arrives out of order still settles correctly.
+    const previous = byId.get(String(nextMessage.id))
+    if (previous && previous !== nextMessage) {
+      byId.set(String(nextMessage.id), { ...previous, ...nextMessage })
+    } else {
+      byId.set(String(nextMessage.id), nextMessage)
+    }
+
     if (nextMessage.type !== 'reaction' && nextMessage.type !== 'receipt') {
       const nextTime = Date.parse(nextMessage.created_at)
       const currentTime = lastMessageTime ? Date.parse(lastMessageTime) : NaN
@@ -345,7 +358,7 @@ function applyMessagesToChats(chats, chatId, messages) {
     }
   }
 
-  const updatedChat = {
+  return {
     ...chat,
     messages: [...byId.values()],
     last_message: lastMessage,
@@ -355,9 +368,6 @@ function applyMessagesToChats(chats, chatId, messages) {
     last_message_encrypted: lastMessageEncrypted,
     unread_count: 0,
   }
-  const nextChats = chats.slice()
-  nextChats[index] = updatedChat
-  return nextChats
 }
 
 // Persists a batch of messages for one chat with a single storage write and a

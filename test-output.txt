@@ -1,0 +1,1338 @@
+TAP version 13
+# Subtest: admin session tokens round-trip and carry the admin user id
+ok 1 - admin session tokens round-trip and carry the admin user id
+  ---
+  duration_ms: 6505.3937
+  type: 'test'
+  ...
+# Subtest: a tampered or foreign-signed token is rejected
+ok 2 - a tampered or foreign-signed token is rejected
+  ---
+  duration_ms: 860.6591
+  type: 'test'
+  ...
+# Subtest: an expired token is rejected
+ok 3 - an expired token is rejected
+  ---
+  duration_ms: 549.1202
+  type: 'test'
+  ...
+# Subtest: the session cookie is HttpOnly, path-scoped and parseable
+ok 4 - the session cookie is HttpOnly, path-scoped and parseable
+  ---
+  duration_ms: 64.555
+  type: 'test'
+  ...
+# Subtest: middleware only guards admin routes
+ok 5 - middleware only guards admin routes
+  ---
+  duration_ms: 544.6504
+  type: 'test'
+  ...
+# Subtest: unauthenticated admin requests are redirected to the admin sign-in page
+ok 6 - unauthenticated admin requests are redirected to the admin sign-in page
+  ---
+  duration_ms: 7506.5368
+  type: 'test'
+  ...
+# Subtest: every gated admin path redirects when the cookie is missing or invalid
+ok 7 - every gated admin path redirects when the cookie is missing or invalid
+  ---
+  duration_ms: 1499.8361
+  type: 'test'
+  ...
+# Subtest: a valid admin session is allowed through
+ok 8 - a valid admin session is allowed through
+  ---
+  duration_ms: 569.2209
+  type: 'test'
+  ...
+# Subtest: the admin sign-in page stays reachable without a session
+ok 9 - the admin sign-in page stays reachable without a session
+  ---
+  duration_ms: 141.3283
+  type: 'test'
+  ...
+# Subtest: the gate fails closed when the signing secret is not configured
+ok 10 - the gate fails closed when the signing secret is not configured
+  ---
+  duration_ms: 610.9562
+  type: 'test'
+  ...
+# Subtest: the admin session endpoint and route guards exist in the app
+ok 11 - the admin session endpoint and route guards exist in the app
+  ---
+  duration_ms: 1673.7934
+  type: 'test'
+  ...
+# Subtest: an AAL2 admin does not enroll or challenge another factor
+ok 12 - an AAL2 admin does not enroll or challenge another factor
+  ---
+  duration_ms: 459.3136
+  type: 'test'
+  ...
+# Subtest: an existing verified TOTP factor is required at sign-in
+ok 13 - an existing verified TOTP factor is required at sign-in
+  ---
+  duration_ms: 11.0118
+  type: 'test'
+  ...
+# Subtest: first-time admin setup removes incomplete factors and returns a new TOTP enrollment
+ok 14 - first-time admin setup removes incomplete factors and returns a new TOTP enrollment
+  ---
+  duration_ms: 74.8333
+  type: 'test'
+  ...
+# Subtest: verification challenges the factor and requires the session to reach AAL2
+ok 15 - verification challenges the factor and requires the session to reach AAL2
+  ---
+  duration_ms: 259.7435
+  type: 'test'
+  ...
+# Subtest: invalid codes and unsuccessful assurance upgrades fail closed
+ok 16 - invalid codes and unsuccessful assurance upgrades fail closed
+  ---
+  duration_ms: 30.8685
+  type: 'test'
+  ...
+# Subtest: missing authenticator configuration fails closed
+ok 17 - missing authenticator configuration fails closed
+  ---
+  duration_ms: 266.9574
+  type: 'test'
+  ...
+# Subtest: message insert binds its sender to the verified linked Supabase identity
+ok 18 - message insert binds its sender to the verified linked Supabase identity
+  ---
+  duration_ms: 1456.7003
+  type: 'test'
+  ...
+# Subtest: the Appwrite gateway rejects plaintext text before database access
+ok 19 - the Appwrite gateway rejects plaintext text before database access
+  ---
+  duration_ms: 436.4645
+  type: 'test'
+  ...
+# Subtest: the Appwrite gateway rejects a forged encryption flag without an envelope
+ok 20 - the Appwrite gateway rejects a forged encryption flag without an envelope
+  ---
+  duration_ms: 21.1378
+  type: 'test'
+  ...
+# Subtest: message polling advances its authenticated composite cursor without skipping ties
+ok 21 - message polling advances its authenticated composite cursor without skipping ties
+  ---
+  duration_ms: 411.2696
+  type: 'test'
+  ...
+# Subtest: the chat list carries each conversation’s newest message for the contact preview
+ok 22 - the chat list carries each conversation’s newest message for the contact preview
+  ---
+  duration_ms: 23.9759
+  type: 'test'
+  ...
+# Subtest: opening an Appwrite chat paginates and caches its complete message history
+ok 23 - opening an Appwrite chat paginates and caches its complete message history
+  ---
+  duration_ms: 475.4033
+  type: 'test'
+  ...
+# Subtest: storage usage reports complete per-account totals and per-type breakdowns
+ok 24 - storage usage reports complete per-account totals and per-type breakdowns
+  ---
+  duration_ms: 43.3527
+  type: 'test'
+  ...
+# Subtest: storage upload preparation scopes the object path and database row to the verified user
+ok 25 - storage upload preparation scopes the object path and database row to the verified user
+  ---
+  duration_ms: 499.025
+  type: 'test'
+  ...
+# Subtest: storage upload preparation rejects unsupported sizes before writing metadata
+ok 26 - storage upload preparation rejects unsupported sizes before writing metadata
+  ---
+  duration_ms: 26.1713
+  type: 'test'
+  ...
+# Subtest: storage deletion removes only paths selected under the authenticated RLS context
+ok 27 - storage deletion removes only paths selected under the authenticated RLS context
+  ---
+  duration_ms: 508.1306
+  type: 'test'
+  ...
+# Subtest: chat upload completion verifies Storage’s actual object size and content type
+ok 28 - chat upload completion verifies Storage’s actual object size and content type
+  ---
+  duration_ms: 524.5323
+  type: 'test'
+  ...
+# Subtest: attachment links are signed only for a file referenced by a member chat
+ok 29 - attachment links are signed only for a file referenced by a member chat
+  ---
+  duration_ms: 21.7765
+  type: 'test'
+  ...
+# Subtest: Appwrite provider blocks every privileged admin action until provider MFA is supported
+ok 30 - Appwrite provider blocks every privileged admin action until provider MFA is supported
+  ---
+  duration_ms: 655.0026
+  type: 'test'
+  ...
+# Subtest: identity uploads are scoped to the verified identity and reject invalid sizes
+ok 31 - identity uploads are scoped to the verified identity and reject invalid sizes
+  ---
+  duration_ms: 12.5205
+  type: 'test'
+  ...
+# Subtest: verification submission cannot register another user’s storage paths
+ok 32 - verification submission cannot register another user’s storage paths
+  ---
+  duration_ms: 28.9093
+  type: 'test'
+  ...
+# Subtest: verification submission checks actual private object metadata before inserting a record
+ok 33 - verification submission checks actual private object metadata before inserting a record
+  ---
+  duration_ms: 468.8098
+  type: 'test'
+  ...
+# Subtest: Appwrite security alerts reject admin accounts because provider MFA is unavailable
+ok 34 - Appwrite security alerts reject admin accounts because provider MFA is unavailable
+  ---
+  duration_ms: 14.0479
+  type: 'test'
+  ...
+# Subtest: Appwrite member sign-in alerts are sent after the transaction with a session-scoped idempotency key
+ok 35 - Appwrite member sign-in alerts are sent after the transaction with a session-scoped idempotency key
+  ---
+  duration_ms: 7323.6527
+  type: 'test'
+  ...
+# Subtest: batch verification badges resolve every directory member in one query
+ok 36 - batch verification badges resolve every directory member in one query
+  ---
+  duration_ms: 11.5646
+  type: 'test'
+  ...
+# Subtest: chat listing is scoped to the caller and returns per-participant display names
+ok 37 - chat listing is scoped to the caller and returns per-participant display names
+  ---
+  duration_ms: 311.1295
+  type: 'test'
+  ...
+# Subtest: chat creation persists sanitised per-participant display names
+ok 38 - chat creation persists sanitised per-participant display names
+  ---
+  duration_ms: 31.6543
+  type: 'test'
+  ...
+# Subtest: chat creation without participant names stores a null snapshot rather than a shared title
+ok 39 - chat creation without participant names stores a null snapshot rather than a shared title
+  ---
+  duration_ms: 5.2764
+  type: 'test'
+  ...
+# Subtest: E2EE status mirror records the provisioning outcome without touching message sending
+ok 40 - E2EE status mirror records the provisioning outcome without touching message sending
+  ---
+  duration_ms: 31.2661
+  type: 'test'
+  ...
+# Subtest: Appwrite push subscriptions are written under the authenticated identity
+ok 41 - Appwrite push subscriptions are written under the authenticated identity
+  ---
+  duration_ms: 252.982
+  type: 'test'
+  ...
+# Subtest: Appwrite push subscription validation rejects malformed platform data before SQL
+ok 42 - Appwrite push subscription validation rejects malformed platform data before SQL
+  ---
+  duration_ms: 4.5938
+  type: 'test'
+  ...
+# Subtest: Appwrite background call requests reject expired deadlines before reading chat data
+ok 43 - Appwrite background call requests reject expired deadlines before reading chat data
+  ---
+  duration_ms: 4.7739
+  type: 'test'
+  ...
+# Subtest: requires a verified Appwrite email before linking
+ok 44 - requires a verified Appwrite email before linking
+  ---
+  duration_ms: 773.0616
+  type: 'test'
+  ...
+# Subtest: links a verified Appwrite account to the existing confirmed Supabase identity
+ok 45 - links a verified Appwrite account to the existing confirmed Supabase identity
+  ---
+  duration_ms: 397.1083
+  type: 'test'
+  ...
+# Subtest: rejects linking to an unconfirmed Supabase account
+ok 46 - rejects linking to an unconfirmed Supabase account
+  ---
+  duration_ms: 4.0637
+  type: 'test'
+  ...
+# Subtest: keeps an existing identity link stable when the Appwrite email changes
+ok 47 - keeps an existing identity link stable when the Appwrite email changes
+  ---
+  duration_ms: 11.61
+  type: 'test'
+  ...
+# Subtest: does not let another Appwrite identity claim an already-linked Supabase account
+ok 48 - does not let another Appwrite identity claim an already-linked Supabase account
+  ---
+  duration_ms: 14.6811
+  type: 'test'
+  ...
+# Subtest: provisions a Supabase identity and profile for a new verified Appwrite account
+ok 49 - provisions a Supabase identity and profile for a new verified Appwrite account
+  ---
+  duration_ms: 572.9065
+  type: 'test'
+  ...
+# Subtest: the session endpoint rejects methods other than POST
+ok 50 - the session endpoint rejects methods other than POST
+  ---
+  duration_ms: 398.1304
+  type: 'test'
+  ...
+# Subtest: the profile gateway rejects methods other than GET
+ok 51 - the profile gateway rejects methods other than GET
+  ---
+  duration_ms: 67.1651
+  type: 'test'
+  ...
+# Subtest: the profile gateway fails closed when its server configuration is incomplete
+ok 52 - the profile gateway fails closed when its server configuration is incomplete
+  ---
+  duration_ms: 41.8501
+  type: 'test'
+  ...
+# Subtest: the session endpoint fails closed when bridge configuration is incomplete
+ok 53 - the session endpoint fails closed when bridge configuration is incomplete
+  ---
+  duration_ms: 59.9571
+  type: 'test'
+  ...
+# Subtest: the session endpoint rejects an invalid Appwrite JWT before touching Supabase
+ok 54 - the session endpoint rejects an invalid Appwrite JWT before touching Supabase
+  ---
+  duration_ms: 8890.2804
+  type: 'test'
+  ...
+# Subtest: RLS database work runs in a transaction bound to the linked Supabase user
+ok 55 - RLS database work runs in a transaction bound to the linked Supabase user
+  ---
+  duration_ms: 530.6262
+  type: 'test'
+  ...
+# Subtest: RLS database work rolls back on query failure and always releases the connection
+ok 56 - RLS database work rolls back on query failure and always releases the connection
+  ---
+  duration_ms: 49.454
+  type: 'test'
+  ...
+# Subtest: RLS database context rejects invalid identities before connecting
+ok 57 - RLS database context rejects invalid identities before connecting
+  ---
+  duration_ms: 5.7057
+  type: 'test'
+  ...
+# Subtest: database pool requires a Supabase postgres role and TLS
+ok 58 - database pool requires a Supabase postgres role and TLS
+  ---
+  duration_ms: 527.3739
+  type: 'test'
+  ...
+# Subtest: normalizePeaks scales the loudest sample to 1 and folds sign
+ok 59 - normalizePeaks scales the loudest sample to 1 and folds sign
+  ---
+  duration_ms: 657.7271
+  type: 'test'
+  ...
+# Subtest: normalizePeaks handles silence and bad input
+ok 60 - normalizePeaks handles silence and bad input
+  ---
+  duration_ms: 12.1389
+  type: 'test'
+  ...
+# Subtest: computePeaks returns the requested number of bars within [floor, 1]
+ok 61 - computePeaks returns the requested number of bars within [floor, 1]
+  ---
+  duration_ms: 457.3838
+  type: 'test'
+  ...
+# Subtest: computePeaks keeps a visible baseline for silent audio
+ok 62 - computePeaks keeps a visible baseline for silent audio
+  ---
+  duration_ms: 21.9163
+  type: 'test'
+  ...
+# Subtest: computePeaks tolerates empty input
+ok 63 - computePeaks tolerates empty input
+  ---
+  duration_ms: 11.5156
+  type: 'test'
+  ...
+# Subtest: STUN falls back to the public servers when no override is configured
+ok 64 - STUN falls back to the public servers when no override is configured
+  ---
+  duration_ms: 307.1325
+  type: 'test'
+  ...
+# Subtest: a comma-separated STUN override replaces the defaults
+ok 65 - a comma-separated STUN override replaces the defaults
+  ---
+  duration_ms: 266.5476
+  type: 'test'
+  ...
+# Subtest: TURN is only added when a relay URL is configured
+ok 66 - TURN is only added when a relay URL is configured
+  ---
+  duration_ms: 4.5157
+  type: 'test'
+  ...
+# Subtest: a credential-free TURN relay omits the auth fields
+ok 67 - a credential-free TURN relay omits the auth fields
+  ---
+  duration_ms: 19.1419
+  type: 'test'
+  ...
+# Subtest: inbox and per-call channel names are namespaced and reject empty ids
+ok 68 - inbox and per-call channel names are namespaced and reject empty ids
+  ---
+  duration_ms: 247.3863
+  type: 'test'
+  ...
+# Subtest: call control and handshake events stay separated
+ok 69 - call control and handshake events stay separated
+  ---
+  duration_ms: 70.6946
+  type: 'test'
+  ...
+# Subtest: createCallId returns a distinct id per call
+ok 70 - createCallId returns a distinct id per call
+  ---
+  duration_ms: 1126.7319
+  type: 'test'
+  ...
+# Subtest: buildRingPayload trims values and defaults the caller name
+ok 71 - buildRingPayload trims values and defaults the caller name
+  ---
+  duration_ms: 369.0321
+  type: 'test'
+  ...
+# Subtest: matchesCall only accepts the payload of the call in progress
+ok 72 - matchesCall only accepts the payload of the call in progress
+  ---
+  duration_ms: 5.8365
+  type: 'test'
+  ...
+# Subtest: only an acknowledged Realtime broadcast counts as sent
+ok 73 - only an acknowledged Realtime broadcast counts as sent
+  ---
+  duration_ms: 13.2775
+  type: 'test'
+  ...
+# Subtest: accepts every required attachment type
+ok 74 - accepts every required attachment type
+  ---
+  duration_ms: 292.0698
+  type: 'test'
+  ...
+# Subtest: accepts supported files when the picker reports a generic or empty MIME type
+ok 75 - accepts supported files when the picker reports a generic or empty MIME type
+  ---
+  duration_ms: 198.756
+  type: 'test'
+  ...
+# Subtest: rejects unsupported and dangerous files
+ok 76 - rejects unsupported and dangerous files
+  ---
+  duration_ms: 49.2446
+  type: 'test'
+  ...
+# Subtest: accept filter exposes both MIME types and extensions for every category
+ok 77 - accept filter exposes both MIME types and extensions for every category
+  ---
+  duration_ms: 30.432
+  type: 'test'
+  ...
+# Subtest: error copy lists the supported categories
+ok 78 - error copy lists the supported categories
+  ---
+  duration_ms: 160.7206
+  type: 'test'
+  ...
+# Subtest: classifies file types for storage metadata
+ok 79 - classifies file types for storage metadata
+  ---
+  duration_ms: 5.1122
+  type: 'test'
+  ...
+# Subtest: detects extensions case-insensitively
+ok 80 - detects extensions case-insensitively
+  ---
+  duration_ms: 15.861
+  type: 'test'
+  ...
+# Subtest: formats byte counts for the upload UI
+ok 81 - formats byte counts for the upload UI
+  ---
+  duration_ms: 24.2234
+  type: 'test'
+  ...
+# Subtest: stable chat file references preserve storage paths
+ok 82 - stable chat file references preserve storage paths
+  ---
+  duration_ms: 400.6502
+  type: 'test'
+  ...
+# Subtest: previous signed and public chat file links resolve to the durable object path
+ok 83 - previous signed and public chat file links resolve to the durable object path
+  ---
+  duration_ms: 18.8953
+  type: 'test'
+  ...
+# Subtest: invalid and unrelated file references are rejected or left unresolved
+ok 84 - invalid and unrelated file references are rejected or left unresolved
+  ---
+  duration_ms: 378.119
+  type: 'test'
+  ...
+# Subtest: a new inbound message refreshes the contact-list preview immediately
+ok 85 - a new inbound message refreshes the contact-list preview immediately
+  ---
+  duration_ms: 923.4191
+  type: 'test'
+  ...
+# Subtest: simultaneous arrivals from several contacts each land on their own row
+ok 86 - simultaneous arrivals from several contacts each land on their own row
+  ---
+  duration_ms: 625.2903
+  type: 'test'
+  ...
+# Subtest: a batch that arrives out of order still settles on the newest message
+ok 87 - a batch that arrives out of order still settles on the newest message
+  ---
+  duration_ms: 50.7003
+  type: 'test'
+  ...
+# Subtest: a reaction arriving last does not replace the preview
+ok 88 - a reaction arriving last does not replace the preview
+  ---
+  duration_ms: 11.5345
+  type: 'test'
+  ...
+# Subtest: a cold cache is filled from the newest message returned with the chat list
+ok 89 - a cold cache is filled from the newest message returned with the chat list
+  ---
+  duration_ms: 20.5558
+  type: 'test'
+  ...
+# Subtest: an older remote row cannot roll back a newer stored preview
+ok 90 - an older remote row cannot roll back a newer stored preview
+  ---
+  duration_ms: 35.5126
+  type: 'test'
+  ...
+# Subtest: a control row returned as the newest message is ignored
+ok 91 - a control row returned as the newest message is ignored
+  ---
+  duration_ms: 7.5007
+  type: 'test'
+  ...
+# Subtest: a contact row shows the contact name, their message and a relative age
+ok 92 - a contact row shows the contact name, their message and a relative age
+  ---
+  duration_ms: 493.2406
+  type: 'test'
+  ...
+# Subtest: the row is named from the viewer’s perspective
+ok 93 - the row is named from the viewer’s perspective
+  ---
+  duration_ms: 16.8188
+  type: 'test'
+  ...
+# Subtest: the viewer’s own last message is marked as theirs
+ok 94 - the viewer’s own last message is marked as theirs
+  ---
+  duration_ms: 15.8471
+  type: 'test'
+  ...
+# Subtest: a very long message is truncated to fit the row and ends with an ellipsis
+ok 95 - a very long message is truncated to fit the row and ends with an ellipsis
+  ---
+  duration_ms: 9.6016
+  type: 'test'
+  ...
+# Subtest: a message at the limit is left untouched
+ok 96 - a message at the limit is left untouched
+  ---
+  duration_ms: 22.8048
+  type: 'test'
+  ...
+# Subtest: multi-line content collapses to a single readable line
+ok 97 - multi-line content collapses to a single readable line
+  ---
+  duration_ms: 18.7375
+  type: 'test'
+  ...
+# Subtest: a contact with no history keeps the empty state instead of a stale preview
+ok 98 - a contact with no history keeps the empty state instead of a stale preview
+  ---
+  duration_ms: 11.004
+  type: 'test'
+  ...
+# Subtest: an attachment with no caption is described rather than shown as blank
+ok 99 - an attachment with no caption is described rather than shown as blank
+  ---
+  duration_ms: 26.413
+  type: 'test'
+  ...
+# Subtest: an encrypted message never leaks ciphertext into the preview
+ok 100 - an encrypted message never leaks ciphertext into the preview
+  ---
+  duration_ms: 196.9956
+  type: 'test'
+  ...
+# Subtest: reactions and receipts never become the preview; the last real message is used
+ok 101 - reactions and receipts never become the preview; the last real message is used
+  ---
+  duration_ms: 16.0991
+  type: 'test'
+  ...
+# Subtest: a reply-encoded message previews its readable text
+ok 102 - a reply-encoded message previews its readable text
+  ---
+  duration_ms: 29.9059
+  type: 'test'
+  ...
+# Subtest: the stored summary wins over an older cached thread
+ok 103 - the stored summary wins over an older cached thread
+  ---
+  duration_ms: 5.0368
+  type: 'test'
+  ...
+# Subtest: an invalid timestamp yields no age label instead of a broken one
+ok 104 - an invalid timestamp yields no age label instead of a broken one
+  ---
+  duration_ms: 356.5559
+  type: 'test'
+  ...
+# Subtest: reply protocol preserves ordinary text and bounds quoted previews
+ok 105 - reply protocol preserves ordinary text and bounds quoted previews
+  ---
+  duration_ms: 471.9632
+  type: 'test'
+  ...
+# Subtest: reactions toggle independently per user and stay hidden from transcript
+ok 106 - reactions toggle independently per user and stay hidden from transcript
+  ---
+  duration_ms: 4063.1469
+  type: 'test'
+  ...
+# Subtest: attempting to disable E2EE never sends plaintext
+ok 107 - attempting to disable E2EE never sends plaintext
+  ---
+  duration_ms: 890.6997
+  type: 'test'
+  ...
+# Subtest: text remains encrypted after a disable attempt when recipient key exists
+ok 108 - text remains encrypted after a disable attempt when recipient key exists
+  ---
+  duration_ms: 6150.7403
+  type: 'test'
+  ...
+# Subtest: the encrypted-envelope validator rejects plaintext and malformed envelopes
+ok 109 - the encrypted-envelope validator rejects plaintext and malformed envelopes
+  ---
+  duration_ms: 491.1315
+  type: 'test'
+  ...
+# Subtest: persistence rejects plaintext before any chat-service request
+ok 110 - persistence rejects plaintext before any chat-service request
+  ---
+  duration_ms: 772.9569
+  type: 'test'
+  ...
+# Subtest: ChatView encrypts text and rejects failed encryption before message persistence
+ok 111 - ChatView encrypts text and rejects failed encryption before message persistence
+  ---
+  duration_ms: 415.4078
+  type: 'test'
+  ...
+# Subtest: a missing contact key prevents sending plaintext
+ok 112 - a missing contact key prevents sending plaintext
+  ---
+  duration_ms: 5.8623
+  type: 'test'
+  ...
+# Subtest: an invalid contact key prevents sending plaintext
+ok 113 - an invalid contact key prevents sending plaintext
+  ---
+  duration_ms: 200.034
+  type: 'test'
+  ...
+# Subtest: the contact can decrypt a message we encrypt (real ECDH + AES-256-GCM)
+ok 114 - the contact can decrypt a message we encrypt (real ECDH + AES-256-GCM)
+  ---
+  duration_ms: 769.8053
+  type: 'test'
+  ...
+# Subtest: we decrypt a message the contact encrypts to us
+ok 115 - we decrypt a message the contact encrypts to us
+  ---
+  duration_ms: 855.235
+  type: 'test'
+  ...
+# Subtest: a message encrypted to a different key fails closed
+ok 116 - a message encrypted to a different key fails closed
+  ---
+  duration_ms: 1582.9304
+  type: 'test'
+  ...
+# Subtest: the generated key pair is stable for the device
+ok 117 - the generated key pair is stable for the device
+  ---
+  duration_ms: 22.257
+  type: 'test'
+  ...
+# Subtest: the key directory migration is participant scoped
+ok 118 - the key directory migration is participant scoped
+  ---
+  duration_ms: 985.9579
+  type: 'test'
+  ...
+# Subtest: contact reads resolve the name from the directory, scoped to the caller
+ok 119 - contact reads resolve the name from the directory, scoped to the caller
+  ---
+  duration_ms: 558.652
+  type: 'test'
+  ...
+# Subtest: a new account is provisioned encrypted by default with a device key pair
+ok 120 - a new account is provisioned encrypted by default with a device key pair
+  ---
+  duration_ms: 735.6822
+  type: 'test'
+  ...
+# Subtest: failed key provisioning keeps encryption mandatory and pins the decision
+ok 121 - failed key provisioning keeps encryption mandatory and pins the decision
+  ---
+  duration_ms: 27.8206
+  type: 'test'
+  ...
+# Subtest: an existing disabled account is switched to mandatory E2EE
+ok 122 - an existing disabled account is switched to mandatory E2EE
+  ---
+  duration_ms: 720.9646
+  type: 'test'
+  ...
+# Subtest: an existing encrypted account keeps encryption on
+ok 123 - an existing encrypted account keeps encryption on
+  ---
+  duration_ms: 12.1902
+  type: 'test'
+  ...
+# Subtest: the encrypted-by-default notice is shown once and can be dismissed
+ok 124 - the encrypted-by-default notice is shown once and can be dismissed
+  ---
+  duration_ms: 12.0366
+  type: 'test'
+  ...
+# Subtest: post-signup audits: a subsequent app boot keeps encryption on and the key unchanged
+ok 125 - post-signup audits: a subsequent app boot keeps encryption on and the key unchanged
+  ---
+  duration_ms: 881.0462
+  type: 'test'
+  ...
+# Subtest: the default-enable migration stamps existing rows off before flipping the default
+ok 126 - the default-enable migration stamps existing rows off before flipping the default
+  ---
+  duration_ms: 483.8727
+  type: 'test'
+  ...
+# Subtest: feed text keeps normal content and trims the edges
+ok 127 - feed text keeps normal content and trims the edges
+  ---
+  duration_ms: 372.6372
+  type: 'test'
+  ...
+# Subtest: feed text strips control characters and runaway blank lines
+ok 128 - feed text strips control characters and runaway blank lines
+  ---
+  duration_ms: 5.3855
+  type: 'test'
+  ...
+# Subtest: feed text refuses anything longer than the column limit
+ok 129 - feed text refuses anything longer than the column limit
+  ---
+  duration_ms: 47.4814
+  type: 'test'
+  ...
+# Subtest: feed text handles missing values without throwing
+ok 130 - feed text handles missing values without throwing
+  ---
+  duration_ms: 8.6178
+  type: 'test'
+  ...
+# Subtest: only same-origin paths and http(s) media urls are accepted
+ok 131 - only same-origin paths and http(s) media urls are accepted
+  ---
+  duration_ms: 425.6816
+  type: 'test'
+  ...
+# Subtest: media normalisation drops unsafe urls, caps the count and sanitises names
+ok 132 - media normalisation drops unsafe urls, caps the count and sanitises names
+  ---
+  duration_ms: 862.6698
+  type: 'test'
+  ...
+# Subtest: the visibility filter shows public posts to everyone and everything to admins
+ok 133 - the visibility filter shows public posts to everyone and everything to admins
+  ---
+  duration_ms: 20.8148
+  type: 'test'
+  ...
+# Subtest: reports unavailable when no provider is configured
+ok 134 - reports unavailable when no provider is configured
+  ---
+  duration_ms: 484.6505
+  type: 'test'
+  ...
+# Subtest: scanFileBuffer never throws and degrades to unavailable without a provider
+ok 135 - scanFileBuffer never throws and degrades to unavailable without a provider
+  ---
+  duration_ms: 13.0855
+  type: 'test'
+  ...
+# Subtest: provider config requires both url and key with a valid http(s) scheme
+ok 136 - provider config requires both url and key with a valid http(s) scheme
+  ---
+  duration_ms: 426.9585
+  type: 'test'
+  ...
+# Subtest: only admins can review ID checks
+ok 137 - only admins can review ID checks
+  ---
+  duration_ms: 446.4673
+  type: 'test'
+  ...
+# Subtest: only pending ID checks can be reviewed
+ok 138 - only pending ID checks can be reviewed
+  ---
+  duration_ms: 14.2246
+  type: 'test'
+  ...
+# Subtest: anonymous users cannot call ID review
+ok 139 - anonymous users cannot call ID review
+  ---
+  duration_ms: 6.5017
+  type: 'test'
+  ...
+# Subtest: the canonical schema mirrors the identity verification tiers migration
+ok 140 - the canonical schema mirrors the identity verification tiers migration
+  ---
+  duration_ms: 302.5366
+  type: 'test'
+  ...
+# Subtest: identity verification carries the structured manual-submission fields
+ok 141 - identity verification carries the structured manual-submission fields
+  ---
+  duration_ms: 228.5563
+  type: 'test'
+  ...
+# Subtest: instant verification is a security-definer RPC that only approves the caller
+ok 142 - instant verification is a security-definer RPC that only approves the caller
+  ---
+  duration_ms: 17.2756
+  type: 'test'
+  ...
+# Subtest: instant verification cannot be called by anonymous users
+ok 143 - instant verification cannot be called by anonymous users
+  ---
+  duration_ms: 12.8695
+  type: 'test'
+  ...
+# Subtest: both identity tiers resolve to the same approved badge level
+ok 144 - both identity tiers resolve to the same approved badge level
+  ---
+  duration_ms: 17.5959
+  type: 'test'
+  ...
+# Subtest: looked-up numbers offer message, call and save actions only
+ok 145 - looked-up numbers offer message, call and save actions only
+  ---
+  duration_ms: 279.6833
+  type: 'test'
+  ...
+# Subtest: there is no backend function to delete a contact
+ok 146 - there is no backend function to delete a contact
+  ---
+  duration_ms: 6.2157
+  type: 'test'
+  ...
+# Subtest: the unsaved-contact warning offers Save First and Ignore
+ok 147 - the unsaved-contact warning offers Save First and Ignore
+  ---
+  duration_ms: 10.9772
+  type: 'test'
+  ...
+# Subtest: both lookup surfaces guard call and chat behind the warning prompt
+ok 148 - both lookup surfaces guard call and chat behind the warning prompt
+  ---
+  duration_ms: 14.7575
+  type: 'test'
+  ...
+# Subtest: Save First saves the contact before running the chosen action
+ok 149 - Save First saves the contact before running the chosen action
+  ---
+  duration_ms: 67.3101
+  type: 'test'
+  ...
+# Subtest: premium members and the admin audit log are RLS-protected tables
+ok 150 - premium members and the admin audit log are RLS-protected tables
+  ---
+  duration_ms: 1776.8027
+  type: 'test'
+  ...
+# Subtest: only admins can grant or revoke Premium Member status
+ok 151 - only admins can grant or revoke Premium Member status
+  ---
+  duration_ms: 51.2635
+  type: 'test'
+  ...
+# Subtest: email confirmation never grants a verification badge
+ok 152 - email confirmation never grants a verification badge
+  ---
+  duration_ms: 637.6923
+  type: 'test'
+  ...
+# Subtest: badge assignments are traceable to an admin action in the audit log
+ok 153 - badge assignments are traceable to an admin action in the audit log
+  ---
+  duration_ms: 18.602
+  type: 'test'
+  ...
+# Subtest: directories resolve badges without an automatic fallback level
+ok 154 - directories resolve badges without an automatic fallback level
+  ---
+  duration_ms: 23.0275
+  type: 'test'
+  ...
+# Subtest: relative time uses readable long form text
+ok 155 - relative time uses readable long form text
+  ---
+  duration_ms: 236.4829
+  type: 'test'
+  ...
+# Subtest: relative time pluralises only when it should
+ok 156 - relative time pluralises only when it should
+  ---
+  duration_ms: 11.0624
+  type: 'test'
+  ...
+# Subtest: relative time never runs backwards for clock skew or future timestamps
+ok 157 - relative time never runs backwards for clock skew or future timestamps
+  ---
+  duration_ms: 80.0809
+  type: 'test'
+  ...
+# Subtest: relative time updates as the shared clock advances
+ok 158 - relative time updates as the shared clock advances
+  ---
+  duration_ms: 3.7116
+  type: 'test'
+  ...
+# Subtest: invalid timestamps render nothing instead of "NaN ago"
+ok 159 - invalid timestamps render nothing instead of "NaN ago"
+  ---
+  duration_ms: 23.2002
+  type: 'test'
+  ...
+# Subtest: the exact timestamp includes both a date and a time
+ok 160 - the exact timestamp includes both a date and a time
+  ---
+  duration_ms: 2416.2731
+  type: 'test'
+  ...
+# Subtest: chat timestamps use the compact form the contact list has room for
+ok 161 - chat timestamps use the compact form the contact list has room for
+  ---
+  duration_ms: 20.4627
+  type: 'test'
+  ...
+# Subtest: chat timestamps fall back to Yesterday, a weekday, then a date
+ok 162 - chat timestamps fall back to Yesterday, a weekday, then a date
+  ---
+  duration_ms: 150.2848
+  type: 'test'
+  ...
+# Subtest: chat timestamps render nothing for an unusable date
+ok 163 - chat timestamps render nothing for an unusable date
+  ---
+  duration_ms: 17.8115
+  type: 'test'
+  ...
+# Subtest: signup creates an unconfirmed user and sends a Resend OTP from nexus-chat-world.com
+ok 164 - signup creates an unconfirmed user and sends a Resend OTP from nexus-chat-world.com
+  ---
+  duration_ms: 10011.8363
+  type: 'test'
+  ...
+# Subtest: signup refuses to re-register a confirmed account and returns a sign-in code
+ok 165 - signup refuses to re-register a confirmed account and returns a sign-in code
+  ---
+  duration_ms: 1023.163
+  type: 'test'
+  ...
+# Subtest: signup reuses an unconfirmed account and emails a fresh OTP
+ok 166 - signup reuses an unconfirmed account and emails a fresh OTP
+  ---
+  duration_ms: 865.2233
+  type: 'test'
+  ...
+# Subtest: resend issues a fresh Resend OTP without using a verification link
+ok 167 - resend issues a fresh Resend OTP without using a verification link
+  ---
+  duration_ms: 1309.828
+  type: 'test'
+  ...
+# Subtest: password recovery sends a recovery OTP through Resend
+ok 168 - password recovery sends a recovery OTP through Resend
+  ---
+  duration_ms: 965.9972
+  type: 'test'
+  ...
+# Subtest: email sign-in sends a Resend OTP from the verified domain
+ok 169 - email sign-in sends a Resend OTP from the verified domain
+  ---
+  duration_ms: 614.3924
+  type: 'test'
+  ...
+# Subtest: verify action rejects link-based completion
+ok 170 - verify action rejects link-based completion
+  ---
+  duration_ms: 70.2386
+  type: 'test'
+  ...
+# Subtest: rejects requests from a different origin before calling providers
+ok 171 - rejects requests from a different origin before calling providers
+  ---
+  duration_ms: 333.5527
+  type: 'test'
+  ...
+# Subtest: denies code sends when the persistent Supabase rate limit is exhausted
+ok 172 - denies code sends when the persistent Supabase rate limit is exhausted
+  ---
+  duration_ms: 359.888
+  type: 'test'
+  ...
+# Subtest: the canonical schema mirrors the social feed migration
+ok 173 - the canonical schema mirrors the social feed migration
+  ---
+  duration_ms: 93.8053
+  type: 'test'
+  ...
+# Subtest: the feed has posts, comments and reaction tables
+ok 174 - the feed has posts, comments and reaction tables
+  ---
+  duration_ms: 12.6269
+  type: 'test'
+  ...
+# Subtest: comments support threaded nesting and posts support media + admin flag
+ok 175 - comments support threaded nesting and posts support media + admin flag
+  ---
+  duration_ms: 230.2862
+  type: 'test'
+  ...
+# Subtest: every feed table has row level security enabled
+ok 176 - every feed table has row level security enabled
+  ---
+  duration_ms: 31.2774
+  type: 'test'
+  ...
+# Subtest: authors own their posts and admins can moderate the whole feed
+ok 177 - authors own their posts and admins can moderate the whole feed
+  ---
+  duration_ms: 35.7154
+  type: 'test'
+  ...
+# Subtest: each member owns only their own reaction rows
+ok 178 - each member owns only their own reaction rows
+  ---
+  duration_ms: 318.6271
+  type: 'test'
+  ...
+# Subtest: feed tables are published for realtime updates
+ok 179 - feed tables are published for realtime updates
+  ---
+  duration_ms: 51.4561
+  type: 'test'
+  ...
+# Subtest: schema dry-run validates checked-in versioned migrations without connecting
+ok 180 - schema dry-run validates checked-in versioned migrations without connecting
+  ---
+  duration_ms: 19853.7196
+  type: 'test'
+  ...
+# Subtest: self-service admin claim is removed from the canonical schema and existing databases
+ok 181 - self-service admin claim is removed from the canonical schema and existing databases
+  ---
+  duration_ms: 1353.4484
+  type: 'test'
+  ...
+# Subtest: Appwrite identity links remain inaccessible to browser roles
+ok 182 - Appwrite identity links remain inaccessible to browser roles
+  ---
+  duration_ms: 752.3897
+  type: 'test'
+  ...
+# Subtest: text messages require a versioned encrypted payload in every database write
+ok 183 - text messages require a versioned encrypted payload in every database write
+  ---
+  duration_ms: 2601.3773
+  type: 'test'
+  ...
+# Subtest: chat file storage is restricted to the uploader or chat members
+ok 184 - chat file storage is restricted to the uploader or chat members
+  ---
+  duration_ms: 1176.324
+  type: 'test'
+  ...
+# Subtest: call push destinations are private to the owning account
+ok 185 - call push destinations are private to the owning account
+  ---
+  duration_ms: 966.5515
+  type: 'test'
+  ...
+# Subtest: schema dry-run rejects non-PostgreSQL URLs
+ok 186 - schema dry-run rejects non-PostgreSQL URLs
+  ---
+  duration_ms: 51.1103
+  type: 'test'
+  ...
+# Subtest: schema dry-run requires a database URL
+ok 187 - schema dry-run requires a database URL
+  ---
+  duration_ms: 300.3957
+  type: 'test'
+  ...
+# Subtest: build environment validation does not execute schema migrations
+ok 188 - build environment validation does not execute schema migrations
+  ---
+  duration_ms: 52.9358
+  type: 'test'
+  ...
+# Subtest: API preflight checks anon and service-role credentials without exposing them
+ok 189 - API preflight checks anon and service-role credentials without exposing them
+  ---
+  duration_ms: 378.3044
+  type: 'test'
+  ...
+# Subtest: API preflight rejects a bad service-role key without echoing it
+ok 190 - API preflight rejects a bad service-role key without echoing it
+  ---
+  duration_ms: 377.121
+  type: 'test'
+  ...
+# Subtest: a full sync tick across many busy threads completes within 500 ms
+not ok 191 - a full sync tick across many busy threads completes within 500 ms
+  ---
+  duration_ms: 15600.553
+  type: 'test'
+  location: 'C:\\Users\\User$\\Downloads\\welcome-hub\\tests\\syncPerformance.test.mjs:85:1'
+  failureType: 'testCodeFailure'
+  error: 'sync tick took 4171.8 ms, budget is 500 ms'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/User$/Downloads/welcome-hub/tests/syncPerformance.test.mjs:106:10)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1382:25)
+    Test.start (node:internal/test_runner/test:1242:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+  ...
+# Subtest: a sync tick writes local storage once and notifies once, however many messages arrive
+ok 192 - a sync tick writes local storage once and notifies once, however many messages arrive
+  ---
+  duration_ms: 996.5591
+  type: 'test'
+  ...
+# Subtest: a message burst for one chat costs a single write through appendMessages
+ok 193 - a message burst for one chat costs a single write through appendMessages
+  ---
+  duration_ms: 44.4768
+  type: 'test'
+  ...
+# Subtest: sync stays inside budget when the same tick repeats against grown history
+not ok 194 - sync stays inside budget when the same tick repeats against grown history
+  ---
+  duration_ms: 34900.9321
+  type: 'test'
+  location: 'C:\\Users\\User$\\Downloads\\welcome-hub\\tests\\syncPerformance.test.mjs:148:1'
+  failureType: 'testCodeFailure'
+  error: 'worst sync tick took 6165.9 ms, budget is 500 ms'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/User$/Downloads/welcome-hub/tests/syncPerformance.test.mjs:162:10)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1382:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+    Test.postRun (node:internal/test_runner/test:1522:19)
+    Test.run (node:internal/test_runner/test:1447:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: security alert emails use only the verified session account and stable idempotency
+ok 195 - security alert emails use only the verified session account and stable idempotency
+  ---
+  duration_ms: 4593.5473
+  type: 'test'
+  ...
+# Subtest: security alerts require AAL2 for administrators and are rate limited
+ok 196 - security alerts require AAL2 for administrators and are rate limited
+  ---
+  duration_ms: 477.0033
+  type: 'test'
+  ...
+# Subtest: security alert SMS uses only the verified, opted-in phone on the authenticated account
+ok 197 - security alert SMS uses only the verified, opted-in phone on the authenticated account
+  ---
+  duration_ms: 665.0712
+  type: 'test'
+  ...
+# Subtest: security alert SMS is skipped unless the number is verified and consented
+ok 198 - security alert SMS is skipped unless the number is verified and consented
+  ---
+  duration_ms: 830.4502
+  type: 'test'
+  ...
+# Sign-in notification delivery failed Error: Twilio unavailable
+#     at smsSender (file:///C:/Users/User$/Downloads/welcome-hub/tests/systemEmails.test.mjs:124:31)
+#     at sendSystemNotification (file:///C:/Users/User$/Downloads/welcome-hub/supabase/functions/_shared/system-email-service.js:73:17)
+#     at async systemEmailHandler (file:///C:/Users/User$/Downloads/welcome-hub/api/notifications/system-email.js:62:20)
+#     at async TestContext.<anonymous> (file:///C:/Users/User$/Downloads/welcome-hub/tests/systemEmails.test.mjs:189:3)
+#     at async Test.run (node:internal/test_runner/test:1389:7)
+#     at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+# Subtest: a Twilio failure is returned explicitly after the email attempt
+ok 199 - a Twilio failure is returned explicitly after the email attempt
+  ---
+  duration_ms: 665.2325
+  type: 'test'
+  ...
+# Subtest: identity review emails require AAL2 admin and use the verified reviewed account address
+ok 200 - identity review emails require AAL2 admin and use the verified reviewed account address
+  ---
+  duration_ms: 71.9752
+  type: 'test'
+  ...
+# Subtest: identity review SMS uses the reviewed account phone and omits reviewer notes
+ok 201 - identity review SMS uses the reviewed account phone and omits reviewer notes
+  ---
+  duration_ms: 445.1174
+  type: 'test'
+  ...
+# Subtest: identity review SMS template only accepts completed statuses
+ok 202 - identity review SMS template only accepts completed statuses
+  ---
+  duration_ms: 38.9888
+  type: 'test'
+  ...
+# Subtest: identity review email rejects non-admin, unverified-recipient, and malformed requests
+ok 203 - identity review email rejects non-admin, unverified-recipient, and malformed requests
+  ---
+  duration_ms: 522.5641
+  type: 'test'
+  ...
+# Subtest: identity review email template safely escapes reviewer notes and omits notes from approvals
+ok 204 - identity review email template safely escapes reviewer notes and omits notes from approvals
+  ---
+  duration_ms: 18.0872
+  type: 'test'
+  ...
+# Subtest: Resend delivery uses the configured verified sender and idempotency key
+ok 205 - Resend delivery uses the configured verified sender and idempotency key
+  ---
+  duration_ms: 7448.7274
+  type: 'test'
+  ...
+# Twilio SMS delivery failed 401
+# Subtest: Twilio sender posts an opted-in message through the configured Messaging Service
+ok 206 - Twilio sender posts an opted-in message through the configured Messaging Service
+  ---
+  duration_ms: 4238.4601
+  type: 'test'
+  ...
+# Subtest: Twilio sender rejects missing configuration, invalid destinations, and provider failures
+ok 207 - Twilio sender rejects missing configuration, invalid destinations, and provider failures
+  ---
+  duration_ms: 484.9784
+  type: 'test'
+  ...
+# Subtest: SMS delivery requires a verified E.164 phone and explicit transactional consent
+ok 208 - SMS delivery requires a verified E.164 phone and explicit transactional consent
+  ---
+  duration_ms: 230.0574
+  type: 'test'
+  ...
+# Subtest: system SMS templates stay within one GSM-7 segment
+ok 209 - system SMS templates stay within one GSM-7 segment
+  ---
+  duration_ms: 38.8916
+  type: 'test'
+  ...
+# Subtest: toList normalises single and array url fields
+ok 210 - toList normalises single and array url fields
+  ---
+  duration_ms: 401.7205
+  type: 'test'
+  ...
+# Subtest: Metered iceServers map onto the four env values
+ok 211 - Metered iceServers map onto the four env values
+  ---
+  duration_ms: 41.4664
+  type: 'test'
+  ...
+# Subtest: grouped urls inside one entry are flattened in order
+ok 212 - grouped urls inside one entry are flattened in order
+  ---
+  duration_ms: 17.0433
+  type: 'test'
+  ...
+# Subtest: a response without a usable TURN credential is rejected
+ok 213 - a response without a usable TURN credential is rejected
+  ---
+  duration_ms: 292.1176
+  type: 'test'
+  ...
+# Subtest: welcome email escapes names, has a GIF, accessible fallback and fixed account link
+ok 214 - welcome email escapes names, has a GIF, accessible fallback and fixed account link
+  ---
+  duration_ms: 181.1427
+  type: 'test'
+  ...
+# Subtest: welcome template rejects insecure URLs and handles absent names
+ok 215 - welcome template rejects insecure URLs and handles absent names
+  ---
+  duration_ms: 39.8469
+  type: 'test'
+  ...
+1..215
+# tests 215
+# suites 0
+# pass 213
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 447498.2974
