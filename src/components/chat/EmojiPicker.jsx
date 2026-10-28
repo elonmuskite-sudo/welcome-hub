@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import data from '@emoji-mart/data'
 import EmojiMartPicker from '@emoji-mart/react'
 
@@ -16,6 +16,7 @@ function readTheme() {
 // font glyphs.
 export default function EmojiPicker({ onSelect, onClose }) {
   const [theme, setTheme] = useState(readTheme)
+  const pickerContainerRef = useRef(null)
 
   useEffect(() => {
     const sync = () => setTheme(readTheme())
@@ -29,8 +30,44 @@ export default function EmojiPicker({ onSelect, onClose }) {
     }
   }, [onClose])
 
+  useEffect(() => {
+    const container = pickerContainerRef.current
+    if (!container) return undefined
+
+    let shadowObserver = null
+    const setInputMode = (root) => {
+      root.querySelectorAll('input, textarea, [contenteditable="true"]').forEach((input) => {
+        if (input.getAttribute('inputmode') !== 'none') input.setAttribute('inputmode', 'none')
+      })
+    }
+    const pickerObserver = new MutationObserver(() => {
+      const picker = container.querySelector('em-emoji-picker')
+      const shadowRoot = picker?.shadowRoot
+      if (!shadowRoot) return
+      setInputMode(shadowRoot)
+      shadowObserver?.disconnect()
+      shadowObserver = new MutationObserver(() => setInputMode(shadowRoot))
+      shadowObserver.observe(shadowRoot, { childList: true, subtree: true })
+      pickerObserver.disconnect()
+    })
+
+    pickerObserver.observe(container, { childList: true, subtree: true })
+    const picker = container.querySelector('em-emoji-picker')
+    if (picker?.shadowRoot) {
+      setInputMode(picker.shadowRoot)
+      shadowObserver = new MutationObserver(() => setInputMode(picker.shadowRoot))
+      shadowObserver.observe(picker.shadowRoot, { childList: true, subtree: true })
+      pickerObserver.disconnect()
+    }
+
+    return () => {
+      pickerObserver.disconnect()
+      shadowObserver?.disconnect()
+    }
+  }, [])
+
   return (
-    <div className="chat-emoji-picker chat-enter" role="dialog" aria-label="Emoji picker">
+    <div ref={pickerContainerRef} className="chat-emoji-picker chat-enter" role="dialog" aria-label="Emoji picker">
       <EmojiMartPicker
         data={data}
         theme={theme}

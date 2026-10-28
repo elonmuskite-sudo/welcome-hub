@@ -12,7 +12,7 @@ let poolPromise
 const POST_COMMIT = Symbol('postCommit')
 const FIRST_VALID_UUID = '00000000-0000-1000-8000-000000000000'
 // Every account gets the same fixed quota; storage is not a purchasable upgrade.
-const STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024
+const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024
 
 export class GatewayError extends Error {
   constructor(message, status = 400) {

@@ -16,6 +16,8 @@ const REQUIRED_TABLES = [
   'public.chat_members',
   'public.messages',
   'public.storage_files',
+  'public.user_storage',
+  'public.attachments',
   'public.call_push_subscriptions',
   'public.auth_email_code_limits',
 ]
@@ -23,6 +25,8 @@ const REQUIRED_FUNCTIONS = [
   'public.consume_auth_email_code_limit(text,integer,integer)',
   'public.lookup_member_by_nexus_id(text)',
   'public.is_chat_member(uuid,uuid)',
+  'public.reserve_user_storage(uuid,bigint)',
+  'public.commit_user_storage(uuid,bigint)',
 ]
 const REQUIRED_AUTH_TRIGGERS = ['on_auth_user_created', 'on_auth_user_updated']
 const MIGRATION_TABLE = 'public.nexus_schema_migrations'

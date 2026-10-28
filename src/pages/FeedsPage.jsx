@@ -45,20 +45,21 @@ import {
   isFeedAvailable,
 } from '../lib/feeds'
 import { FEED_COMMENT_MAX_LENGTH, FEED_POST_MAX_LENGTH } from '../lib/feedContent'
+import { resolveFeedMediaUrl } from '../lib/storageManager'
 
 const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.avi'
 const MAX_MEDIA = 10
 
-function MediaGrid({ media }) {
+function MediaGrid({ media, urlMap }) {
   if (!media?.length) return null
   return (
     <div className={`grid gap-1 px-4 pb-3 ${media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
       {media.map((item, index) => (
         <div key={`${item.url}-${index}`} className="overflow-hidden rounded-xl border border-border bg-black/5">
           {item.type === 'video' ? (
-            <video src={item.url} controls playsInline preload="metadata" className="max-h-[420px] w-full bg-black object-contain" />
+            <video src={urlMap?.[item.url] || item.url} controls playsInline preload="metadata" className="max-h-[420px] w-full bg-black object-contain" />
           ) : (
-            <img src={item.url} alt={item.name || `Post media ${index + 1}`} loading="lazy" className="max-h-[420px] w-full object-cover" />
+            <img src={urlMap?.[item.url] || item.url} alt={item.name || `Post media ${index + 1}`} loading="lazy" className="max-h-[420px] w-full object-cover" />
           )}
         </div>
       ))}
@@ -100,6 +101,7 @@ export default function FeedsPage() {
   const [composerId, setComposerId] = useState(null)
   const [composerText, setComposerText] = useState('')
   const [composerMedia, setComposerMedia] = useState([])
+  const [mediaUrlMap, setMediaUrlMap] = useState({})
   const [composerBusy, setComposerBusy] = useState(false)
   const [composerProgress, setComposerProgress] = useState(null)
   const fileInputRef = useRef(null)
@@ -168,6 +170,34 @@ export default function FeedsPage() {
     setSharedStatus({})
     setCopiedStatus(false)
   }, [activeShareFeedId])
+
+  // Durable media references (r2://, storage://) are resolved to real URLs here
+  // while the stored reference on the post stays untouched.
+  useEffect(() => {
+    let cancelled = false
+    const urls = new Set()
+    for (const feed of feeds) {
+      for (const item of Array.isArray(feed.media) ? feed.media : []) {
+        if (item?.url) urls.add(item.url)
+      }
+    }
+    for (const item of composerMedia) {
+      if (item?.url) urls.add(item.url)
+    }
+    if (!urls.size) {
+      setMediaUrlMap({})
+      return undefined
+    }
+    const run = async () => {
+      const map = {}
+      await Promise.all([...urls].map(async (url) => {
+        try { map[url] = await resolveFeedMediaUrl(url) } catch { map[url] = url }
+      }))
+      if (!cancelled) setMediaUrlMap(map)
+    }
+    run()
+    return () => { cancelled = true }
+  }, [feeds, composerMedia])
 
   // ---- Composer -----------------------------------------------------------
   const resetComposer = () => {
@@ -591,7 +621,7 @@ export default function FeedsPage() {
                 </div>
 
                 {feed.content && <p className="whitespace-pre-wrap px-4 pb-3 leading-relaxed text-foreground">{feed.content}</p>}
-                <MediaGrid media={feed.media} />
+                <MediaGrid media={feed.media} urlMap={mediaUrlMap} />
 
                 <div className="flex items-center justify-between border-b border-border px-4 py-2">
                   <ReactionSummary reactions={feed.reactions} reactedBy={feed.reactedBy} userId={user?.id} />
@@ -663,7 +693,7 @@ export default function FeedsPage() {
                 <div className="grid grid-cols-3 gap-2">
                   {composerMedia.map((item, index) => (
                     <div key={`${item.url}-${index}`} className="relative overflow-hidden rounded-lg border border-border">
-                      {item.type === 'video' ? <video src={item.url} className="h-24 w-full object-cover" muted /> : <img src={item.url} alt="" className="h-24 w-full object-cover" />}
+                      {item.type === 'video' ? <video src={mediaUrlMap[item.url] || item.url} className="h-24 w-full object-cover" muted /> : <img src={mediaUrlMap[item.url] || item.url} alt="" className="h-24 w-full object-cover" />}
                       <button
                         onClick={() => setComposerMedia((prev) => prev.filter((_, i) => i !== index))}
                         className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white"
