@@ -25,6 +25,7 @@ import { encryptMessage } from '../lib/crypto/e2ee'
 import { useNow } from '../lib/useNow'
 import { blockUser } from '../lib/moderation'
 import { createChat, getChats, sendChatMessage, getContacts, searchUserByNexusId } from '../lib/persistence'
+import { participantNamesFor } from '../lib/chatPreview'
 import UniversalEmojiPicker from '../components/chat/UniversalEmojiPicker'
 import {
   listFeed,
@@ -367,12 +368,15 @@ export default function FeedsPage() {
         return ids.length === participants.length && ids.every((id, index) => id === participants[index])
       })
       if (!chat) {
+        const recipientName = recipient.fullName || contact.name || recipient.nexusIdDisplay || recipient.nexusId
+        const myName = user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.nexusIdDisplay || user.nexusId
         chat = await createChat({
-          title: recipient.fullName || contact.name,
+          title: recipientName,
           type: 'private',
           avatar_url: recipient.avatarUrl || null,
           owner_id: user.id,
           participantIds: participants,
+          participantNames: participantNamesFor(user.id, myName, recipient.id, recipientName),
         })
       }
       const content = `📢 Shared post by ${activeShareFeed.userName}:\n\n"${activeShareFeed.content}"`

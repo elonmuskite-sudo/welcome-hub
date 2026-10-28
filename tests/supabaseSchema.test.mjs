@@ -66,7 +66,7 @@ test('text messages require a versioned encrypted payload in every database writ
   )
   for (const sql of [schema, migration]) {
     assert.match(sql, /messages_text_requires_encryption/i)
-    assert.match(sql, /type in \('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document'\) or \(/i)
+    assert.match(sql, /type in \('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document'(?:, 'call')?\) or \(/i)
     assert.match(sql, /encrypted is true/i)
     assert.match(sql, /ECDH-P256\+AES-256-GCM/i)
     assert.match(sql, /\(content::jsonb - 'alg' - 'iv' - 'data'\) = '\{\}'::jsonb/i)

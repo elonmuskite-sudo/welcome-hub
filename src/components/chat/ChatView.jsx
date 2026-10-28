@@ -4,6 +4,7 @@ import { ArrowLeftIcon, PhoneIcon, LockClosedIcon } from '@heroicons/react/24/so
 import Avatar from './Avatar'
 import MessageInput from './MessageInput'
 import MessageBubble from './MessageBubble'
+import CallHistoryEntry from './CallHistoryEntry'
 import { useSetting } from '../../hooks/useSetting'
 import { useSyncStatus } from '../../hooks/useSyncStatus'
 import { getWallpaperById } from '../../lib/wallpapers'
@@ -109,7 +110,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
     if (!readReceiptsEnabled || !user?.id) return
     const pending = { delivered: [], read: [] }
     for (const message of messages) {
-      if (message.type === 'receipt' || message.type === 'reaction') continue
+      if (message.type === 'receipt' || message.type === 'reaction' || message.type === 'call') continue
       const sender = String(message.sender_id || '')
       if (!sender || sender === 'me' || sender === String(user.id)) continue
       const alreadySent = receiptStateRef.current.get(message.id)
@@ -356,7 +357,9 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
                 </div>
               </div>
             ) : (
-              visibleMessages.map((message) => (
+              visibleMessages.map((message) => message.type === 'call' ? (
+                <CallHistoryEntry key={message.id} message={message} userId={user?.id} />
+              ) : (
                 <MessageBubble
                   key={message.id}
                   message={message}

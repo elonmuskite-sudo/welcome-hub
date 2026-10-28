@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import { useAuth } from './AuthContext'
 import { ICE_SERVERS } from './callIce'
 import { notifyCallPush } from './callPush'
+import { sendChatMessage, newId } from './persistence'
 import {
   CALL_EVENTS,
   buildRingPayload,
@@ -12,6 +13,7 @@ import {
   isBroadcastAcknowledged,
   matchesCall,
 } from './callSignaling'
+import { CALL_HISTORY_OUTCOMES, callHistoryOutcome, encodeCallHistory } from './chatProtocol'
 
 const RING_TIMEOUT_MS = 45000
 const CONNECTION_TIMEOUT_MS = 30000
@@ -123,6 +125,7 @@ export function CallProvider({ children }) {
   const disconnectTimerRef = useRef(null)
   const dismissTimerRef = useRef(null)
   const pendingIncomingCallsRef = useRef(new Set())
+  const recordedCallIdsRef = useRef(new Set())
 
   userIdRef.current = userId
 
@@ -178,10 +181,41 @@ export function CallProvider({ children }) {
   // pass false so two clients cannot bounce a hangup back and forth.
   const endCallInternal = useCallback((patch = {}, notify = true) => {
     const current = callRef.current
-    if (!current) return
-    if (notify) sendInbox(current.peerId, CALL_EVENTS.HANGUP, { callId: current.id })
+    if (!current || current.state === 'ended') return
+    const error = patch.error ?? current.error
+    const outcome = current.startedAt
+      ? 'completed'
+      : CALL_HISTORY_OUTCOMES.includes(patch.outcome)
+        ? patch.outcome
+        : callHistoryOutcome(current, error)
+    if (notify) sendInbox(current.peerId, CALL_EVENTS.HANGUP, { callId: current.id, outcome })
+    if (current.direction === 'outgoing' && current.chatId && userIdRef.current
+      && !recordedCallIdsRef.current.has(current.id)) {
+      recordedCallIdsRef.current.add(current.id)
+      const endedAt = new Date().toISOString()
+      const duration = current.startedAt
+        ? Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000))
+        : 0
+      void sendChatMessage(current.chatId, {
+        id: newId(),
+        sender_id: userIdRef.current,
+        type: 'call',
+        content: encodeCallHistory({
+          callId: current.id,
+          outcome,
+          duration,
+          startedAt: current.startedAt ? new Date(current.startedAt).toISOString() : null,
+          endedAt,
+        }),
+        duration,
+        encrypted: false,
+        created_at: endedAt,
+      }).catch((historyError) => {
+        console.error('Could not save call history to the conversation.', historyError)
+      })
+    }
     cleanupMedia()
-    setCallState({ ...current, state: 'ended', ...patch })
+    setCallState({ ...current, state: 'ended', ...patch, error })
     if (typeof window !== 'undefined') {
       dismissTimerRef.current = window.setTimeout(() => {
         if (callRef.current?.state === 'ended') setCallState(null)
@@ -527,7 +561,10 @@ export function CallProvider({ children }) {
   const handleHangup = useCallback((payload) => {
     const current = callRef.current
     if (!current || !matchesCall(payload, current)) return
-    endCallInternal({ error: '' }, false)
+    endCallInternal({
+      error: '',
+      outcome: typeof payload.outcome === 'string' ? payload.outcome : undefined,
+    }, false)
   }, [endCallInternal])
 
   // Always-on inbox so a call can ring on any page while signed in.

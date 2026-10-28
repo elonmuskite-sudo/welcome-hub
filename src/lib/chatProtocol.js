@@ -1,5 +1,6 @@
 const PREFIX = 'nexus:v1:'
 export const REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🙏']
+export const CALL_HISTORY_OUTCOMES = ['completed', 'missed', 'declined', 'busy', 'cancelled', 'failed']
 
 export function encodeReply(text, reply) {
   return reply ? PREFIX + JSON.stringify({ kind: 'reply', text, reply: { id: reply.id, preview: reply.content.slice(0, 160) } }) : text
@@ -30,6 +31,61 @@ export function receiptContent(messageIds, status) {
   const ids = [...new Set((Array.isArray(messageIds) ? messageIds : [messageIds]).map(String).filter(Boolean))]
   if (ids.length === 0) throw new Error('A receipt needs at least one message id.')
   return JSON.stringify({ messageIds: ids, status })
+}
+
+export function encodeCallHistory(event) {
+  if (!event || typeof event.callId !== 'string' || !event.callId.trim()
+    || !CALL_HISTORY_OUTCOMES.includes(event.outcome)
+    || !Number.isSafeInteger(event.duration) || event.duration < 0) {
+    throw new Error('Call history details are invalid.')
+  }
+  return PREFIX + JSON.stringify({
+    kind: 'call',
+    callId: event.callId,
+    outcome: event.outcome,
+    duration: event.duration,
+    startedAt: typeof event.startedAt === 'string' ? event.startedAt : null,
+    endedAt: typeof event.endedAt === 'string' ? event.endedAt : null,
+  })
+}
+
+export function decodeCallHistory(content) {
+  if (typeof content !== 'string' || !content.startsWith(PREFIX)) return null
+  try {
+    const event = JSON.parse(content.slice(PREFIX.length))
+    if (event.kind !== 'call'
+      || typeof event.callId !== 'string' || !event.callId
+      || !CALL_HISTORY_OUTCOMES.includes(event.outcome)
+      || !Number.isSafeInteger(event.duration) || event.duration < 0) return null
+    return {
+      callId: event.callId,
+      outcome: event.outcome,
+      duration: event.duration,
+      startedAt: typeof event.startedAt === 'string' ? event.startedAt : null,
+      endedAt: typeof event.endedAt === 'string' ? event.endedAt : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function callHistoryLabel(event, isOutgoing) {
+  if (!event) return 'Voice call'
+  if (event.outcome === 'completed') return isOutgoing ? 'Outgoing voice call' : 'Incoming voice call'
+  if (event.outcome === 'missed') return isOutgoing ? 'Outgoing call · No answer' : 'Missed call'
+  if (event.outcome === 'declined') return isOutgoing ? 'Outgoing call · Declined' : 'Declined incoming call'
+  if (event.outcome === 'busy') return isOutgoing ? 'Outgoing call · Contact busy' : 'Call unavailable'
+  if (event.outcome === 'cancelled') return isOutgoing ? 'Cancelled outgoing call' : 'Cancelled call'
+  return isOutgoing ? 'Outgoing call failed' : 'Incoming call failed'
+}
+
+export function callHistoryOutcome(call, error = '') {
+  if (call?.startedAt) return 'completed'
+  const reason = String(error || '').toLowerCase()
+  if (reason.includes('missed') || reason.includes('no answer')) return 'missed'
+  if (reason.includes('declined')) return 'declined'
+  if (reason.includes('busy') || reason.includes('already on a call')) return 'busy'
+  return reason ? 'failed' : 'cancelled'
 }
 
 export function resolveMessages(messages) {

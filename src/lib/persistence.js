@@ -36,10 +36,10 @@ const notifyContactsUpdate = () => emit('nexus-contacts:updated')
 const notifyChatUpdate = (detail = {}) => emit('nexus-chat:updated', { ...detail, cacheUpdated: true })
 const notifyChange = notifyChatUpdate
 
-// Reactions and receipts are protocol control rows: they are stored as messages
-// but must never become a conversation preview.
+// Reactions, receipts, and call-history rows are protocol events. They are
+// stored as messages but must never become a conversation preview.
 function isPreviewRow(row) {
-  return Boolean(row) && row.type !== 'reaction' && row.type !== 'receipt'
+  return Boolean(row) && row.type !== 'reaction' && row.type !== 'receipt' && row.type !== 'call'
 }
 
 // Folds a chat's newest message into the summary fields the contact list reads.
@@ -150,7 +150,7 @@ export function startRealtimeListeners() {
       const known = readLocalChats().some((c) => String(c.id) === String(row.chat_id))
       if (!known) { await readChats(currentUserId); notifyChatUpdate() }
       await appendMessage(String(row.chat_id), mapMessage(row))
-      if (row.type !== 'reaction' && row.type !== 'receipt' && String(row.sender_id || '') !== String(currentUserId || '')) {
+      if (row.type !== 'reaction' && row.type !== 'receipt' && row.type !== 'call' && String(row.sender_id || '') !== String(currentUserId || '')) {
         emit('nexus:incoming-notification', {
           title: 'New message',
           preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',
@@ -345,7 +345,8 @@ function applyIncomingMessagesToChat(chat, messages) {
       byId.set(String(nextMessage.id), nextMessage)
     }
 
-    if (nextMessage.type !== 'reaction' && nextMessage.type !== 'receipt') {
+    // Protocol events never become the conversation's last message preview.
+    if (nextMessage.type !== 'reaction' && nextMessage.type !== 'receipt' && nextMessage.type !== 'call') {
       const nextTime = Date.parse(nextMessage.created_at)
       const currentTime = lastMessageTime ? Date.parse(lastMessageTime) : NaN
       if (!Number.isFinite(currentTime) || !Number.isFinite(nextTime) || nextTime >= currentTime) {
@@ -405,7 +406,7 @@ export function applyChatSyncBatch(remoteChats, messages) {
     const bucket = byChat.get(chatId)
     if (bucket) bucket.push(row)
     else byChat.set(chatId, [row])
-    if (row.type !== 'reaction' && row.type !== 'receipt') {
+    if (row.type !== 'reaction' && row.type !== 'receipt' && row.type !== 'call') {
       notifications.push({
         title: 'New message',
         preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',

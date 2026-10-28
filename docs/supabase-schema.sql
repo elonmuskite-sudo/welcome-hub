@@ -214,7 +214,7 @@ create table public.messages (
   sender_id uuid, content text not null check (char_length(content) between 1 and 65535), type text not null default 'text',
   file_url text, file_name text, duration numeric, encrypted boolean not null default false, created_at timestamptz not null default now(),
   constraint messages_text_requires_encryption check (
-    type in ('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document') or (
+    type in ('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document', 'call') or (
       encrypted is true
       and jsonb_typeof(content::jsonb) = 'object'
       and (content::jsonb - 'alg' - 'iv' - 'data') = '{}'::jsonb

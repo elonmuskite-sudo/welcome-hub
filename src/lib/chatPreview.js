@@ -26,6 +26,13 @@ export function peerIdOf(chat, myId) {
   return ids.length === 1 ? ids[0] : null
 }
 
+export function participantNamesFor(firstId, firstName, secondId, secondName) {
+  const names = {}
+  if (firstId && typeof firstName === 'string' && firstName.trim()) names[String(firstId)] = firstName.trim()
+  if (secondId && typeof secondName === 'string' && secondName.trim()) names[String(secondId)] = secondName.trim()
+  return Object.keys(names).length ? names : null
+}
+
 // Resolves the conversation name from the viewer's perspective: a 1:1 chat is
 // shown as the *other* participant. Falls back to the stored title for groups
 // or chats created before participant names were recorded.
@@ -39,7 +46,7 @@ export function chatDisplayName(chat, viewerId) {
 // Reactions and receipts ride the message stream as protocol control rows: they
 // are real messages, but they must never become a conversation preview.
 export function isPreviewableMessage(message) {
-  return Boolean(message) && message.type !== 'reaction' && message.type !== 'receipt'
+  return Boolean(message) && message.type !== 'reaction' && message.type !== 'receipt' && message.type !== 'call'
 }
 
 // Collapses runs of whitespace so a multi-line message stays on one readable line.
