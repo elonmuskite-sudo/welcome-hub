@@ -70,7 +70,7 @@ revoke execute on function public.commit_user_storage(uuid, bigint) from public,
 grant execute on function public.commit_user_storage(uuid, bigint) to authenticated, service_role;
 revoke execute on function public.create_user_storage() from public, anon, authenticated;
 
-create table public.attachments (id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade, channel_id text, file_key text not null unique, mime_type text not null, file_size bigint not null default 0 check (file_size >= 0), created_at timestamptz not null default now());
+create table public.attachments (id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade, channel_id text, file_name text not null default '', file_key text unique, storage_type text not null default 'external_bucket' check (storage_type in ('inline_base64', 'external_bucket')), file_data text, mime_type text not null, file_size bigint not null default 0 check (file_size >= 0), created_at timestamptz not null default now(), constraint attachments_payload_check check ((storage_type = 'inline_base64' and file_data is not null and file_key is null) or (storage_type = 'external_bucket' and file_key is not null and file_data is null)));
 create index idx_attachments_user on public.attachments(user_id);
 create index idx_attachments_channel on public.attachments(channel_id);
 grant select, insert, delete on public.attachments to authenticated; grant all on public.attachments to service_role;

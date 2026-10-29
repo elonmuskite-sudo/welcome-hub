@@ -1,7 +1,9 @@
 import { useCallback, useState } from 'react'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { createR2FileReference, createInlineFileReference } from '../lib/chatFileUrl'
 
 export const USER_STORAGE_MAX_BYTES = 10737418240
+export const MAX_INLINE_BYTES = 2097152
 
 type UploadInput = {
   file: File
@@ -10,9 +12,29 @@ type UploadInput = {
 }
 
 type UploadResult = {
-  fileKey: string
+  reference: string
   fileSize: number
   url: string
+}
+
+// Inline attachments are stored as raw Base64 (no data: prefix) so the server can
+// validate the payload, then handed back to the client as a data URL for instant
+// rendering. FileReader.readAsDataURL returns the full data URL, so strip it.
+function convertFileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.readAsDataURL(file)
+    reader.onload = () => {
+      const result = String(reader.result || '')
+      const comma = result.indexOf(',')
+      if (comma === -1) {
+        reject(new Error('The file could not be read.'))
+        return
+      }
+      resolve(result.slice(comma + 1))
+    }
+    reader.onerror = () => reject(new Error('The file could not be read.'))
+  })
 }
 
 async function authContext(): Promise<{ token: string; userId: string }> {
@@ -89,6 +111,25 @@ export function useChatUploader() {
       }
 
       const { token } = await authContext()
+
+      if (file.size <= MAX_INLINE_BYTES) {
+        const base64Data = await convertFileToBase64(file)
+        const inlined = await postJson('/api/storage/inline', token, {
+          fileName: file.name,
+          fileType: file.type || 'application/octet-stream',
+          fileSize: file.size,
+          base64Data,
+          channelId: channelId ?? null,
+        })
+        setProgress(100)
+        onProgress?.(100)
+        return {
+          reference: createInlineFileReference(inlined.attachmentId),
+          fileSize: file.size,
+          url: inlined.url,
+        }
+      }
+
       const presign = await postJson('/api/storage/presign', token, {
         fileName: file.name,
         fileType: file.type || 'application/octet-stream',
@@ -106,7 +147,7 @@ export function useChatUploader() {
         mimeType: file.type || 'application/octet-stream',
         channelId: channelId ?? null,
       })
-      return { fileKey: confirmed.fileKey, fileSize: file.size, url: confirmed.url }
+      return { reference: createR2FileReference(confirmed.fileKey), fileSize: file.size, url: confirmed.url }
     } catch (uploadError) {
       const message = uploadError instanceof Error ? uploadError.message : 'The file could not be uploaded.'
       setError(message)

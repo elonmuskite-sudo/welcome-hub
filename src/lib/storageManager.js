@@ -1,10 +1,10 @@
 import { supabase, isSupabaseConfigured } from './supabase'
 import { appwriteData, isAppwriteAuthEnabled } from './appwrite'
 import { UNSUPPORTED_FILE_MESSAGE, classifyFileType, formatBytes, isSupportedFile } from './chatAttachments'
-import { createChatFileReference, storagePathFromChatFileUrl, r2PathFromFileUrl } from './chatFileUrl'
+import { createChatFileReference, storagePathFromChatFileUrl, r2PathFromFileUrl, inlineIdFromFileUrl } from './chatFileUrl'
 
 export { ATTACHMENT_ACCEPT, UNSUPPORTED_FILE_MESSAGE, classifyFileType, formatBytes, isSupportedFile } from './chatAttachments'
-export { createChatFileReference, storagePathFromChatFileUrl, createR2FileReference, r2PathFromFileUrl } from './chatFileUrl'
+export { createChatFileReference, storagePathFromChatFileUrl, createR2FileReference, r2PathFromFileUrl, createInlineFileReference, inlineIdFromFileUrl } from './chatFileUrl'
 
 export const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024 // 10 GB per user
 export const MAX_VIDEO_DURATION_SECONDS = 45
@@ -278,6 +278,22 @@ export async function resolveFeedMediaUrl(fileUrl, chatId = 'feed') {
 }
 
 export async function resolveChatFileUrl(fileUrl, chatId) {
+  const inlineId = inlineIdFromFileUrl(fileUrl)
+  if (inlineId) {
+    if (!supabase) throw new Error('File storage is not configured.')
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) throw new Error('Sign in to open this attachment.')
+    const response = await fetch('/api/storage/url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ attachmentId: inlineId, channelId: chatId ? String(chatId) : null }),
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.url) throw new Error(payload?.error || 'A secure attachment link could not be created.')
+    return payload.url
+  }
+
   const r2Key = r2PathFromFileUrl(fileUrl)
   if (r2Key) {
     if (!supabase) throw new Error('File storage is not configured.')

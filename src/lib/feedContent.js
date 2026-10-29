@@ -33,7 +33,7 @@ export function sanitizeMediaName(value) {
 // http(s) URLs are accepted; anything else (javascript:, data:, file:) is dropped.
 // Durable storage references (r2:// object keys, storage:// Supabase paths) are
 // resolved to real URLs at read time, so they must survive validation here.
-const DURABLE_MEDIA_PREFIXES = ['r2://', 'storage://']
+const DURABLE_MEDIA_PREFIXES = ['r2://', 'storage://', 'inline://']
 
 export function isSafeMediaUrl(value) {
   const url = String(value || '').trim()

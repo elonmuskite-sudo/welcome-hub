@@ -4,7 +4,7 @@ import { Smile, Sticker, Paperclip, Mic, Send, Square, X, LoaderCircle, Reply } 
 import StickerPicker from './StickerPicker'
 import VoiceNoteDialog from './VoiceNoteDialog'
 import ChatButton from './ChatButton'
-import { uploadChatFile, validateUpload, createR2FileReference, ATTACHMENT_ACCEPT } from '../../lib/storageManager'
+import { uploadChatFile, validateUpload, ATTACHMENT_ACCEPT } from '../../lib/storageManager'
 import { useChatUploader } from '../../hooks/useChatUploader'
 import { extractWaveformPeaks } from '../../lib/audioWaveform'
 import { useAuth } from '../../lib/AuthContext'
@@ -109,7 +109,7 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
     try {
       const stored = await uploadToR2({ file, channelId: chatId ?? null, onProgress: reportProgress })
       return {
-        fileUrl: createR2FileReference(stored.fileKey),
+        fileUrl: stored.reference,
         fileName: file.name,
         fileType: meta.fileType,
         durationSeconds: meta.durationSeconds,

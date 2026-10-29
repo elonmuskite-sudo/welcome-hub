@@ -10,6 +10,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 // /api/storage/presign, /api/storage/confirm and /api/storage/url.
 
 const MAX_BYTES = 10737418240
+const MAX_INLINE_BYTES = 2097152
 const PRESIGN_TTL_SECONDS = 900
 const READ_TTL_SECONDS = 3600
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -69,6 +70,9 @@ async function authorize(req, res) {
 async function presignHandler(req, res, { admin, userId }, config) {
   const fileSize = Number(req.body?.fileSize)
   if (!Number.isFinite(fileSize) || fileSize <= 0) return send(res, 400, { error: 'A valid file size is required.' })
+  if (fileSize <= MAX_INLINE_BYTES) {
+    return send(res, 400, { error: 'Files up to 2 MB are stored inline; use /api/storage/inline for this file.' })
+  }
   if (fileSize > MAX_BYTES) {
     return send(res, 413, { error: 'Quota Exceeded: this file is larger than your 10 GB allocation.' })
   }
@@ -157,16 +161,17 @@ async function confirmHandler(req, res, { admin, userId }, config) {
 }
 
 async function urlHandler(req, res, { admin, userId }, config) {
-  const fileKey = String(req.body?.fileKey || '')
-  if (!fileKey) return send(res, 400, { error: 'A file key is required.' })
+  const fileKey = req.body?.fileKey ? String(req.body.fileKey) : ''
+  const attachmentId = req.body?.attachmentId ? String(req.body.attachmentId) : ''
+  if (!fileKey && !attachmentId) {
+    return send(res, 400, { error: 'A file key or attachment id is required.' })
+  }
 
   // Authorise from the server-owned registry row, never the client-supplied
   // channelId, so a caller cannot claim membership to unlock another's file.
-  const { data: attachment, error: lookupError } = await admin
-    .from('attachments')
-    .select('user_id, channel_id')
-    .eq('file_key', fileKey)
-    .maybeSingle()
+  let lookup = admin.from('attachments').select('user_id, channel_id, storage_type, file_data, mime_type')
+  lookup = attachmentId ? lookup.eq('id', attachmentId) : lookup.eq('file_key', fileKey)
+  const { data: attachment, error: lookupError } = await lookup.maybeSingle()
   if (lookupError) return send(res, 500, { error: 'The attachment could not be resolved.' })
   if (!attachment) return send(res, 404, { error: 'This attachment is unavailable.' })
 
@@ -188,6 +193,14 @@ async function urlHandler(req, res, { admin, userId }, config) {
       return send(res, 403, { error: 'You do not have access to this attachment.' })
     }
   }
+
+  if (attachment.storage_type === 'inline_base64') {
+    if (!attachment.file_data) return send(res, 404, { error: 'This attachment is unavailable.' })
+    return send(res, 200, {
+      url: `data:${String(attachment.mime_type || 'application/octet-stream')};base64,${attachment.file_data}`,
+    })
+  }
+  if (!config) return send(res, 503, { error: 'Object storage is not configured on the server.' })
 
   // Feed media gets a stable public URL when a public base is configured so
   // <img>/<video> keep working; otherwise fall back to a signed link.
@@ -211,9 +224,80 @@ async function urlHandler(req, res, { admin, userId }, config) {
   return send(res, 200, { url: downloadUrl })
 }
 
+function isValidBase64(value) {
+  return value.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(value)
+}
+
+async function inlineHandler(req, res, { admin, userId }) {
+  const fileName = String(req.body?.fileName || 'file').slice(0, 200)
+  const mimeType = String(req.body?.fileType || req.body?.mimeType || 'application/octet-stream')
+  const fileSize = Number(req.body?.fileSize)
+  const channelId = req.body?.channelId ? String(req.body.channelId) : null
+  const base64Data = String(req.body?.base64Data || '')
+
+  if (!Number.isFinite(fileSize) || fileSize <= 0) return send(res, 400, { error: 'A valid file size is required.' })
+  if (fileSize > MAX_INLINE_BYTES) {
+    return send(res, 413, { error: 'This file is larger than 2 MB; use /api/storage/presign instead.' })
+  }
+  if (!base64Data || base64Data.length > MAX_INLINE_BYTES * 2) {
+    return send(res, 400, { error: 'A valid inline payload is required.' })
+  }
+  if (!isValidBase64(base64Data)) return send(res, 400, { error: 'The inline payload is not valid Base64.' })
+
+  const { error: reserveError } = await admin.rpc('reserve_user_storage', {
+    p_user_id: userId,
+    p_file_size: fileSize,
+  })
+  if (reserveError) {
+    if (String(reserveError.message || '').includes('STORAGE_QUOTA_EXCEEDED')) {
+      return send(res, 413, { error: 'Quota Exceeded: not enough remaining space in your 10 GB allocation.' })
+    }
+    return send(res, 500, { error: 'The storage quota could not be checked.' })
+  }
+
+  const { error: commitError } = await admin.rpc('commit_user_storage', {
+    p_user_id: userId,
+    p_file_size: fileSize,
+  })
+  if (commitError) {
+    if (String(commitError.message || '').includes('STORAGE_QUOTA_EXCEEDED')) {
+      return send(res, 413, { error: 'Quota Exceeded: not enough remaining space in your 10 GB allocation.' })
+    }
+    return send(res, 500, { error: 'Storage usage could not be recorded.' })
+  }
+
+  const { data: inserted, error: insertError } = await admin
+    .from('attachments')
+    .insert({
+      user_id: userId,
+      channel_id: channelId,
+      file_name: fileName,
+      storage_type: 'inline_base64',
+      file_data: base64Data,
+      mime_type: mimeType,
+      file_size: fileSize,
+    })
+    .select('id')
+    .single()
+
+  if (insertError) {
+    // Reverse the deduction so a failed registry insert does not leak quota.
+    await admin.rpc('commit_user_storage', { p_user_id: userId, p_file_size: -fileSize })
+    return send(res, 500, { error: 'The attachment could not be registered.' })
+  }
+
+  return send(res, 200, {
+    attachmentId: inserted.id,
+    fileKey: null,
+    fileSize,
+    url: `data:${mimeType};base64,${base64Data}`,
+  })
+}
+
 const ACTIONS = {
   presign: presignHandler,
   confirm: confirmHandler,
+  inline: inlineHandler,
   url: urlHandler,
 }
 
@@ -225,11 +309,15 @@ export default async function handler(req, res) {
   const run = ACTIONS[action]
   if (!run) return send(res, 404, { error: 'Unknown storage action.' })
 
-  const config = storageConfig()
-  if (!config) return send(res, 503, { error: 'Object storage is not configured on the server.' })
-
   const auth = await authorize(req, res)
   if (!auth) return
+
+  // Inline attachments live in the database, so they must keep working even
+  // when the bucket is unconfigured; only the bucket-backed actions need R2.
+  const config = storageConfig()
+  if (!config && (action === 'presign' || action === 'confirm')) {
+    return send(res, 503, { error: 'Object storage is not configured on the server.' })
+  }
 
   return run(req, res, auth, config)
 }

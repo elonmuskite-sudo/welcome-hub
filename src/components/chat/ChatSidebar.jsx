@@ -9,7 +9,7 @@ import { useSyncStatus } from '../../hooks/useSyncStatus'
 import { useNow } from '../../lib/useNow'
 import { SyncSpinner } from '../SyncIndicator'
 import { createChat, getChats, searchUserByNexusId, formatNexusId, addContact, isContactSaved } from '../../lib/persistence'
-import { participantNamesFor } from '../../lib/chatPreview'
+import { participantNamesFor, chatDisplayName } from '../../lib/chatPreview'
 
 // eslint-disable-next-line react/prop-types
 export default function ChatSidebar({ activeTab, onTabChange }) {
@@ -189,9 +189,15 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
     await runLookupAction(action, foundUser)
   }
 
-  const filteredChats = chats.filter(chat =>
-    chat.title.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  // Search matches the name the row actually shows and the stored title, and
+  // tolerates a null/absent title so one malformed row cannot break the list.
+  const filteredChats = chats.filter((chat) => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return true
+    const label = chatDisplayName(chat, user?.id)
+    const title = typeof chat.title === 'string' ? chat.title : ''
+    return label.toLowerCase().includes(query) || title.toLowerCase().includes(query)
+  })
 
   const handleChatSelect = (chat) => {
     navigate(`/app/chat/${chat.id}`)
