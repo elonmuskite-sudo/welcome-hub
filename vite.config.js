@@ -72,7 +72,6 @@ export default defineConfig(({ mode }) => {
             if (id.includes('@radix-ui')) return 'radix'
             // Heavy, feature-specific libraries get their own chunks so a screen
             // that needs them does not inflate the entry bundle or first paint.
-            if (id.includes('@vladmandic/face-api')) return 'face'
             if (id.includes('react-markdown') || id.includes('remark') || id.includes('rehype') || id.includes('micromark') || id.includes('mdast') || id.includes('hast') || id.includes('unist')) return 'markdown'
           }
         },

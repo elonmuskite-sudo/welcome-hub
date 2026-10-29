@@ -4,13 +4,15 @@ import { IdentityLinkError, linkAppwriteIdentity, verifyAppwriteSession } from '
 import { createDatabasePool, withAuthenticatedDatabaseTransaction } from './appwriteDatabase.js'
 import { isFileScanConfigured, scanFileBuffer, unavailableScan } from './fileScan.js'
 import { isEncryptedTextEnvelope, requiresE2EEEncryption } from '../src/lib/crypto/envelope.js'
+import { storagePathFromChatFileUrl } from '../src/lib/chatFileUrl.js'
 import { securityAlertEmail, sendSystemEmail } from './systemEmails.js'
+import { sendCallPush } from './callPush.js'
 
 let poolPromise
 const POST_COMMIT = Symbol('postCommit')
 const FIRST_VALID_UUID = '00000000-0000-1000-8000-000000000000'
 // Every account gets the same fixed quota; storage is not a purchasable upgrade.
-const STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024
+const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024
 
 export class GatewayError extends Error {
   constructor(message, status = 400) {
@@ -169,15 +171,20 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
         [chatId, supabaseUserId],
       )
       if (!chats[0]) return { chat: null }
-      const { rows: messages } = await client.query(
-        `select id, chat_id, sender_id, content, type, file_url, file_name,
-                duration, encrypted, created_at
-           from public.messages
-          where chat_id = $1
-          order by created_at asc
-          limit 5000`,
-        [chatId],
-      )
+      const messages = []
+      for (let offset = 0; ; offset += 1000) {
+        const { rows } = await client.query(
+          `select id, chat_id, sender_id, content, type, file_url, file_name,
+                  duration, encrypted, created_at
+             from public.messages
+            where chat_id = $1
+            order by created_at asc, id asc
+            limit 1000 offset $2`,
+          [chatId, offset],
+        )
+        messages.push(...rows)
+        if (rows.length < 1000) break
+      }
       return { chat: { ...chats[0], messages } }
     }
     case 'chats.create': {
@@ -319,10 +326,16 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
         `select coalesce(sum(size_bytes), 0)::bigint as used_bytes
            from public.storage_files`,
       )
+      const { rows: typeUsage } = await client.query(
+        `select file_type, coalesce(sum(size_bytes), 0)::bigint as used_bytes
+           from public.storage_files
+          group by file_type`,
+      )
       return {
         files,
         quotaBytes: STORAGE_QUOTA_BYTES,
         usedBytes: Number(usage[0]?.used_bytes || 0),
+        byType: Object.fromEntries(typeUsage.map((row) => [row.file_type, Number(row.used_bytes) || 0])),
       }
     }
     case 'storage.upload.prepare': {
@@ -409,9 +422,34 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
           throw new GatewayError('This file was rejected because the virus scan flagged it as unsafe.', 422)
         }
       }
-      const { data, error } = await admin.storage.from('chat-files').createSignedUrl(rows[0].storage_path, 60 * 60 * 24 * 365)
+      return { scanStatus: scan.status }
+    }
+    case 'storage.file.url': {
+      const chatId = requiredString(body.chatId, 'Chat ID', 64)
+      if (!validUuid(chatId)) throw new GatewayError('Chat ID is invalid.')
+      const storagePath = requiredString(body.storagePath, 'Storage path', 1024)
+      const fileUrl = requiredString(body.fileUrl, 'Attachment reference', 4096)
+      if (storagePathFromChatFileUrl(fileUrl) !== storagePath) {
+        throw new GatewayError('The attachment reference is invalid.')
+      }
+      const { rows } = await client.query(
+        `select sf.storage_path
+           from public.storage_files sf
+           join public.chat_members cm on cm.chat_id = sf.chat_id
+          where sf.chat_id = $1
+            and sf.storage_path = $2
+            and cm.profile_id = $3
+            and exists (
+              select 1 from public.messages m
+               where m.chat_id = sf.chat_id and m.file_url = $4
+            )
+          limit 1`,
+        [chatId, storagePath, supabaseUserId, fileUrl],
+      )
+      if (!rows[0]) throw new GatewayError('You no longer have access to this attachment.', 404)
+      const { data, error } = await admin.storage.from('chat-files').createSignedUrl(storagePath, 60 * 60)
       if (error || !data?.signedUrl) throw new GatewayError('Could not create a secure file link.', 503)
-      return { fileUrl: data.signedUrl, scanStatus: scan.status }
+      return { fileUrl: data.signedUrl }
     }
     case 'storage.upload.cancel': {
       const fileId = requiredString(body.fileId, 'File ID', 64)
@@ -444,6 +482,92 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
         [rows.map((row) => row.id)],
       )
       return { deleted: rowCount }
+    }
+    case 'calls.push.register': {
+      const platform = String(body.platform || '')
+      const endpoint = requiredString(body.endpoint, 'Push endpoint', 8192)
+      const p256dh = optionalString(body.p256dh, 'Web push key', 512)
+      const auth = optionalString(body.auth, 'Web push auth key', 512)
+      if (!['web', 'android', 'ios'].includes(platform)
+        || (platform === 'web' && (!p256dh || !auth))
+        || (platform !== 'web' && (p256dh || auth))) {
+        throw new GatewayError('The push subscription is invalid.')
+      }
+      const { rowCount } = await client.query(
+        `insert into public.call_push_subscriptions (user_id, platform, endpoint, p256dh, auth, updated_at)
+         values ($1, $2, $3, $4, $5, now())
+         on conflict (platform, endpoint) do update
+           set user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth, updated_at = now()
+         where public.call_push_subscriptions.user_id = excluded.user_id`,
+        [supabaseUserId, platform, endpoint, p256dh, auth],
+      )
+      if (!rowCount) throw new GatewayError('This push destination is already registered to another account.', 409)
+      return { ok: true }
+    }
+    case 'calls.push.remove': {
+      const platform = String(body.platform || '')
+      const endpoint = requiredString(body.endpoint, 'Push endpoint', 8192)
+      if (!['web', 'android', 'ios'].includes(platform)) throw new GatewayError('The push subscription is invalid.')
+      const { rowCount } = await client.query(
+        `delete from public.call_push_subscriptions
+          where user_id = $1 and platform = $2 and endpoint = $3`,
+        [supabaseUserId, platform, endpoint],
+      )
+      return { removed: rowCount > 0 }
+    }
+    case 'calls.push.notify': {
+      const chatId = requiredString(body.chatId, 'Chat ID', 64)
+      const callId = requiredString(body.callId, 'Call ID', 64)
+      const expiresAt = Number(body.expiresAt)
+      if (!validUuid(chatId) || !validUuid(callId)
+        || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now() || expiresAt > Date.now() + 60000) {
+        throw new GatewayError('The call request is invalid or expired.')
+      }
+      const { rows: chats } = await client.query(
+        `select id, type from public.chats
+          where id = $1 and (owner_id = $2 or public.is_chat_member(id, $2))`,
+        [chatId, supabaseUserId],
+      )
+      if (!chats[0] || chats[0].type === 'group') throw new GatewayError('The one-to-one conversation is unavailable.', 404)
+      const { rows: participants } = await client.query(
+        `select cm.profile_id, m.full_name, m.avatar_url
+           from public.chat_members cm
+           join public.members m on m.id = cm.profile_id
+          where cm.chat_id = $1`,
+        [chatId],
+      )
+      const participantIds = [...new Set(participants.map((row) => String(row.profile_id)))]
+      if (!participantIds.includes(supabaseUserId)) throw new GatewayError('You are not a member of this conversation.', 403)
+      const peers = participants.filter((row) => String(row.profile_id) !== supabaseUserId)
+      if (participantIds.length !== 2 || peers.length !== 1) {
+        throw new GatewayError('Calls are only available in one-to-one conversations.')
+      }
+      const { rows: callers } = await client.query(
+        `select full_name, avatar_url from public.members where id = $1`,
+        [supabaseUserId],
+      )
+      const caller = callers[0] || {}
+      const payload = {
+        callId,
+        chatId,
+        expiresAt,
+        fromUserId: supabaseUserId,
+        fromName: caller.full_name || 'Nexus user',
+        fromAvatar: caller.avatar_url || '',
+      }
+      const recipientId = String(peers[0].profile_id)
+      return {
+        response: { ok: true },
+        [POST_COMMIT]: async () => {
+          try {
+            const result = await sendCallPush(recipientId, payload)
+            return { pushSent: result.sent > 0 }
+          } catch (error) {
+            console.error('Appwrite background call notification failed.', error)
+            return { pushSent: false }
+          }
+        },
+      }
     }
     case 'admin.verify': {
       const { rows } = await client.query(
@@ -694,6 +818,11 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
         ['SUPABASE_POOLER_URL', process.env.SUPABASE_POOLER_URL],
         ['RESEND_API_KEY', process.env.RESEND_API_KEY],
         ['RESEND_FROM', process.env.RESEND_FROM],
+        ['VITE_WEB_PUSH_PUBLIC_KEY', process.env.VITE_WEB_PUSH_PUBLIC_KEY],
+        ['WEB_PUSH_VAPID_PUBLIC_KEY', process.env.WEB_PUSH_VAPID_PUBLIC_KEY],
+        ['WEB_PUSH_VAPID_PRIVATE_KEY', process.env.WEB_PUSH_VAPID_PRIVATE_KEY],
+        ['WEB_PUSH_VAPID_SUBJECT', process.env.WEB_PUSH_VAPID_SUBJECT],
+        ['FIREBASE_SERVICE_ACCOUNT_JSON', process.env.FIREBASE_SERVICE_ACCOUNT_JSON],
       ].map(([key, value]) => ({ key, configured: Boolean(String(value || '').trim()) }))
       const tableNames = [
         'members',
@@ -764,6 +893,9 @@ async function inUserTransaction(config, account, operation) {
   )
   if (typeof result?.[POST_COMMIT] !== 'function') return result
   const emailNotificationSent = await result[POST_COMMIT]()
+  if (emailNotificationSent && typeof emailNotificationSent === 'object') {
+    return { ...result.response, ...emailNotificationSent }
+  }
   return { ...result.response, emailNotificationSent }
 }
 

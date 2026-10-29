@@ -54,6 +54,28 @@ const OPTIONAL_PUBLIC_KEYS = [
   'VITE_TURN_CREDENTIAL',
 ]
 
+// Object storage (Cloudflare R2 / S3-compatible). The credentials are
+// server-only and the base URL is browser-safe, so the set is optional and is
+// only synced once real values exist. Without them the storage API reports 503
+// and uploads fall back to Supabase.
+const OPTIONAL_R2_KEYS = [
+  'R2_BUCKET_NAME',
+  'R2_ACCOUNT_ID',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+  'VITE_R2_PUBLIC_BASE_URL',
+]
+
+// Background call alerts (Web Push). The public key ships to the browser in the
+// bundle, the private key is a server-only secret, and the subject is a contact
+// URL. Optional: without them the app reports that web push is not configured.
+const OPTIONAL_WEB_PUSH_KEYS = [
+  'VITE_WEB_PUSH_PUBLIC_KEY',
+  'WEB_PUSH_VAPID_PUBLIC_KEY',
+  'WEB_PUSH_VAPID_PRIVATE_KEY',
+  'WEB_PUSH_VAPID_SUBJECT',
+]
+
 const PUBLIC_KEYS = new Set([
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_ANON_KEY',
@@ -66,6 +88,14 @@ const PUBLIC_KEYS = new Set([
   'APPWRITE_PROJECT_ID',
   'RESEND_FROM',
   ...OPTIONAL_PUBLIC_KEYS,
+  // Only the public base URL is browser-safe; the R2 credentials must stay
+  // encrypted on Vercel.
+  'VITE_R2_PUBLIC_BASE_URL',
+  // The VAPID public key and subject are not secrets; the private key must stay
+  // encrypted on Vercel.
+  'VITE_WEB_PUSH_PUBLIC_KEY',
+  'WEB_PUSH_VAPID_PUBLIC_KEY',
+  'WEB_PUSH_VAPID_SUBJECT',
 ])
 
 const LEGACY_PUBLIC_SECRETS = ['VITE_ADMIN_PASSWORD']
@@ -127,9 +157,21 @@ function loadValues() {
       .filter((key) => !invalidValue(config[key]))
       .map((key) => [key, String(config[key])])
   )
+  const optionalR2 = Object.fromEntries(
+    OPTIONAL_R2_KEYS
+      .filter((key) => !invalidValue(config[key]))
+      .map((key) => [key, String(config[key])])
+  )
+  const optionalWebPush = Object.fromEntries(
+    OPTIONAL_WEB_PUSH_KEYS
+      .filter((key) => !invalidValue(config[key]))
+      .map((key) => [key, String(config[key])])
+  )
   return {
     ...Object.fromEntries(requiredKeys.map((key) => [key, String(config[key])])),
     ...optionalPublic,
+    ...optionalR2,
+    ...optionalWebPush,
     VITE_AUTH_PROVIDER: provider,
   }
 }

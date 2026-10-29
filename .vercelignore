@@ -13,10 +13,17 @@ dist
 # (scripts/sync-vercel-env.js), never from these files.
 .env
 .env.*
+# A stray local .npmrc would be uploaded by CLI deployments; npm 12 pins install
+# scripts through package.json, so the repo needs no .npmrc in the build. (The
+# "Unknown env config cache-dir" warning on Vercel comes from the build
+# environment's npm_config_cache_dir, not from a repository file.)
+.npmrc
 *.keystore
 *.jks
 *.pem
 android/key.properties
 android/local.properties
+android-sdk/
+.playwright-browsers/
 .demo-accounts.local.json
 supabase/backups

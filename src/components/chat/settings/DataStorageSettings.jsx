@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { HardDrive, Image, Video, Mic, Music, FileText, Sticker, Trash2, RefreshCw, LoaderCircle } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { HardDrive, Image, Video, Mic, Music, FileText, Sticker, Trash2, RefreshCw, LoaderCircle, ExternalLink } from 'lucide-react'
 import { useAuth } from '../../../lib/AuthContext'
-import { getStorageUsage, deleteStorageFiles, formatBytes } from '../../../lib/storageManager'
+import {
+  STORAGE_QUOTA_BYTES,
+  STORAGE_USAGE_CHANGED_EVENT,
+  getStorageUsage,
+  deleteStorageFiles,
+  formatBytes,
+  createChatFileReference,
+  openChatFile,
+} from '../../../lib/storageManager'
 import ChatButton from '../ChatButton'
 
 const TYPE_META = {
@@ -20,25 +28,71 @@ export default function DataStorageSettings() {
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(() => new Set())
   const [deleting, setDeleting] = useState(false)
+  const [openingFileId, setOpeningFileId] = useState(null)
+  const [displayedBytes, setDisplayedBytes] = useState(0)
+  const displayedBytesRef = useRef(0)
+  const refreshInFlight = useRef(false)
 
   const refresh = useCallback(async () => {
     if (!user?.id) { setLoading(false); return }
-    setError('')
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
     try {
       const result = await getStorageUsage(user.id)
       setUsage(result)
-      setSelected(new Set())
+      const currentFileIds = new Set((result.files || []).map((file) => file.id))
+      setSelected((previous) => new Set([...previous].filter((id) => currentFileIds.has(id))))
+      setError('')
     } catch (err) {
       setError(err.message || 'Storage usage could not be loaded.')
     } finally {
+      refreshInFlight.current = false
       setLoading(false)
     }
   }, [user?.id])
 
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => {
+    void refresh()
+    const onStorageChanged = () => { void refresh() }
+    window.addEventListener(STORAGE_USAGE_CHANGED_EVENT, onStorageChanged)
+    const refreshTimer = window.setInterval(onStorageChanged, 15000)
+    return () => {
+      window.removeEventListener(STORAGE_USAGE_CHANGED_EVENT, onStorageChanged)
+      window.clearInterval(refreshTimer)
+    }
+  }, [refresh])
 
   const usedBytes = usage?.usedBytes || 0
-  const quotaBytes = usage?.quotaBytes || 1
+  const quotaBytes = usage?.quotaBytes || STORAGE_QUOTA_BYTES
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      displayedBytesRef.current = usedBytes
+      setDisplayedBytes(usedBytes)
+      return undefined
+    }
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reducedMotion) {
+      displayedBytesRef.current = usedBytes
+      setDisplayedBytes(usedBytes)
+      return undefined
+    }
+    const startBytes = displayedBytesRef.current
+    const startTime = window.performance.now()
+    let frameId
+    const animate = (now) => {
+      const progress = Math.min(1, (now - startTime) / 650)
+      const eased = 1 - ((1 - progress) ** 3)
+      const currentBytes = Math.round(startBytes + ((usedBytes - startBytes) * eased))
+      displayedBytesRef.current = currentBytes
+      setDisplayedBytes(currentBytes)
+      if (progress < 1) frameId = window.requestAnimationFrame(animate)
+    }
+    frameId = window.requestAnimationFrame(animate)
+    return () => window.cancelAnimationFrame(frameId)
+  }, [usedBytes])
+
+  const displayedPercent = Math.min(100, (displayedBytes / quotaBytes) * 100)
   const usedPercent = Math.min(100, (usedBytes / quotaBytes) * 100)
 
   const files = usage?.files || []
@@ -69,6 +123,19 @@ export default function DataStorageSettings() {
     }
   }
 
+  const openFile = async (file) => {
+    if (openingFileId) return
+    setError('')
+    setOpeningFileId(file.id)
+    try {
+      await openChatFile(createChatFileReference(file.storage_path), file.chat_id)
+    } catch (err) {
+      setError(err.message || 'This file could not be opened.')
+    } finally {
+      setOpeningFileId(null)
+    }
+  }
+
   const breakdown = useMemo(() => {
     const entries = Object.entries(usage?.byType || {})
     return entries.sort((a, b) => b[1] - a[1])
@@ -92,21 +159,31 @@ export default function DataStorageSettings() {
           <div>
             <p className="font-semibold text-foreground">Cloud storage</p>
             <p className="text-sm text-muted-foreground">
-              {formatBytes(usedBytes)} of {formatBytes(quotaBytes)} used
+              <span aria-live="polite">{formatBytes(displayedBytes)}</span> of {formatBytes(quotaBytes)} used
             </p>
           </div>
           <ChatButton title="Refresh usage" onClick={refresh} className="ml-auto w-9">
             <RefreshCw className="w-4 h-4" />
           </ChatButton>
         </div>
-        <div className="h-3 rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={Math.round(usedPercent)} aria-valuemin={0} aria-valuemax={100}>
+        <div
+          className="h-3 rounded-full bg-muted overflow-hidden"
+          role="progressbar"
+          aria-label={`${formatBytes(usedBytes)} of ${formatBytes(quotaBytes)} storage used`}
+          aria-valuenow={Math.round(usedPercent)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
           <div
-            className={`h-full rounded-full transition-all ${usedPercent > 90 ? 'bg-destructive' : 'bg-primary'}`}
-            style={{ width: `${usedPercent}%` }}
+            className={`h-full rounded-full transition-[width] duration-700 ease-out ${usedPercent > 90 ? 'bg-destructive' : 'bg-primary'}`}
+            style={{ width: `${displayedPercent}%` }}
           />
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           {formatBytes(Math.max(quotaBytes - usedBytes, 0))} free · Videos up to 45 seconds
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Shared files use your storage after you save a copy.
         </p>
       </div>
 
@@ -159,7 +236,7 @@ export default function DataStorageSettings() {
               const checked = selected.has(file.id)
               return (
                 <li key={file.id} className="border-t border-border first:border-t-0">
-                  <label className="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-muted/50 transition">
+                  <div className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition">
                     <input
                       type="checkbox"
                       checked={checked}
@@ -168,14 +245,24 @@ export default function DataStorageSettings() {
                       aria-label={`Select ${file.file_name}`}
                     />
                     <Icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-sm text-foreground">{file.file_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {meta.label} · {formatBytes(file.size_bytes)}
-                        {file.duration_seconds != null ? ` · ${Math.round(file.duration_seconds)}s` : ''}
-                      </p>
-                    </div>
-                  </label>
+                    <button
+                      type="button"
+                      onClick={() => openFile(file)}
+                      disabled={Boolean(openingFileId)}
+                      className="flex flex-1 min-w-0 items-center gap-2 text-left disabled:opacity-60"
+                    >
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate text-sm text-foreground">{file.file_name}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {meta.label} · {formatBytes(file.size_bytes)}
+                          {file.duration_seconds != null ? ` · ${Math.round(file.duration_seconds)}s` : ''}
+                        </span>
+                      </span>
+                      {openingFileId === file.id
+                        ? <LoaderCircle className="w-4 h-4 animate-spin flex-shrink-0" />
+                        : <ExternalLink className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
+                    </button>
+                  </div>
                 </li>
               )
             })}

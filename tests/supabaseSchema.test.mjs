@@ -66,7 +66,7 @@ test('text messages require a versioned encrypted payload in every database writ
   )
   for (const sql of [schema, migration]) {
     assert.match(sql, /messages_text_requires_encryption/i)
-    assert.match(sql, /type in \('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document'\) or \(/i)
+    assert.match(sql, /type in \('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document'(?:, 'call')?\) or \(/i)
     assert.match(sql, /encrypted is true/i)
     assert.match(sql, /ECDH-P256\+AES-256-GCM/i)
     assert.match(sql, /\(content::jsonb - 'alg' - 'iv' - 'data'\) = '\{\}'::jsonb/i)
@@ -74,6 +74,38 @@ test('text messages require a versioned encrypted payload in every database writ
     assert.match(sql, /->> 'data'/i)
   }
   assert.match(migration, /not valid/i)
+})
+
+test('chat file storage is restricted to the uploader or chat members', () => {
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261027133018_secure_chat_file_access.sql'),
+    'utf8',
+  )
+  for (const sql of [schema, migration]) {
+    assert.match(sql, /drop policy if exists "Chat files signed-in read" on storage\.objects/i)
+    assert.match(sql, /create policy "Chat members read chat files"/i)
+    assert.match(sql, /public\.is_chat_member/i)
+    assert.match(sql, /\(select auth\.uid\(\)\)/i)
+    assert.match(sql, /storage\.foldername\(name\)\)\[2\].*~\*/i)
+    assert.doesNotMatch(sql, /create policy "Chat files signed-in read"/i)
+  }
+  assert.match(migration, /_user = \(select auth\.uid\(\)\)/i)
+})
+
+test('call push destinations are private to the owning account', () => {
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261027165720_call_push_subscriptions.sql'),
+    'utf8',
+  )
+  for (const sql of [schema, migration]) {
+    assert.match(sql, /create table(?: if not exists)? public\.call_push_subscriptions/i)
+    assert.match(sql, /enable row level security/i)
+    assert.match(sql, /using\s*\(\(select auth\.uid\(\)\)\s*=\s*user_id\)/i)
+    assert.match(sql, /with check\s*\(\(select auth\.uid\(\)\)\s*=\s*user_id\)/i)
+    assert.match(sql, /unique \(platform, endpoint\)/i)
+  }
 })
 
 test('schema dry-run rejects non-PostgreSQL URLs', () => {

@@ -17,7 +17,8 @@ let faceApiPromise
 async function loadFaceApi() {
   if (!faceApiPromise) {
     faceApiPromise = (async () => {
-      const faceapi = await import('@vladmandic/face-api')
+      const { default: faceApiUrl } = await import('@vladmandic/face-api/dist/face-api.esm.js?url')
+      const faceapi = await import(/* @vite-ignore */ faceApiUrl)
       await Promise.all([
         faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
         faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),

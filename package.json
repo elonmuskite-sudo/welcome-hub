@@ -41,9 +41,12 @@
   },
   "dependencies": {
     "@capacitor/android": "^6.1.2",
+    "@aws-sdk/client-s3": "^3.700.0",
+    "@aws-sdk/s3-request-presigner": "^3.700.0",
     "@capacitor/cli": "^6.1.2",
     "@capacitor/core": "^6.1.2",
     "@capacitor/ios": "^6.1.2",
+    "@capacitor/push-notifications": "6.0.5",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@heroicons/react": "^2.2.0",
@@ -67,6 +70,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "emoji-mart": "^5.6.0",
+    "firebase-admin": "14.5.0",
     "framer-motion": "^11.16.4",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.475.0",
@@ -79,7 +83,13 @@
     "resend": "^6.33.0",
     "tailwind-merge": "^3.0.2",
     "tailwindcss-animate": "^1.0.7",
-    "zod": "^3.24.2"
+    "web-push": "3.6.7",
+    "zod": "^4.6.7"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.4"
+    }
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
@@ -105,6 +115,10 @@
     "wrangler": "^4.131.2"
   },
   "allowScripts": {
-    "sharp@0.32.6": true
+    "sharp@0.32.6": true,
+    "esbuild": true,
+    "@firebase/util": true,
+    "protobufjs": true,
+    "workerd": true
   }
 }

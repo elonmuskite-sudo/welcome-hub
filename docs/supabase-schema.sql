@@ -27,6 +27,80 @@ grant select, insert, delete on public.storage_files to authenticated; grant all
 alter table public.storage_files enable row level security;
 create policy "Own files" on public.storage_files for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 
+-- Per-user 10GB storage quota counter and the R2/S3 attachment registry.
+create table public.user_storage (user_id uuid primary key references auth.users(id) on delete cascade, used_bytes bigint not null default 0 check (used_bytes >= 0), max_bytes bigint not null default 10737418240, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+grant select on public.user_storage to authenticated; grant all on public.user_storage to service_role;
+alter table public.user_storage enable row level security;
+create policy "Own storage quota read" on public.user_storage for select to authenticated using (user_id = auth.uid());
+create trigger trg_user_storage_updated before update on public.user_storage for each row execute function public.update_updated_at_column();
+
+create or replace function public.reserve_user_storage(p_user_id uuid, p_file_size bigint) returns boolean language plpgsql security definer set search_path = public as $$
+declare v_limit bigint; v_used bigint;
+begin
+  if p_file_size is null or p_file_size < 0 then raise exception 'INVALID_FILE_SIZE'; end if;
+  insert into public.user_storage (user_id) values (p_user_id) on conflict (user_id) do nothing;
+  select max_bytes, used_bytes into v_limit, v_used from public.user_storage where user_id = p_user_id for update;
+  if v_used + p_file_size > v_limit then raise exception 'STORAGE_QUOTA_EXCEEDED'; end if;
+  return true;
+end $$;
+
+create or replace function public.commit_user_storage(p_user_id uuid, p_file_size bigint) returns bigint language plpgsql security definer set search_path = public as $$
+declare v_limit bigint; v_used bigint;
+begin
+  insert into public.user_storage (user_id) values (p_user_id) on conflict (user_id) do nothing;
+  select max_bytes, used_bytes into v_limit, v_used from public.user_storage where user_id = p_user_id for update;
+  if v_used + p_file_size > v_limit then raise exception 'STORAGE_QUOTA_EXCEEDED'; end if;
+  if v_used + p_file_size < 0 then raise exception 'STORAGE_USAGE_UNDERFLOW'; end if;
+  update public.user_storage set used_bytes = used_bytes + p_file_size, updated_at = now() where user_id = p_user_id returning used_bytes into v_used;
+  return v_used;
+end $$;
+
+create or replace function public.create_user_storage() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.user_storage (user_id) values (new.id) on conflict (user_id) do nothing;
+  return new;
+end $$;
+create trigger on_auth_user_created_storage after insert on auth.users for each row execute function public.create_user_storage();
+
+insert into public.user_storage (user_id) select id from auth.users on conflict (user_id) do nothing;
+
+revoke execute on function public.reserve_user_storage(uuid, bigint) from public, anon;
+grant execute on function public.reserve_user_storage(uuid, bigint) to authenticated, service_role;
+revoke execute on function public.commit_user_storage(uuid, bigint) from public, anon;
+grant execute on function public.commit_user_storage(uuid, bigint) to authenticated, service_role;
+revoke execute on function public.create_user_storage() from public, anon, authenticated;
+
+create table public.attachments (id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade, channel_id text, file_name text not null default '', file_key text unique, storage_type text not null default 'external_bucket' check (storage_type in ('inline_base64', 'external_bucket')), file_data text, mime_type text not null, file_size bigint not null default 0 check (file_size >= 0), created_at timestamptz not null default now(), constraint attachments_payload_check check ((storage_type = 'inline_base64' and file_data is not null and file_key is null) or (storage_type = 'external_bucket' and file_key is not null and file_data is null)));
+create index idx_attachments_user on public.attachments(user_id);
+create index idx_attachments_channel on public.attachments(channel_id);
+grant select, insert, delete on public.attachments to authenticated; grant all on public.attachments to service_role;
+alter table public.attachments enable row level security;
+create policy "Own attachments" on public.attachments for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create table public.call_push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  platform text not null check (platform in ('web', 'android', 'ios')),
+  endpoint text not null,
+  p256dh text,
+  auth text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint call_push_subscription_web_keys check (
+    (platform = 'web' and p256dh is not null and auth is not null)
+    or (platform in ('android', 'ios') and p256dh is null and auth is null)
+  ),
+  constraint call_push_subscription_endpoint_unique unique (platform, endpoint)
+);
+create index call_push_subscriptions_user_id_idx on public.call_push_subscriptions (user_id);
+grant select, insert, update, delete on public.call_push_subscriptions to authenticated;
+grant select, delete on public.call_push_subscriptions to service_role;
+alter table public.call_push_subscriptions enable row level security;
+create policy "Users manage their own call push subscriptions"
+  on public.call_push_subscriptions for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
 create or replace function public.get_verification_badge(_user_id uuid) returns text language sql stable security definer set search_path = public as $$
   select case
     when exists(select 1 from public.identity_verifications where user_id=_user_id and status='approved') then 'authenticated'
@@ -37,7 +111,6 @@ grant execute on function public.get_verification_badge(uuid) to anon, authentic
 create policy "ID docs own upload" on storage.objects for insert to authenticated with check (bucket_id='identity-docs' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "ID docs own or admin read" on storage.objects for select to authenticated using (bucket_id='identity-docs' and ((storage.foldername(name))[1] = auth.uid()::text or public.has_role(auth.uid(),'admin')));
 create policy "Chat files own upload" on storage.objects for insert to authenticated with check (bucket_id='chat-files' and (storage.foldername(name))[1] = auth.uid()::text);
-create policy "Chat files signed-in read" on storage.objects for select to authenticated using (bucket_id='chat-files');
 create policy "Chat files own delete" on storage.objects for delete to authenticated using (bucket_id='chat-files' and (storage.foldername(name))[1] = auth.uid()::text);
 -- from 20261012105808_722066b4-005b-47d7-aa9a-df0f18f3aeed.sql
 revoke execute on function public.has_role(uuid, public.app_role) from public, anon;
@@ -191,7 +264,7 @@ create table public.messages (
   sender_id uuid, content text not null check (char_length(content) between 1 and 65535), type text not null default 'text',
   file_url text, file_name text, duration numeric, encrypted boolean not null default false, created_at timestamptz not null default now(),
   constraint messages_text_requires_encryption check (
-    type in ('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document') or (
+    type in ('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document', 'call') or (
       encrypted is true
       and jsonb_typeof(content::jsonb) = 'object'
       and (content::jsonb - 'alg' - 'iv' - 'data') = '{}'::jsonb
@@ -220,7 +293,24 @@ alter table public.chats enable row level security;
 alter table public.chat_members enable row level security;
 alter table public.messages enable row level security;
 create or replace function public.is_chat_member(_chat uuid, _user uuid) returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.chat_members where chat_id = _chat and profile_id = _user) $$;
+  select _user = (select auth.uid())
+    and exists (select 1 from public.chat_members where chat_id = _chat and profile_id = _user) $$;
+drop policy if exists "Chat files signed-in read" on storage.objects;
+create policy "Chat members read chat files" on storage.objects for select to authenticated
+using (
+  bucket_id = 'chat-files'
+  and (
+    (storage.foldername(name))[1] = (select auth.uid())::text
+    or case
+      when (storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        then public.is_chat_member(
+          ((storage.foldername(name))[2])::uuid,
+          (select auth.uid())
+        )
+      else false
+    end
+  )
+);
 create policy "View own chats" on public.chats for select to authenticated using (owner_id = auth.uid() or public.is_chat_member(id, auth.uid()));
 create policy "Create owned chats" on public.chats for insert to authenticated with check (owner_id = auth.uid());
 create policy "Owners update chats" on public.chats for update to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());

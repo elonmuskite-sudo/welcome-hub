@@ -101,6 +101,18 @@ async function main() {
   if (hasTurnUser !== hasTurnCredential) {
     console.warn('[env:validate] TURN username and credential must be set together; relay credentials will be ignored.')
   }
+  const webPushKeys = [
+    'VITE_WEB_PUSH_PUBLIC_KEY',
+    'WEB_PUSH_VAPID_PUBLIC_KEY',
+    'WEB_PUSH_VAPID_PRIVATE_KEY',
+    'WEB_PUSH_VAPID_SUBJECT',
+  ]
+  if (webPushKeys.some((key) => isPlaceholder(getEnvValue(key)))) {
+    console.warn('[env:validate] Web background call alerts are disabled until all VAPID keys are configured.')
+  }
+  if (isPlaceholder(getEnvValue('FIREBASE_SERVICE_ACCOUNT_JSON'))) {
+    console.warn('[env:validate] Native background call alerts are disabled until FIREBASE_SERVICE_ACCOUNT_JSON is configured.')
+  }
   if (isStrictDeploy && missing.length) {
     console.error('[env:validate] Missing production env values before deploy:')
     for (const key of missing) console.error(` - ${key}`)

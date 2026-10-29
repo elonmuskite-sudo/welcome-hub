@@ -4,7 +4,8 @@ import { Smile, Sticker, Paperclip, Mic, Send, Square, X, LoaderCircle, Reply } 
 import StickerPicker from './StickerPicker'
 import VoiceNoteDialog from './VoiceNoteDialog'
 import ChatButton from './ChatButton'
-import { uploadChatFile, ATTACHMENT_ACCEPT } from '../../lib/storageManager'
+import { uploadChatFile, validateUpload, ATTACHMENT_ACCEPT } from '../../lib/storageManager'
+import { useChatUploader } from '../../hooks/useChatUploader'
 import { extractWaveformPeaks } from '../../lib/audioWaveform'
 import { useAuth } from '../../lib/AuthContext'
 
@@ -28,6 +29,7 @@ const CHAT_INPUT_HINTS = {
 
 export default function MessageInput({ onSendMessage, reply, onCancelReply, chatId }) {
   const { user } = useAuth()
+  const { uploadFile: uploadToR2 } = useChatUploader()
   const [inputText, setInputText] = useState('')
   const [activePanel, setActivePanel] = useState(null) // 'stickers' | 'emoji' | null
   const [isSending, setIsSending] = useState(false)
@@ -97,6 +99,35 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
     if (await send({ content: inputText.trim(), type: 'text' })) setInputText('')
   }
 
+  // Attachments go through the R2 object-storage pipeline when it is configured
+  // and fall back to the existing Supabase pipeline only when the server reports
+  // that object storage is unconfigured (HTTP 503). Validation runs once up front
+  // so both paths enforce the same type/size/duration rules.
+  const uploadAttachment = useCallback(async ({ file, kind = 'file', durationSeconds = null, label }) => {
+    const meta = await validateUpload(file, { userId: user?.id, kind, durationSeconds })
+    const reportProgress = percent => setUploadProgress({ percent, label })
+    try {
+      const stored = await uploadToR2({ file, channelId: chatId ?? null, onProgress: reportProgress })
+      return {
+        fileUrl: stored.reference,
+        fileName: file.name,
+        fileType: meta.fileType,
+        durationSeconds: meta.durationSeconds,
+        scanStatus: 'unavailable',
+      }
+    } catch (r2Error) {
+      if (r2Error?.status !== 503) throw r2Error
+      return uploadChatFile({
+        userId: user?.id,
+        chatId,
+        file,
+        kind,
+        durationSeconds,
+        onProgress: reportProgress,
+      })
+    }
+  }, [user?.id, chatId, uploadToR2])
+
   // Multi-file attachments: each file is validated, uploaded with progress, and
   // sent as its own message so one bad file never blocks the rest.
   const selectFiles = async event => {
@@ -112,12 +143,7 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
         const label = files.length > 1 ? `Uploading ${index + 1} of ${files.length}: ${file.name}` : `Uploading ${file.name}`
         setUploadProgress({ percent: 0, label })
         try {
-          const uploaded = await uploadChatFile({
-            userId: user?.id,
-            chatId,
-            file,
-            onProgress: percent => setUploadProgress({ percent, label }),
-          })
+          const uploaded = await uploadAttachment({ file, label })
           await send({
             content: uploaded.fileName,
             type: uploaded.fileType === 'sticker' ? 'image' : uploaded.fileType,
@@ -189,13 +215,11 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
     setError('')
     setUploadProgress({ percent: 0, label: 'Uploading voice note' })
     try {
-      const uploaded = await uploadChatFile({
-        userId: user?.id,
-        chatId,
+      const uploaded = await uploadAttachment({
         file: pendingVoice.file,
         kind: 'voice',
         durationSeconds: pendingVoice.durationSeconds,
-        onProgress: percent => setUploadProgress({ percent, label: 'Uploading voice note' }),
+        label: 'Uploading voice note',
       })
       const sent = await send({
         content: uploaded.fileName,

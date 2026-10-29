@@ -38,7 +38,9 @@ function ChatListItem({ chat, selected, now, onClick }) {
         </div>
         <div className="flex justify-between items-center">
           <p className="text-sm text-muted-foreground truncate" title={preview.snippet}>
-            {preview.sentByViewer && <span aria-hidden="true">You: </span>}
+            {preview.senderName && preview.senderName !== preview.name && (
+              <span aria-hidden="true">{preview.senderName}: </span>
+            )}
             {preview.snippet}
           </p>
           {chat.unread_count > 0 && (

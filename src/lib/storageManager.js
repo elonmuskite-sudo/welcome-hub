@@ -1,13 +1,22 @@
 import { supabase, isSupabaseConfigured } from './supabase'
 import { appwriteData, isAppwriteAuthEnabled } from './appwrite'
 import { UNSUPPORTED_FILE_MESSAGE, classifyFileType, formatBytes, isSupportedFile } from './chatAttachments'
+import { createChatFileReference, storagePathFromChatFileUrl, r2PathFromFileUrl, inlineIdFromFileUrl } from './chatFileUrl'
 
 export { ATTACHMENT_ACCEPT, UNSUPPORTED_FILE_MESSAGE, classifyFileType, formatBytes, isSupportedFile } from './chatAttachments'
+export { createChatFileReference, storagePathFromChatFileUrl, createR2FileReference, r2PathFromFileUrl, createInlineFileReference, inlineIdFromFileUrl } from './chatFileUrl'
 
-export const STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024 // 5 GB per user
+export const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024 // 10 GB per user
 export const MAX_VIDEO_DURATION_SECONDS = 45
+export const STORAGE_USAGE_CHANGED_EVENT = 'nexus:storage-usage-changed'
 const BUCKET = 'chat-files'
-const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 365
+const SIGNED_URL_TTL_SECONDS = 60 * 60
+
+function announceStorageUsageChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(STORAGE_USAGE_CHANGED_EVENT))
+  }
+}
 
 export function probeMediaDuration(file) {
   return new Promise((resolve) => {
@@ -32,32 +41,46 @@ export function probeMediaDuration(file) {
 export async function getStorageUsage(userId) {
   if (isAppwriteAuthEnabled()) {
     if (!userId) throw new Error('Sign in to view storage usage.')
-    const { files = [], quotaBytes = STORAGE_QUOTA_BYTES, usedBytes = 0 } = await appwriteData('storage.usage')
-    const byType = {}
-    for (const file of files) {
-      const size = Number(file.size_bytes) || 0
-      byType[file.file_type] = (byType[file.file_type] || 0) + size
-    }
+    const {
+      files = [],
+      quotaBytes = STORAGE_QUOTA_BYTES,
+      usedBytes = 0,
+      byType = {},
+    } = await appwriteData('storage.usage')
     return { usedBytes, quotaBytes, byType, files }
   }
   if (!isSupabaseConfigured() || !userId) {
     return { usedBytes: 0, quotaBytes: STORAGE_QUOTA_BYTES, byType: {}, files: [] }
   }
-  const { data, error } = await supabase
+  const { data: fileList, error: fileListError } = await supabase
     .from('storage_files')
     .select('id, chat_id, file_name, file_type, mime_type, size_bytes, duration_seconds, storage_path, created_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(1000)
-  if (error) throw error
-
-  const files = data || []
+  if (fileListError) throw fileListError
+  const files = fileList || []
   const byType = {}
   let usedBytes = 0
-  for (const file of files) {
-    const size = Number(file.size_bytes) || 0
-    usedBytes += size
-    byType[file.file_type] = (byType[file.file_type] || 0) + size
+  const pageSize = 1000
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase
+      .from('storage_files')
+      .select('file_type, size_bytes')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+    if (error) throw error
+
+    const page = data || []
+    for (const file of page) {
+      const size = Number(file.size_bytes) || 0
+      usedBytes += size
+      byType[file.file_type] = (byType[file.file_type] || 0) + size
+    }
+    if (page.length < pageSize) break
   }
   // Every account has the same fixed quota; storage is not a purchasable upgrade.
   return { usedBytes, quotaBytes: STORAGE_QUOTA_BYTES, byType, files }
@@ -165,9 +188,10 @@ export async function uploadChatFile({ userId, chatId, file, kind = 'file', dura
       report(100)
       // The gateway verifies the object and runs the server-side scan hook,
       // so it fails the call when a configured scanner flags the file.
-      const { fileUrl, scanStatus = 'unavailable' } = await appwriteData('storage.upload.finish', { fileId })
+      const { scanStatus = 'unavailable' } = await appwriteData('storage.upload.finish', { fileId })
+      announceStorageUsageChanged()
       return {
-        fileUrl,
+        fileUrl: createChatFileReference(path),
         fileName: file.name || 'file',
         fileType,
         durationSeconds: duration,
@@ -232,8 +256,9 @@ export async function uploadChatFile({ userId, chatId, file, kind = 'file', dura
     throw new Error('This file was rejected because the virus scan flagged it as unsafe.')
   }
 
+  announceStorageUsageChanged()
   return {
-    fileUrl: signed.signedUrl,
+    fileUrl: createChatFileReference(path),
     fileName: file.name || 'file',
     fileType,
     durationSeconds: duration,
@@ -242,12 +267,150 @@ export async function uploadChatFile({ userId, chatId, file, kind = 'file', dura
   }
 }
 
+// Feed media renders directly in <img>/<video>, so it needs a stable URL rather
+// than an expiring signed link. Falls back to the signed resolver when no public
+// base is configured.
+export async function resolveFeedMediaUrl(fileUrl, chatId = 'feed') {
+  const r2Key = r2PathFromFileUrl(fileUrl)
+  const publicBase = String(import.meta.env?.VITE_R2_PUBLIC_BASE_URL || '').replace(/\/+$/, '')
+  if (r2Key && publicBase) return `${publicBase}/${r2Key}`
+  return resolveChatFileUrl(fileUrl, chatId)
+}
+
+export async function resolveChatFileUrl(fileUrl, chatId) {
+  const inlineId = inlineIdFromFileUrl(fileUrl)
+  if (inlineId) {
+    if (!supabase) throw new Error('File storage is not configured.')
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) throw new Error('Sign in to open this attachment.')
+    const response = await fetch('/api/storage/url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ attachmentId: inlineId, channelId: chatId ? String(chatId) : null }),
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.url) throw new Error(payload?.error || 'A secure attachment link could not be created.')
+    return payload.url
+  }
+
+  const r2Key = r2PathFromFileUrl(fileUrl)
+  if (r2Key) {
+    if (!supabase) throw new Error('File storage is not configured.')
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) throw new Error('Sign in to open this attachment.')
+    const response = await fetch('/api/storage/url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ fileKey: r2Key, channelId: chatId ? String(chatId) : null }),
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.url) throw new Error(payload?.error || 'A secure attachment link could not be created.')
+    return payload.url
+  }
+
+  const path = storagePathFromChatFileUrl(fileUrl)
+  if (!path) return fileUrl
+
+  if (isAppwriteAuthEnabled()) {
+    if (!chatId) throw new Error('The conversation for this attachment is unavailable.')
+    const { fileUrl: signedUrl } = await appwriteData('storage.file.url', {
+      chatId: String(chatId),
+      storagePath: path,
+      fileUrl,
+    })
+    if (!signedUrl) throw new Error('A secure attachment link could not be created.')
+    return signedUrl
+  }
+
+  if (!supabase) throw new Error('File storage is not configured.')
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError) throw new Error(userError.message || 'Could not verify access to this attachment.')
+  if (!user) throw new Error('Sign in to open this attachment.')
+
+  const { data: ownedFile, error: ownedFileError } = await supabase
+    .from('storage_files')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('storage_path', path)
+    .limit(1)
+    .maybeSingle()
+  if (ownedFileError) throw new Error(ownedFileError.message || 'Could not verify access to this attachment.')
+
+  let hasAccess = Boolean(ownedFile)
+  if (!hasAccess) {
+    if (!chatId) throw new Error('The conversation for this attachment is unavailable.')
+    const { data: message, error: messageError } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('chat_id', String(chatId))
+    .eq('file_url', fileUrl)
+    .limit(1)
+    .maybeSingle()
+    if (messageError) throw new Error(messageError.message || 'Could not verify access to this attachment.')
+    hasAccess = Boolean(message)
+  }
+  if (!hasAccess) throw new Error('You no longer have access to this attachment.')
+
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+  if (error || !data?.signedUrl) throw new Error(error?.message || 'A secure attachment link could not be created.')
+  return data.signedUrl
+}
+
+export async function openChatFile(fileUrl, chatId) {
+  if (typeof window === 'undefined') throw new Error('Attachments can only be opened in a browser.')
+  const viewer = window.open('about:blank', '_blank')
+  if (!viewer) throw new Error('Allow pop-ups to open this attachment.')
+  viewer.opener = null
+
+  try {
+    const url = await resolveChatFileUrl(fileUrl, chatId)
+    viewer.location.replace(url)
+  } catch (error) {
+    viewer.close()
+    throw error
+  }
+}
+
+export async function saveReceivedChatFile({
+  userId,
+  chatId,
+  fileUrl,
+  fileName,
+  kind = 'file',
+  durationSeconds = null,
+  onProgress,
+}) {
+  if (!userId) throw new Error('Sign in to save this attachment.')
+  const signedUrl = await resolveChatFileUrl(fileUrl, chatId)
+  const response = await fetch(signedUrl)
+  if (!response.ok) throw new Error(`The attachment download failed (HTTP ${response.status}).`)
+  const blob = await response.blob()
+  if (!blob.size) throw new Error('The downloaded attachment is empty.')
+  const file = new File([blob], String(fileName || 'saved-file'), {
+    type: blob.type || 'application/octet-stream',
+  })
+  return uploadChatFile({
+    userId,
+    chatId: null,
+    file,
+    kind,
+    durationSeconds,
+    onProgress,
+  })
+}
+
 export async function deleteStorageFiles(userId, fileIds) {
   if (!isSupabaseConfigured() || !userId) throw new Error('File storage is not configured.')
   const ids = (fileIds || []).filter(Boolean)
   if (!ids.length) return { deleted: 0 }
   if (isAppwriteAuthEnabled()) {
-    return appwriteData('storage.delete', { fileIds: ids })
+    const result = await appwriteData('storage.delete', { fileIds: ids })
+    if (result?.deleted) announceStorageUsageChanged()
+    return result
   }
 
   const { data: rows, error: readError } = await supabase
@@ -270,5 +433,6 @@ export async function deleteStorageFiles(userId, fileIds) {
     .in('id', ids)
   if (deleteError) throw deleteError
 
+  if (rows?.length) announceStorageUsageChanged()
   return { deleted: rows?.length || 0 }
 }

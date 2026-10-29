@@ -15,11 +15,18 @@ const REQUIRED_TABLES = [
   'public.chats',
   'public.chat_members',
   'public.messages',
+  'public.storage_files',
+  'public.user_storage',
+  'public.attachments',
+  'public.call_push_subscriptions',
   'public.auth_email_code_limits',
 ]
 const REQUIRED_FUNCTIONS = [
   'public.consume_auth_email_code_limit(text,integer,integer)',
   'public.lookup_member_by_nexus_id(text)',
+  'public.is_chat_member(uuid,uuid)',
+  'public.reserve_user_storage(uuid,bigint)',
+  'public.commit_user_storage(uuid,bigint)',
 ]
 const REQUIRED_AUTH_TRIGGERS = ['on_auth_user_created', 'on_auth_user_updated']
 const MIGRATION_TABLE = 'public.nexus_schema_migrations'
@@ -155,6 +162,64 @@ async function collectSchemaChecks(client) {
   const triggerNames = new Set(triggers.map((row) => row.trigger_name))
   for (const name of REQUIRED_AUTH_TRIGGERS) {
     checks.push({ name: `trigger ${name}`, pass: triggerNames.has(name) })
+  }
+  const { rows: membershipFunctions } = await client.query(`
+    select pg_get_functiondef(p.oid) as definition
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = 'is_chat_member'
+      and pg_get_function_identity_arguments(p.oid) = '_chat uuid, _user uuid'
+  `)
+  const membershipFunction = String(membershipFunctions[0]?.definition || '')
+  checks.push({
+    name: 'chat membership helper is bound to the authenticated caller',
+    pass: /_user\s*=\s*\(?\s*select\s+auth\.uid\(\)/i.test(membershipFunction),
+  })
+  const { rows: filePolicies } = await client.query(`
+    select policyname, qual
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = any($1::text[])
+  `, [['Chat files signed-in read', 'Chat members read chat files']])
+  const chatFilePolicy = filePolicies.find((policy) => policy.policyname === 'Chat members read chat files')
+  const chatFilePolicyExpression = String(chatFilePolicy?.qual || '')
+  checks.push({
+    name: 'policy storage.objects restricts chat files to owners or members',
+    pass: Boolean(
+      chatFilePolicy
+      && /(?:public\.)?is_chat_member/i.test(chatFilePolicyExpression)
+      && /auth\.uid/i.test(chatFilePolicyExpression)
+      && !filePolicies.some((policy) => policy.policyname === 'Chat files signed-in read')
+    ),
+  })
+  const { rows: pushPolicies } = await client.query(`
+    select policyname, qual, with_check
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'call_push_subscriptions'
+      and policyname = 'Users manage their own call push subscriptions'
+  `)
+  const pushPolicy = pushPolicies[0]
+  checks.push({
+    name: 'policy public.call_push_subscriptions restricts tokens to their owner',
+    pass: Boolean(
+      pushPolicy
+      && /auth\.uid/i.test(String(pushPolicy.qual || ''))
+      && /auth\.uid/i.test(String(pushPolicy.with_check || ''))
+    ),
+  })
+  const { rows: realtimeTables } = await client.query(`
+    select tablename
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = any($1::text[])
+  `, [['messages', 'chat_members']])
+  const publishedTables = new Set(realtimeTables.map((row) => row.tablename))
+  for (const table of ['messages', 'chat_members']) {
+    checks.push({ name: `realtime publication includes ${table}`, pass: publishedTables.has(table) })
   }
   return { ok: checks.every((check) => check.pass), checks }
 }

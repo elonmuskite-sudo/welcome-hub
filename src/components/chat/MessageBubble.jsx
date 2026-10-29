@@ -1,9 +1,11 @@
 /* eslint-disable react/prop-types */
-import { memo, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { format } from 'date-fns'
-import { FileText, Download, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck } from 'lucide-react'
+import { ArrowLeft, FileText, Film, Image as ImageIcon, Music, Paperclip, SmilePlus, Reply, Copy, Check, CheckCheck, Save, X } from 'lucide-react'
 import ChatButton from './ChatButton'
 import { REACTIONS, decodeContent } from '../../lib/chatProtocol'
+import { resolveChatFileUrl, saveReceivedChatFile } from '../../lib/storageManager'
 
 function formatTime(dateString) {
   try {
@@ -17,9 +19,11 @@ function formatTime(dateString) {
   }
 }
 
-function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, receiptsEnabled = true }) {
+function MessageBubble({ message, isOwn, userId, chatId, onReact, onReply, reacting, receiptsEnabled = true }) {
   const [showReactions, setShowReactions] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [preview, setPreview] = useState(null)
+  const [saveState, setSaveState] = useState({ status: 'idle', percent: 0, error: '' })
   const decoded = decodeContent(message.content)
   const groups = REACTIONS.map(emoji => ({ emoji, users: (message.reactions || []).filter(r => r.emoji === emoji).map(r => r.userId) })).filter(r => r.users.length)
   const copyText = async () => {
@@ -27,6 +31,111 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
   }
   const timeLabel = useMemo(() => formatTime(message.created_at), [message.created_at])
   const isSticker = message.type === 'sticker'
+  const canSaveAttachment = !isOwn
+    && Boolean(message.file_url)
+    && ['image', 'video', 'audio', 'voice', 'file', 'document'].includes(message.type)
+  const hasPreviewModal = ['image', 'video', 'audio', 'voice', 'file', 'document'].includes(message.type)
+  const AttachmentIcon = message.type === 'image'
+    ? ImageIcon
+    : message.type === 'video'
+      ? Film
+      : message.type === 'audio' || message.type === 'voice'
+        ? Music
+        : FileText
+  const attachmentType = message.type === 'image'
+    ? 'Image'
+    : message.type === 'video'
+      ? 'Video'
+      : message.type === 'voice'
+        ? 'Voice note'
+        : message.type === 'audio'
+          ? 'Audio'
+          : 'Document'
+  const attachmentName = message.file_name || decoded.text || attachmentType
+
+  const closePreview = useCallback(() => setPreview(null), [])
+
+  const saveAttachment = useCallback(async () => {
+    if (!canSaveAttachment || saveState.status === 'saving' || saveState.status === 'saved') return
+    setSaveState({ status: 'saving', percent: 0, error: '' })
+    try {
+      await saveReceivedChatFile({
+        userId,
+        chatId,
+        fileUrl: message.file_url,
+        fileName: message.file_name || message.content || 'saved-file',
+        kind: message.type === 'document' ? 'file' : message.type,
+        durationSeconds: message.duration,
+        onProgress: (percent) => setSaveState((current) => ({ ...current, percent })),
+      })
+      setSaveState({ status: 'saved', percent: 100, error: '' })
+    } catch (error) {
+      console.error('Could not save received chat attachment', error)
+      setSaveState({
+        status: 'error',
+        percent: 0,
+        error: error.message || 'This file could not be saved to your storage.',
+      })
+    }
+  }, [
+    canSaveAttachment,
+    saveState.status,
+    userId,
+    chatId,
+    message.file_url,
+    message.file_name,
+    message.content,
+    message.type,
+    message.duration,
+  ])
+
+  const renderSaveButton = () => canSaveAttachment && (
+    <button
+      type="button"
+      onClick={saveAttachment}
+      disabled={saveState.status === 'saving' || saveState.status === 'saved'}
+      className="inline-flex min-h-9 items-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-60"
+    >
+      {saveState.status === 'saved'
+        ? <Check className="h-4 w-4" />
+        : <Save className={`h-4 w-4 ${saveState.status === 'saving' ? 'animate-pulse' : ''}`} />}
+      {saveState.status === 'saved'
+        ? 'Saved to storage'
+        : saveState.status === 'saving'
+          ? `Saving${saveState.percent ? ` ${saveState.percent}%` : '…'}`
+          : 'Save to my storage'}
+    </button>
+  )
+
+  const openPreview = useCallback(async (type) => {
+    const requestId = `${message.id}-${Date.now()}`
+    setPreview({ requestId, type, url: '', loading: true, error: false })
+    try {
+      const url = await resolveChatFileUrl(message.file_url, chatId)
+      setPreview((current) => current?.requestId === requestId
+        ? { ...current, url, loading: false }
+        : current)
+    } catch (error) {
+      console.error('Could not preview chat attachment', error)
+      setPreview((current) => current?.requestId === requestId
+        ? { ...current, loading: false, error: true }
+        : current)
+    }
+  }, [message.id, message.file_url, chatId])
+
+  useEffect(() => {
+    if (!preview) return undefined
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') closePreview()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [preview, closePreview])
 
   const renderContent = useMemo(() => {
     switch (message.type) {
@@ -34,46 +143,29 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
         return <p className="text-xs sm:text-sm whitespace-pre-wrap break-words leading-relaxed">{decoded.text}</p>
 
       case 'image':
-        return (
-          <img
-            src={message.file_url}
-            alt="Shared image"
-            className="w-full max-w-xs sm:max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition"
-            onClick={() => window.open(message.file_url, '_blank')}
-          />
-        )
-
       case 'video':
-        return (
-          <div className="max-w-xs sm:max-w-sm">
-            <video
-              src={message.file_url}
-              controls
-              className="rounded-lg w-full"
-              preload="metadata"
-            />
-            {message.file_name && (
-              <p className="text-xs mt-1 opacity-75 flex items-center gap-1">
-                <Film className="w-3 h-3 flex-shrink-0" />
-                <span className="truncate">{message.file_name}</span>
-              </p>
-            )}
-          </div>
-        )
-
+      case 'audio':
       case 'voice':
+      case 'document':
+      case 'file':
+        if (!message.file_url) return <p className="text-xs">Attachment unavailable</p>
         return (
-          <div className="flex items-center gap-2 min-w-0 max-w-full">
-            <Music className="w-4 h-4 flex-shrink-0" />
-            <audio
-              src={message.file_url}
-              controls
-              className="h-8 w-52 max-w-full min-w-0"
-            />
-            {message.duration && (
-              <span className="text-xs opacity-75 flex-shrink-0">{message.duration}s</span>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={() => openPreview(message.type)}
+            className="flex w-full min-w-52 max-w-sm items-center gap-3 rounded-lg border border-current/10 bg-background/10 p-3 text-left transition-colors hover:bg-background/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            <AttachmentIcon className="h-6 w-6 flex-shrink-0 opacity-80" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">
+                {attachmentName}
+              </p>
+              <p className="mt-0.5 text-xs opacity-75">
+                {attachmentType}{message.duration ? ` · ${Math.round(message.duration)}s` : ''} · Tap to open
+              </p>
+            </div>
+            <Paperclip className="ml-auto h-4 w-4 flex-shrink-0 opacity-60" />
+          </button>
         )
 
       case 'sticker':
@@ -83,35 +175,13 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
           </span>
         )
 
-      case 'document':
-      case 'file':
-        return (
-          <a
-            href={message.file_url}
-            download={message.file_name}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg bg-background/10 hover:bg-background/20 transition-colors"
-          >
-            <FileText className="w-6 h-6 sm:w-8 sm:h-8 flex-shrink-0" />
-            <div className="min-w-0">
-              <p className="text-xs sm:text-sm font-medium truncate">
-                {message.file_name || message.content}
-              </p>
-              <p className="text-xs opacity-75 flex items-center gap-1">
-                <Download className="w-3 h-3 flex-shrink-0" />
-                Tap to download
-              </p>
-            </div>
-          </a>
-        )
-
       default:
         return <p className="text-xs sm:text-sm">{decoded.text}</p>
     }
-  }, [message.type, message.content, message.file_url, message.file_name, message.duration, decoded.text])
+  }, [message.type, message.content, message.file_url, message.duration, decoded.text, attachmentName, attachmentType, openPreview])
 
   return (
+    <>
     <div id={`message-${message.id}`} className={`chat-enter flex ${isOwn ? 'justify-end' : 'justify-start'} px-0`}>
       <div
         className={
@@ -126,6 +196,12 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
       >
         {decoded.reply && <a href={`#message-${decoded.reply.id}`} className="block border-l-2 border-current bg-background/10 px-2 py-1 mb-2 rounded text-xs opacity-80 max-w-full truncate">{decoded.reply.preview}</a>}
         {renderContent}
+        {canSaveAttachment && !hasPreviewModal && (
+          <div className="mt-2">
+            {renderSaveButton()}
+            {saveState.error && <p role="alert" className="mt-1 text-xs text-destructive">{saveState.error}</p>}
+          </div>
+        )}
         {!isSticker && (
           <div className={`text-xs mt-1 opacity-70 ${isOwn ? 'text-primary-foreground' : 'text-muted-foreground'}`}>
             <span>{timeLabel}</span>
@@ -149,6 +225,86 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
         {groups.length > 0 && <div className="flex flex-wrap gap-1 mt-2">{groups.map(({ emoji, users }) => <ChatButton key={emoji} title={`${emoji}: ${users.length} reaction${users.length > 1 ? 's' : ''}`} aria-pressed={users.includes(String(userId))} disabled={reacting} onClick={() => onReact?.(message, emoji)} className={`!min-h-7 px-2 text-xs border ${users.includes(String(userId)) ? 'bg-accent text-accent-foreground border-accent' : 'bg-card text-card-foreground border-border'}`}>{emoji} {users.length}</ChatButton>)}</div>}
       </div>
     </div>
+    {preview && createPortal(
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 sm:p-6"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closePreview()
+        }}
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-label={preview.type === 'image' ? 'Image preview' : 'Document preview'}
+          className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-2xl"
+        >
+          <header className="flex min-h-14 items-center gap-2 border-b border-border px-3 sm:px-4">
+            <button
+              type="button"
+              onClick={closePreview}
+              className="inline-flex min-h-10 items-center gap-2 rounded-md px-2 text-sm font-medium hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              aria-label="Back to conversation"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="hidden sm:inline">Back to conversation</span>
+              <span className="sm:hidden">Back</span>
+            </button>
+            <p className="min-w-0 flex-1 truncate text-sm font-medium">
+              {attachmentName}
+            </p>
+            {renderSaveButton()}
+            <button
+              type="button"
+              onClick={closePreview}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              aria-label="Close preview"
+              title="Close preview"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </header>
+          <div className={`flex min-h-0 flex-1 items-center justify-center bg-black/5 p-2 sm:p-4 ${preview.type === 'image' ? 'overflow-hidden' : 'overflow-auto'}`}>
+            {preview.loading && <p className="text-sm text-muted-foreground">Loading preview…</p>}
+            {preview.error && (
+              <div className="space-y-3 text-center">
+                <p role="alert" className="text-sm text-destructive">This file preview could not be loaded.</p>
+                <button type="button" onClick={() => openPreview(preview.type)} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+                  Try again
+                </button>
+              </div>
+            )}
+            {!preview.loading && !preview.error && preview.url && preview.type === 'image' && (
+              <img src={preview.url} alt={message.file_name || 'Shared image'} className="h-full w-full object-contain" />
+            )}
+            {!preview.loading && !preview.error && preview.url && preview.type === 'video' && (
+              <video src={preview.url} controls autoPlay className="max-h-full max-w-full rounded-md" preload="metadata" />
+            )}
+            {!preview.loading && !preview.error && preview.url && ['audio', 'voice'].includes(preview.type) && (
+              <div className="flex w-full max-w-xl flex-col items-center gap-4 rounded-lg border border-border bg-background p-6">
+                <Music className="h-10 w-10 text-primary" />
+                <p className="max-w-full truncate text-sm font-medium">{attachmentName}</p>
+                <audio src={preview.url} controls autoPlay className="w-full" preload="metadata" />
+              </div>
+            )}
+            {!preview.loading && !preview.error && preview.url && ['file', 'document'].includes(preview.type) && (
+              <iframe
+                src={preview.url}
+                title={attachmentName}
+                className="h-[75vh] min-h-[50vh] w-full rounded-md bg-white"
+              />
+            )}
+          </div>
+          {saveState.error && (
+            <p role="alert" className="border-t border-border px-4 py-2 text-sm text-destructive">
+              {saveState.error}
+            </p>
+          )}
+        </section>
+      </div>,
+      document.body,
+    )}
+    </>
   )
 }
 
