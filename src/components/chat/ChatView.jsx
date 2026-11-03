@@ -20,6 +20,8 @@ import { SyncSpinner } from '../SyncIndicator'
 import { peerIdOf, chatDisplayName } from '../../lib/chatPreview'
 import { requiresE2EEEncryption } from '../../lib/crypto/envelope'
 import { resolveMessages, decodeContent, encodeReply } from '../../lib/chatProtocol'
+import { useChatTyping } from '../../hooks/useChatTyping'
+import ChatProfileSheet from './ChatProfileSheet'
 
 // Single placeholder for any encrypted message we cannot read yet (missing peer
 // key or a payload from another key), so pending and failed never look different.
@@ -34,6 +36,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
   const [showSearch, setShowSearch] = useState(false)
   const [search, setSearch] = useState('')
   const [reacting, setReacting] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const messagesEndRef = useRef(null)
   // Message ids already attempted in this chat; keeps the decrypt effect from
   // retrying a failure on every render while still allowing a retry after the
@@ -65,16 +68,31 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
   const { user } = useAuth()
   const didAutoStartCall = useRef(false)
   const peerId = peerIdOf(chat, user?.id)
+  const peerName = chatDisplayName(chat, user?.id)
+  const { isPeerTyping, setLocalTyping } = useChatTyping(chat.id, user?.id, Boolean(peerId) && chat.type !== 'group')
+
+  const closeProfile = useCallback(() => setShowProfile(false), [])
+  const openSearch = useCallback(() => {
+    setShowSearch(true)
+    setSearch('')
+  }, [])
+  const openMessage = useCallback((messageId) => {
+    setSearch('')
+    setShowSearch(false)
+    window.setTimeout(() => {
+      document.getElementById(`chat-message-${messageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 0)
+  }, [])
 
   const startCall = useCallback(() => {
-    if (!peerId) return
+    if (!peerId || call) return
     initiateCall({
       chatId: chat.id,
       peerId,
       peerName: chatDisplayName(chat, user?.id),
       peerAvatar: chat.avatar_url,
     })
-  }, [chat, peerId, user?.id, initiateCall])
+  }, [chat, peerId, user?.id, initiateCall, call])
 
   // The number-lookup "Call" action arrives with autoStartCall; fire the call once.
   useEffect(() => {
@@ -296,21 +314,29 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
           >
             <ArrowLeftIcon className="w-5 h-5" />
           </ChatButton>
-          <div className="flex-shrink-0">
-            <Avatar src={chat.avatar_url} alt={chatDisplayName(chat, user?.id)} size="sm" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1 min-w-0">
-              <h2 className="font-bold text-foreground truncate text-sm sm:text-base">{chatDisplayName(chat, user?.id)}</h2>
-              {peerId && <VerificationBadge userId={peerId} className="w-4 h-4 flex-shrink-0" />}
-              {chat.encrypted && (
-                <LockClosedIcon className="w-3.5 h-3.5 text-primary flex-shrink-0" title="End-to-end encrypted" />
-              )}
-            </div>
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              {call?.state === 'connected' ? 'On call' : chat.type === 'group' ? 'Group conversation' : 'Private conversation'}
-            </p>
-          </div>
+          <ChatButton
+            title={peerId ? 'Open contact profile' : 'Conversation details'}
+            aria-haspopup={peerId ? 'dialog' : undefined}
+            onClick={() => { if (peerId) setShowProfile(true) }}
+            disabled={!peerId}
+            className="flex min-w-0 items-center gap-2 sm:gap-3 rounded-xl text-left"
+          >
+            <span className="flex-shrink-0">
+              <Avatar src={chat.avatar_url} alt={peerName} size="sm" />
+            </span>
+            <span className="min-w-0">
+              <span className="flex items-center gap-1">
+                <span className="truncate font-bold text-foreground text-sm sm:text-base">{peerName}</span>
+                {peerId && <VerificationBadge userId={peerId} className="h-4 w-4 flex-shrink-0" />}
+                {chat.encrypted && (
+                  <LockClosedIcon className="h-3.5 w-3.5 flex-shrink-0 text-primary" title="End-to-end encrypted" />
+                )}
+              </span>
+              <span className={`block truncate text-xs sm:text-sm ${isPeerTyping ? 'font-medium text-primary' : 'text-muted-foreground'}`} aria-live="polite">
+                {call?.state === 'connected' ? 'On call' : isPeerTyping ? 'Typing…' : chat.type === 'group' ? 'Group conversation' : 'Private conversation'}
+              </span>
+            </span>
+          </ChatButton>
         </div>
 
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
@@ -357,20 +383,23 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
                 </div>
               </div>
             ) : (
-              visibleMessages.map((message) => message.type === 'call' ? (
-                <CallHistoryEntry key={message.id} message={message} userId={user?.id} />
-              ) : (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  userId={user?.id}
-                  chatId={chat.id}
-                  onReact={handleReact}
-                  onReply={setReply}
-                  reacting={reacting}
-                  receiptsEnabled={readReceiptsEnabled}
-                  isOwn={String(message.sender_id) === String(user?.id) || message.sender_id === 'me'}
-                />
+              visibleMessages.map((message) => (
+                <div key={message.id} id={`chat-message-${message.id}`} className="scroll-mt-20">
+                  {message.type === 'call' ? (
+                    <CallHistoryEntry message={message} userId={user?.id} />
+                  ) : (
+                    <MessageBubble
+                      message={message}
+                      userId={user?.id}
+                      chatId={chat.id}
+                      onReact={handleReact}
+                      onReply={setReply}
+                      reacting={reacting}
+                      receiptsEnabled={readReceiptsEnabled}
+                      isOwn={String(message.sender_id) === String(user?.id) || message.sender_id === 'me'}
+                    />
+                  )}
+                </div>
               ))
             )}
             <div ref={messagesEndRef} />
@@ -379,7 +408,18 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
       </div>
 
       {sendError && <p role="alert" className="border-t border-destructive/30 bg-destructive/10 chat-page-x py-2 text-sm text-destructive break-words">{sendError}</p>}
-      <MessageInput onSendMessage={handleSendMessage} reply={reply} onCancelReply={() => setReply(null)} chatId={chat.id} />
+      <MessageInput onSendMessage={handleSendMessage} onTypingChange={setLocalTyping} reply={reply} onCancelReply={() => setReply(null)} chatId={chat.id} />
+      <ChatProfileSheet
+        open={showProfile}
+        chat={chat}
+        peerId={peerId}
+        peerName={peerName}
+        callDisabled={Boolean(call)}
+        onClose={closeProfile}
+        onCall={startCall}
+        onSearch={openSearch}
+        onOpenMessage={openMessage}
+      />
     </div>
   )
 }

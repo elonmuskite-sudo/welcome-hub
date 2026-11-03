@@ -27,7 +27,7 @@ const CHAT_INPUT_HINTS = {
   autoCapitalize: 'sentences',
 }
 
-export default function MessageInput({ onSendMessage, reply, onCancelReply, chatId }) {
+export default function MessageInput({ onSendMessage, onTypingChange, reply, onCancelReply, chatId }) {
   const { user } = useAuth()
   const { uploadFile: uploadToR2 } = useChatUploader()
   const [inputText, setInputText] = useState('')
@@ -47,18 +47,20 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
   const aliveRef = useRef(true)
   const chunksRef = useRef([])
   const pendingUrlRef = useRef(null)
+  const typingActiveRef = useRef(false)
 
   useEffect(() => {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
+      if (typingActiveRef.current) onTypingChange?.(false)
       if (recorderRef.current) recorderRef.current.onstop = null
       if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
       streamRef.current?.getTracks().forEach(track => track.stop())
       clearInterval(intervalRef.current)
       if (pendingUrlRef.current) URL.revokeObjectURL(pendingUrlRef.current)
     }
-  }, [])
+  }, [onTypingChange])
   useEffect(() => { if (reply) textareaRef.current?.focus() }, [reply])
 
   // Auto-grows the composer up to a cap derived from the *visible* viewport: on
@@ -96,7 +98,17 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
   const submit = async event => {
     event.preventDefault()
     if (!inputText.trim() || isSending) return
-    if (await send({ content: inputText.trim(), type: 'text' })) setInputText('')
+    if (await send({ content: inputText.trim(), type: 'text' })) {
+      typingActiveRef.current = false
+      onTypingChange?.(false)
+      setInputText('')
+    }
+  }
+  const updateInput = (value) => {
+    const typing = Boolean(value.trim())
+    typingActiveRef.current = typing
+    onTypingChange?.(typing)
+    setInputText(value)
   }
 
   // Attachments go through the R2 object-storage pipeline when it is configured
@@ -254,7 +266,7 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
       <ChatButton title="Stickers" disabled={busy} onClick={() => togglePanel('stickers')} aria-expanded={activePanel === 'stickers'} className={`w-11 h-11 shrink-0 ${activePanel === 'stickers' ? 'bg-primary/10 text-primary' : ''}`}><Sticker className="w-5 h-5" /></ChatButton>
       <ChatButton title="Attach files" disabled={busy} onClick={() => fileInputRef.current?.click()} className="w-11 h-11 shrink-0"><Paperclip className="w-5 h-5" /></ChatButton>
       <input ref={fileInputRef} type="file" multiple accept={ATTACHMENT_ACCEPT} className="hidden" onChange={selectFiles} />
-      <textarea ref={textareaRef} rows={1} disabled={busy} aria-label="Message" maxLength={16000} value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) submit(e) }} placeholder="Message…" {...CHAT_INPUT_HINTS} className="chat-textarea flex-1 min-w-0 min-h-11 resize-none rounded-lg bg-muted px-3 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
+      <textarea ref={textareaRef} rows={1} disabled={busy} aria-label="Message" maxLength={16000} value={inputText} onChange={e => updateInput(e.target.value)} onBlur={() => { typingActiveRef.current = false; onTypingChange?.(false) }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) submit(e) }} placeholder="Message…" {...CHAT_INPUT_HINTS} className="chat-textarea flex-1 min-w-0 min-h-11 resize-none rounded-lg bg-muted px-3 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
       <ChatButton type={inputText.trim() ? 'submit' : 'button'} variant="primary" title={busy ? 'Sending message' : inputText.trim() ? 'Send message' : 'Record voice message'} disabled={busy} onClick={!inputText.trim() ? startRecording : undefined} className="w-11 h-11 shrink-0">{busy ? <LoaderCircle className="w-5 h-5 animate-spin" /> : inputText.trim() ? <Send className="w-5 h-5" /> : <Mic className="w-5 h-5" />}</ChatButton>
     </form>}
     {pendingVoice && <VoiceNoteDialog audioUrl={pendingVoice.url} durationSeconds={pendingVoice.durationSeconds} peaks={pendingVoice.peaks} isSending={busy} error={error} onSend={sendPendingVoice} onDelete={discardPendingVoice} />}

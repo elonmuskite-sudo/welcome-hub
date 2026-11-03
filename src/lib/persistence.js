@@ -152,6 +152,7 @@ export function startRealtimeListeners() {
       await appendMessage(String(row.chat_id), mapMessage(row))
       if (row.type !== 'reaction' && row.type !== 'receipt' && row.type !== 'call' && String(row.sender_id || '') !== String(currentUserId || '')) {
         emit('nexus:incoming-notification', {
+          chatId: String(row.chat_id),
           title: 'New message',
           preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',
           avatarUrl: '/logo.png', type: 'message',
@@ -408,6 +409,7 @@ export function applyChatSyncBatch(remoteChats, messages) {
     else byChat.set(chatId, [row])
     if (row.type !== 'reaction' && row.type !== 'receipt' && row.type !== 'call') {
       notifications.push({
+        chatId,
         title: 'New message',
         preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',
         avatarUrl: '/logo.png',

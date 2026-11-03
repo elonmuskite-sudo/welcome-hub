@@ -1,18 +1,38 @@
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import Avatar from './Avatar'
 import { Lock } from 'lucide-react'
 import ChatButton from './ChatButton'
 import VerificationBadge from './VerificationBadge'
 import { useAuth } from '../../lib/AuthContext'
 import { chatListPreview, peerIdOf } from '../../lib/chatPreview'
+import { useChatTyping } from '../../hooks/useChatTyping'
 
 function ChatListItem({ chat, selected, now, onClick }) {
   const { user } = useAuth()
   const peerId = peerIdOf(chat, user?.id)
   const preview = useMemo(() => chatListPreview(chat, user?.id, now), [chat, user?.id, now])
+  const rowRef = useRef(null)
+  const [nearViewport, setNearViewport] = useState(false)
+  const { isPeerTyping } = useChatTyping(chat.id, user?.id, nearViewport && Boolean(peerId))
+
+  useEffect(() => {
+    const row = rowRef.current
+    if (!row) return undefined
+    if (typeof IntersectionObserver === 'undefined') {
+      setNearViewport(true)
+      return undefined
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      setNearViewport(entry.isIntersecting)
+    }, { rootMargin: '100px' })
+    observer.observe(row)
+    return () => observer.disconnect()
+  }, [])
 
   return (
     <ChatButton
+      ref={rowRef}
       onClick={onClick}
       className={`w-full text-left flex items-center !rounded-none !h-auto !justify-start p-4 chat-enter ${
         selected ? 'bg-primary/10 border-l-2 border-primary' : 'border-l-2 border-transparent'
@@ -37,11 +57,19 @@ function ChatListItem({ chat, selected, now, onClick }) {
           )}
         </div>
         <div className="flex justify-between items-center">
-          <p className="text-sm text-muted-foreground truncate" title={preview.snippet}>
-            {preview.senderName && preview.senderName !== preview.name && (
-              <span aria-hidden="true">{preview.senderName}: </span>
+          <p
+            className={`text-sm truncate ${isPeerTyping ? 'font-medium text-primary' : 'text-muted-foreground'}`}
+            title={isPeerTyping ? 'Typing…' : preview.snippet}
+            aria-live="polite"
+          >
+            {isPeerTyping ? 'Typing…' : (
+              <>
+                {preview.senderName && preview.senderName !== preview.name && (
+                  <span aria-hidden="true">{preview.senderName}: </span>
+                )}
+                {preview.snippet}
+              </>
             )}
-            {preview.snippet}
           </p>
           {chat.unread_count > 0 && (
             <span className="ml-2 bg-primary text-primary-foreground text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0">

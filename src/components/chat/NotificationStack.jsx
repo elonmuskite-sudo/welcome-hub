@@ -1,5 +1,6 @@
 import { BellIcon } from '@heroicons/react/24/solid'
 import { useEffect, useState } from 'react'
+import { isChatMuted } from '../../lib/chatPreferences'
 
 export default function NotificationStack() {
   const [notifications, setNotifications] = useState([])
@@ -7,6 +8,7 @@ export default function NotificationStack() {
   useEffect(() => {
     const handleNotification = (event) => {
       const detail = event.detail || {}
+      if (detail.chatId && isChatMuted(detail.chatId)) return
       const id = detail.id || `${Date.now()}-${Math.random()}`
       const next = {
         id,
