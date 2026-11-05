@@ -63,13 +63,14 @@ export function createCallId() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-export function buildRingPayload({ callId, chatId, caller, expiresAt }) {
+export function buildRingPayload({ callId, chatId, caller, expiresAt, kind = 'voice' }) {
   return {
     callId: idOf(callId),
     chatId: idOf(chatId),
     fromUserId: idOf(caller?.id),
     fromName: idOf(caller?.name) || 'Nexus user',
     fromAvatar: caller?.avatar || null,
+    kind: kind === 'video' ? 'video' : 'voice',
     ...(Number.isSafeInteger(expiresAt) ? { expiresAt } : {}),
   }
 }

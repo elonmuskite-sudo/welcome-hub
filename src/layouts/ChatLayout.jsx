@@ -10,7 +10,8 @@ import ErrorBoundary from '../components/ErrorBoundary'
 import SyncIndicator from '../components/SyncIndicator'
 import Header from '../components/Header'
 import { requestNotificationPermission, showSystemNotification } from '../lib/notifications'
-import { startRealtimeListeners, stopRealtimeListeners } from '../lib/persistence'
+import { getChats, getContacts, startRealtimeListeners, stopRealtimeListeners } from '../lib/persistence'
+import { useAuth } from '../lib/AuthContext'
 import { publishMyPublicKey, applyE2EEDefaultForExistingAccount, shouldShowE2EEDefaultNotice, dismissE2EEDefaultNotice } from '../lib/crypto/e2ee'
 import { syncE2EEStatus } from '../lib/persistence'
 import { useViewportInsets } from '../hooks/useViewportInsets'
@@ -18,8 +19,29 @@ import { useViewportInsets } from '../hooks/useViewportInsets'
 export default function ChatLayout() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [showE2eeNotice, setShowE2eeNotice] = useState(false)
+  const [initialSync, setInitialSync] = useState({ status: 'loading', error: '' })
+  const [syncAttempt, setSyncAttempt] = useState(0)
   useViewportInsets()
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+    let active = true
+    let timeoutId
+    setInitialSync({ status: 'loading', error: '' })
+    const timeout = new Promise((_, reject) => {
+      timeoutId = window.setTimeout(() => reject(new Error('Initial sync is taking longer than expected.')), 20000)
+    })
+    Promise.race([Promise.all([getChats(user.id), getContacts()]), timeout])
+      .then(() => { if (active) setInitialSync({ status: 'ready', error: '' }) })
+      .catch((error) => { if (active) setInitialSync({ status: 'failed', error: error?.message || 'Could not sync your workspace.' }) })
+      .finally(() => window.clearTimeout(timeoutId))
+    return () => {
+      active = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [user?.id, syncAttempt])
 
   useEffect(() => {
     async function initNotifications() {
@@ -100,6 +122,29 @@ export default function ChatLayout() {
 
       {/* Rendered here rather than per-chat so an incoming call rings on any page. */}
       <VoiceCallOverlay />
+
+      {initialSync.status !== 'ready' && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background px-6 py-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div className="w-full max-w-sm text-center">
+            {initialSync.status === 'loading' ? (
+              <>
+                <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-primary/20 border-t-primary" role="status" aria-label="Syncing workspace" />
+                <h1 className="mt-5 text-lg font-semibold text-foreground">Syncing your workspace</h1>
+                <p className="mt-2 text-sm text-muted-foreground">Loading your conversations and contacts…</p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-lg font-semibold text-foreground">Initial sync didn’t finish</h1>
+                <p role="alert" className="mt-2 text-sm text-muted-foreground">{initialSync.error}</p>
+                <div className="mt-5 flex flex-col gap-2">
+                  <button type="button" onClick={() => setSyncAttempt((attempt) => attempt + 1)} className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground">Retry sync</button>
+                  <button type="button" onClick={() => setInitialSync({ status: 'ready', error: '' })} className="rounded-lg border border-border px-4 py-2.5 text-sm font-semibold text-foreground">Continue with saved data</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

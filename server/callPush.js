@@ -46,6 +46,7 @@ function pushData(call) {
     fromUserId: String(call.fromUserId),
     fromName: String(call.fromName || 'Nexus user').slice(0, 100),
     fromAvatar: String(call.fromAvatar || '').slice(0, 2048),
+    callKind: call.callKind === 'video' ? 'video' : 'voice',
     expiresAt: String(call.expiresAt),
   }
 }
@@ -92,7 +93,7 @@ export async function sendCallPush(recipientId, call) {
   const ttlSeconds = Math.max(1, Math.ceil((expiresAt - Date.now()) / 1000))
   const ttlMilliseconds = Math.max(1000, expiresAt - Date.now())
   const notification = {
-    title: 'Incoming voice call',
+    title: data.callKind === 'video' ? 'Incoming video call' : 'Incoming voice call',
     body: `${data.fromName} is calling you. Tap to answer.`,
     data,
   }

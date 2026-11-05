@@ -47,9 +47,12 @@ test('buildRingPayload trims values and defaults the caller name', () => {
     fromUserId: 'u2',
     fromName: 'Nexus user',
     fromAvatar: null,
+    kind: 'voice',
     expiresAt: 12345,
   })
   assert.equal(buildRingPayload({ caller: { id: 'u2', name: 'Ada', avatar: 'a.png' } }).fromAvatar, 'a.png')
+  assert.equal(buildRingPayload({ kind: 'video' }).kind, 'video')
+  assert.equal(buildRingPayload({ kind: 'unexpected' }).kind, 'voice')
 })
 
 test('matchesCall only accepts the payload of the call in progress', () => {

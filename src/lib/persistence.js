@@ -180,11 +180,27 @@ export async function readChats(userId) {
   return withSync('chats', () => readChatsFromSource(userId))
 }
 
+async function addCurrentPeerAvatars(chats, userId) {
+  const peerIds = [...new Set(chats
+    .filter((chat) => chat.type !== 'group')
+    .flatMap((chat) => (chat.participant_ids || []).map(String).filter((id) => id !== String(userId || ''))))]
+  if (!peerIds.length) return chats
+  const { data: profiles, error } = await supabase.rpc('list_member_profiles', { p_ids: peerIds })
+  if (error) throw error
+  const avatars = new Map((profiles || []).map((profile) => [String(profile.id), profile.avatar_url]))
+  return chats.map((chat) => {
+    if (chat.type === 'group') return chat
+    const peerId = (chat.participant_ids || []).map(String).find((id) => id !== String(userId || ''))
+    return peerId && avatars.has(peerId) ? { ...chat, avatar_url: avatars.get(peerId) } : chat
+  })
+}
+
 async function readChatsFromSource(userId) {
   if (isAppwriteAuthEnabled()) {
     const { chats = [] } = await appwriteData('chats.list')
-    const mappedChats = chats.map(({ chat_members: members, latest, ...chat }) => ({
+    const mappedChats = chats.map(({ chat_members: members, latest, peer_avatar_url: peerAvatarUrl, ...chat }) => ({
       ...chat,
+      avatar_url: peerAvatarUrl || chat.avatar_url,
       id: String(chat.id),
       participant_ids: (members || []).map((member) => String(member.profile_id)),
       latest: Array.isArray(latest) ? latest[0] : latest,
@@ -223,6 +239,7 @@ async function readChatsFromSource(userId) {
     }
   }
 
+  if (remoteChats) remoteChats = await addCurrentPeerAvatars(remoteChats, userId)
   const local = readLocalChats()
   if (!remoteChats) {
     if (!userId) return local

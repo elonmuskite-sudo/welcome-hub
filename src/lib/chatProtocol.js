@@ -44,6 +44,7 @@ export function encodeCallHistory(event) {
     callId: event.callId,
     outcome: event.outcome,
     duration: event.duration,
+    callType: event.callType === 'video' ? 'video' : 'voice',
     startedAt: typeof event.startedAt === 'string' ? event.startedAt : null,
     endedAt: typeof event.endedAt === 'string' ? event.endedAt : null,
   })
@@ -61,6 +62,7 @@ export function decodeCallHistory(content) {
       callId: event.callId,
       outcome: event.outcome,
       duration: event.duration,
+      callType: event.callType === 'video' ? 'video' : 'voice',
       startedAt: typeof event.startedAt === 'string' ? event.startedAt : null,
       endedAt: typeof event.endedAt === 'string' ? event.endedAt : null,
     }
@@ -70,8 +72,9 @@ export function decodeCallHistory(content) {
 }
 
 export function callHistoryLabel(event, isOutgoing) {
+  const callType = event?.callType === 'video' ? 'video' : 'voice'
   if (!event) return 'Voice call'
-  if (event.outcome === 'completed') return isOutgoing ? 'Outgoing voice call' : 'Incoming voice call'
+  if (event.outcome === 'completed') return isOutgoing ? `Outgoing ${callType} call` : `Incoming ${callType} call`
   if (event.outcome === 'missed') return isOutgoing ? 'Outgoing call · No answer' : 'Missed call'
   if (event.outcome === 'declined') return isOutgoing ? 'Outgoing call · Declined' : 'Declined incoming call'
   if (event.outcome === 'busy') return isOutgoing ? 'Outgoing call · Contact busy' : 'Call unavailable'

@@ -20,6 +20,7 @@ function incomingCallUrl(data = {}) {
     fromUserId: String(data.fromUserId || ''),
     fromName: String(data.fromName || 'Contact'),
     fromAvatar: String(data.fromAvatar || ''),
+    callKind: data.callKind === 'video' ? 'video' : 'voice',
   })
   return `/app/chat/${encodeURIComponent(chatId)}?${query}`
 }
@@ -49,9 +50,9 @@ async function saveSubscription(payload) {
   if (!response.ok) throw new Error(result?.error || 'Call alerts could not be enabled.')
 }
 
-export async function notifyCallPush({ chatId, callId, expiresAt }) {
+export async function notifyCallPush({ chatId, callId, expiresAt, kind = 'voice' }) {
   if (isAppwriteAuthEnabled()) {
-    return appwriteData('calls.push.notify', { chatId, callId, expiresAt })
+    return appwriteData('calls.push.notify', { chatId, callId, expiresAt, kind })
   }
   if (!supabase) throw new Error('Call notifications are not configured.')
   const { data: { session }, error } = await supabase.auth.getSession()
@@ -63,7 +64,7 @@ export async function notifyCallPush({ chatId, callId, expiresAt }) {
       Authorization: `Bearer ${session.access_token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ chatId, callId, expiresAt }),
+    body: JSON.stringify({ chatId, callId, expiresAt, kind }),
   })
   const result = await response.json().catch(() => null)
   if (!response.ok) throw new Error(result?.error || 'The background call alert could not be sent.')

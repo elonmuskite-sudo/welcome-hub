@@ -132,6 +132,11 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
       const { rows } = await client.query(
         `select c.id, c.title, c.type, c.avatar_url, c.encrypted, c.owner_id, c.created_at,
                 c.participant_names,
+                (select m.avatar_url
+                   from public.chat_members peer
+                   join public.members m on m.id = peer.profile_id
+                  where peer.chat_id = c.id and peer.profile_id <> $1
+                  limit 1) as peer_avatar_url,
                 (select json_build_object(
                           'content', m.content, 'created_at', m.created_at, 'sender_id', m.sender_id,
                           'type', m.type, 'encrypted', m.encrypted)
@@ -290,10 +295,11 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
       // Scoped to the caller: without this filter every account rendered the
       // same rows, which is how unrelated people appeared with an identical name.
       const { rows } = await client.query(
-        `select id, name, nexus_id, avatar_url, created_at
-           from public.contacts
-          where user_id = $1
-          order by created_at desc
+        `select c.id, c.name, c.nexus_id, coalesce(m.avatar_url, c.avatar_url) as avatar_url, c.created_at
+           from public.contacts c
+           left join public.members m on m.member_id = c.nexus_id
+          where c.user_id = $1
+          order by c.created_at desc
           limit 500`,
         [supabaseUserId],
       )
@@ -451,6 +457,56 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
       if (error || !data?.signedUrl) throw new GatewayError('Could not create a secure file link.', 503)
       return { fileUrl: data.signedUrl }
     }
+    case 'profile.avatar.url': {
+      const storagePath = requiredString(body.storagePath, 'Storage path', 1024)
+      const fileUrl = requiredString(body.fileUrl, 'Profile photo reference', 4096)
+      if (storagePathFromChatFileUrl(fileUrl) !== storagePath
+        || !validUuid(storagePath.split('/')[0])
+        || storagePath.split('/')[1] !== 'direct') {
+        throw new GatewayError('The profile photo reference is invalid.')
+      }
+      const { rows } = await client.query(
+        `select exists (
+           select 1
+             from public.members m
+            where m.id::text = split_part($2, '/', 1)
+              and m.avatar_url = $3
+             and (
+               m.id = $1
+               or (
+                 (
+                   exists (
+                     select 1 from public.contacts c
+                      where c.user_id = $1 and c.nexus_id = m.member_id
+                   )
+                   or exists (
+                     select 1 from public.feed_posts p
+                      where p.author_id = m.id and p.status = 'active'
+                   )
+                   or exists (
+                     select 1
+                       from public.feed_comments fc
+                       join public.feed_posts fp on fp.id = fc.post_id
+                      where fc.author_id = m.id
+                        and (fp.status = 'active' or fp.author_id = $1 or public.has_role($1, 'admin'))
+                        and (fc.status = 'active' or fc.author_id = $1 or public.has_role($1, 'admin'))
+                   )
+                   or public.has_role($1, 'admin')
+                 )
+                 and not exists (
+                   select 1 from public.blocked_users bu
+                    where bu.blocker_id = $1 and bu.blocked_id = m.id
+                 )
+               )
+             )
+         ) as allowed`,
+        [supabaseUserId, storagePath, fileUrl],
+      )
+      if (!rows[0]?.allowed) throw new GatewayError('You no longer have access to this profile photo.', 404)
+      const { data, error } = await admin.storage.from('chat-files').createSignedUrl(storagePath, 60 * 60)
+      if (error || !data?.signedUrl) throw new GatewayError('A secure profile photo link could not be created.', 503)
+      return { fileUrl: data.signedUrl }
+    }
     case 'storage.upload.cancel': {
       const fileId = requiredString(body.fileId, 'File ID', 64)
       if (!validUuid(fileId)) throw new GatewayError('File ID is invalid.')
@@ -554,6 +610,7 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
         fromUserId: supabaseUserId,
         fromName: caller.full_name || 'Nexus user',
         fromAvatar: caller.avatar_url || '',
+        callKind: body.kind === 'video' ? 'video' : 'voice',
       }
       const recipientId = String(peers[0].profile_id)
       return {
@@ -705,36 +762,12 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
       )
       return { record: rows[0] || null }
     }
-    case 'verification.instant': {
-      const selfiePath = requiredString(body.selfiePath, 'Selfie path', 255)
-      if (!selfiePath.startsWith(`${supabaseUserId}/`)) {
-        throw new GatewayError('Identity document paths are invalid.')
-      }
-      const score = Number(body.matchScore)
-      if (!Number.isFinite(score) || score < 0 || score > 1) throw new GatewayError('Face match score is invalid.')
-      const selfie = await admin.storage.from('identity-docs').info(selfiePath)
-      const selfieSize = Number(selfie.data?.size ?? selfie.data?.metadata?.size)
-      const selfieType = String(selfie.data?.content_type || selfie.data?.metadata?.mimetype || '').toLowerCase()
-      if (selfie.error || !Number.isSafeInteger(selfieSize) || selfieSize < 1 || selfieSize > 15 * 1024 * 1024
-        || !['image/jpeg', 'image/png', 'image/webp'].includes(selfieType)) {
-        throw new GatewayError('The uploaded selfie is invalid or exceeds 15 MB.')
-      }
-      // Routed through the security-definer RPC so only the caller's own row can
-      // be auto-approved, exactly like the Supabase path.
-      await client.query(
-        `select public.submit_instant_identity_verification($1, $2)`,
-        [selfiePath, Number(score.toFixed(3))],
-      )
-      return { record: { status: 'approved', tier: 'instant', match_score: Number(score.toFixed(3)) } }
-    }
     case 'verification.submit': {
       const selfiePath = requiredString(body.selfiePath, 'Selfie path', 255)
       const idPath = requiredString(body.idPath, 'Identity document path', 255)
       if (!selfiePath.startsWith(`${supabaseUserId}/`) || !idPath.startsWith(`${supabaseUserId}/`)) {
         throw new GatewayError('Identity document paths are invalid.')
       }
-      const score = Number(body.matchScore)
-      if (!Number.isFinite(score) || score < 0 || score > 1) throw new GatewayError('Face match score is invalid.')
       const fullLegalName = requiredString(body.fullLegalName, 'Full legal name', 200)
       const dateOfBirth = requiredString(body.dateOfBirth, 'Date of birth', 10)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) throw new GatewayError('Date of birth is invalid.')
@@ -761,7 +794,7 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
           (user_id, status, tier, match_score, selfie_path, id_document_path,
            full_legal_name, date_of_birth, document_type, document_number, issuing_country,
            reviewer_note, reviewed_by, reviewed_at)
-         values ($1, 'pending', 'manual', $2, $3, $4, $5, $6, $7, $8, $9, null, null, null)
+          values ($1, 'pending', 'manual', null, $2, $3, $4, $5, $6, $7, $8, null, null, null)
          on conflict (user_id) do update set status = 'pending', tier = 'manual', match_score = excluded.match_score,
            selfie_path = excluded.selfie_path, id_document_path = excluded.id_document_path,
            full_legal_name = excluded.full_legal_name, date_of_birth = excluded.date_of_birth,
@@ -769,7 +802,7 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
            issuing_country = excluded.issuing_country,
            reviewer_note = null, reviewed_by = null, reviewed_at = null
          returning status, tier, match_score, reviewer_note, created_at`,
-        [supabaseUserId, Number(score.toFixed(3)), selfiePath, idPath, fullLegalName, dateOfBirth, documentType, documentNumber, issuingCountry],
+        [supabaseUserId, selfiePath, idPath, fullLegalName, dateOfBirth, documentType, documentNumber, issuingCountry],
       )
       return { record: rows[0] }
     }

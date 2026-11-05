@@ -44,6 +44,30 @@ test('self-service admin claim is removed from the canonical schema and existing
   assert.match(migration, /drop function if exists private\.claim_first_admin\(\)/i)
 })
 
+test('identity verification cannot approve from client-side face scores', () => {
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261105094049_disable_unverified_identity_auto_approval.sql'),
+    'utf8',
+  )
+  const settings = fs.readFileSync(
+    path.join(root, 'src', 'components', 'chat', 'settings', 'VerificationSettings.jsx'),
+    'utf8',
+  )
+  const gateway = fs.readFileSync(path.join(root, 'server', 'appwriteGateway.js'), 'utf8')
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+
+  assert.match(migration, /where tier = 'instant'/i)
+  assert.match(migration, /set status = 'rejected'/i)
+  assert.match(migration, /match_score = null/i)
+  assert.match(migration, /check \(tier = 'manual'\)/i)
+  assert.match(migration, /drop function if exists public\.submit_instant_identity_verification/i)
+  assert.doesNotMatch(settings, /face-api|submitInstant|submit_instant_identity_verification|verification\.instant/i)
+  assert.match(settings, /submit for admin review/i)
+  assert.doesNotMatch(gateway, /case 'verification\.instant'/i)
+  assert.doesNotMatch(gateway, /body\.matchScore/i)
+  assert.doesNotMatch(schema, /submit_instant_identity_verification/i)
+})
+
 test('Appwrite identity links remain inaccessible to browser roles', () => {
   const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
   const migration = fs.readFileSync(
@@ -91,6 +115,48 @@ test('chat file storage is restricted to the uploader or chat members', () => {
     assert.doesNotMatch(sql, /create policy "Chat files signed-in read"/i)
   }
   assert.match(migration, /_user = \(select auth\.uid\(\)\)/i)
+})
+
+test('profile photos are private and visible to owners, contacts, and allowed feed viewers', () => {
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261105095000_contact_scoped_profile_photos.sql'),
+    'utf8',
+  )
+  const gateway = fs.readFileSync(path.join(root, 'server', 'appwriteGateway.js'), 'utf8')
+  for (const sql of [schema, migration]) {
+    assert.match(sql, /public\.can_read_contact_avatar/i)
+    assert.match(sql, /m\.avatar_url = 'storage:\/\/' \|\| _path/i)
+    assert.match(sql, /m\.id = auth\.uid\(\)/i)
+    assert.match(sql, /c\.user_id = auth\.uid\(\)/i)
+    assert.match(sql, /p\.author_id = m\.id and p\.status = 'active'/i)
+    assert.match(sql, /bu\.blocker_id = auth\.uid\(\) and bu\.blocked_id = m\.id/i)
+    assert.match(sql, /create policy "Contacts read active profile photos"/i)
+    assert.match(sql, /bucket_id = 'chat-files'/i)
+  }
+  assert.match(gateway, /m\.id = \$1/i)
+  assert.match(gateway, /bu\.blocker_id = \$1 and bu\.blocked_id = m\.id/i)
+  assert.match(migration, /revoke execute on function public\.can_read_contact_avatar\(text, text\) from public, anon/i)
+})
+
+test('feed events store bounded metadata and require a title and start time', () => {
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261105102436_feed_event_metadata.sql'),
+    'utf8',
+  )
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+  const feeds = fs.readFileSync(path.join(root, 'src', 'lib', 'feeds.js'), 'utf8')
+  const composer = fs.readFileSync(path.join(root, 'src', 'pages', 'FeedsPage.jsx'), 'utf8')
+  for (const sql of [migration, schema]) {
+    assert.match(sql, /post_type in \('general', 'event'\)/i)
+    assert.match(sql, /nullif\(trim\(title\), ''\) is not null and event_starts_at is not null/i)
+    assert.match(sql, /char_length\(title\) <= 160/i)
+    assert.match(sql, /char_length\(event_location\) <= 240/i)
+  }
+  assert.match(feeds, /event_starts_at/)
+  assert.match(feeds, /Choose a valid event date and time/)
+  assert.match(composer, /datetime-local/)
+  assert.match(composer, /Event/)
 })
 
 test('call push destinations are private to the owning account', () => {

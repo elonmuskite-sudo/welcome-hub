@@ -115,9 +115,8 @@ export default function IdentityReviewQueue() {
           <div key={r.id} className="rounded-2xl border border-border bg-muted/30 p-4 space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                {r.tier === 'instant' ? 'Instant' : 'Manual'}
+                Manual review
               </span>
-              <span>Match score {r.match_score == null ? 'n/a' : Number(r.match_score).toFixed(2)}</span>
               <span>· {new Date(r.created_at).toLocaleString()}</span>
             </div>
             {(r.full_legal_name || r.date_of_birth || r.document_type || r.document_number || r.issuing_country) && (

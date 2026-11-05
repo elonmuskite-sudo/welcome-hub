@@ -311,6 +311,43 @@ using (
     end
   )
 );
+create or replace function public.can_read_contact_avatar(_owner_id text, _path text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and exists (
+    select 1 from public.members m
+    where m.id::text = _owner_id
+      and m.avatar_url = 'storage://' || _path
+      and (
+        m.id = auth.uid()
+        or (
+          (
+            exists (select 1 from public.contacts c where c.nexus_id = m.member_id and c.user_id = auth.uid())
+            or exists (select 1 from public.feed_posts p where p.author_id = m.id and p.status = 'active')
+            or exists (
+              select 1 from public.feed_comments fc
+              join public.feed_posts fp on fp.id = fc.post_id
+              where fc.author_id = m.id
+                and (fp.status = 'active' or fp.author_id = auth.uid() or public.has_role(auth.uid(), 'admin'))
+                and (fc.status = 'active' or fc.author_id = auth.uid() or public.has_role(auth.uid(), 'admin'))
+            )
+            or public.has_role(auth.uid(), 'admin')
+          )
+          and not exists (
+            select 1 from public.blocked_users bu
+            where bu.blocker_id = auth.uid() and bu.blocked_id = m.id
+          )
+        )
+      )
+  )
+$$;
+revoke execute on function public.can_read_contact_avatar(text, text) from public, anon;
+grant execute on function public.can_read_contact_avatar(text, text) to authenticated, service_role;
+drop policy if exists "Contacts read active profile photos" on storage.objects;
+create policy "Contacts read active profile photos" on storage.objects for select to authenticated
+using (
+  bucket_id = 'chat-files'
+  and public.can_read_contact_avatar((storage.foldername(name))[1], name)
+);
 create policy "View own chats" on public.chats for select to authenticated using (owner_id = auth.uid() or public.is_chat_member(id, auth.uid()));
 create policy "Create owned chats" on public.chats for insert to authenticated with check (owner_id = auth.uid());
 create policy "Owners update chats" on public.chats for update to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
@@ -587,37 +624,16 @@ alter table public.identity_verifications
 -- Rows created before this migration are treated as manual submissions.
 update public.identity_verifications set tier = 'manual' where tier is null;
 
--- The instant tier has no government document, so the ID path becomes optional.
+-- Keep the ID path nullable for legacy data; new submissions require an ID.
 alter table public.identity_verifications alter column id_document_path drop not null;
 
 do $$ begin
   alter table public.identity_verifications
-    add constraint identity_verifications_tier_check check (tier in ('instant', 'manual'));
+    add constraint identity_verifications_tier_check check (tier = 'manual');
 exception when duplicate_object then null; end $$;
 
--- Instant automated verification. security definer so the member cannot mark
--- arbitrary rows approved: the function only ever writes the caller's own row.
-create or replace function public.submit_instant_identity_verification(_selfie_path text, _match_score numeric default null)
-returns void language plpgsql security definer set search_path = public as $$
-begin
-  if auth.uid() is null then raise exception 'Sign in to verify your identity'; end if;
-  if coalesce(trim(_selfie_path), '') = '' then raise exception 'A selfie is required for instant verification'; end if;
-
-  insert into public.identity_verifications (user_id, status, tier, match_score, selfie_path, id_document_path, reviewed_at)
-  values (auth.uid(), 'approved', 'instant', _match_score, _selfie_path, null, now())
-  on conflict (user_id) do update
-    set status = 'approved',
-        tier = 'instant',
-        match_score = excluded.match_score,
-        selfie_path = excluded.selfie_path,
-        id_document_path = null,
-        reviewer_note = null,
-        reviewed_by = null,
-        reviewed_at = now(),
-        updated_at = now();
-end $$;
-revoke execute on function public.submit_instant_identity_verification(text, numeric) from public, anon;
-grant execute on function public.submit_instant_identity_verification(text, numeric) to authenticated, service_role;
+-- No client-side face score can approve an identity. The authenticated submission
+-- path must include a government document and remain pending for admin review.
 
 -- 20261017040000_social_feed.sql
 -- APPLIED to production woavhlkgylarngqyvphf ("Nexus Next") on 2026-10-17. See the deployment record at the end of this file.
@@ -628,10 +644,18 @@ create table if not exists public.feed_posts (
   author_id uuid not null,
   content text not null default '' check (char_length(content) <= 5000),
   media jsonb not null default '[]'::jsonb,
+  post_type text not null default 'general' check (post_type in ('general', 'event')),
+  title text check (title is null or char_length(title) <= 160),
+  event_starts_at timestamptz,
+  event_location text check (event_location is null or char_length(event_location) <= 240),
   is_admin_post boolean not null default false,
   status text not null default 'active' check (status in ('active', 'hidden', 'removed')),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint feed_posts_event_metadata_check check (
+    (post_type = 'event' and nullif(trim(title), '') is not null and event_starts_at is not null)
+    or (post_type = 'general' and event_starts_at is null and event_location is null)
+  )
 );
 create index if not exists idx_feed_posts_created on public.feed_posts(created_at desc);
 create index if not exists idx_feed_posts_author on public.feed_posts(author_id);
@@ -793,10 +817,8 @@ grant execute on function public.set_my_e2ee_status(boolean, boolean) to authent
 -- Verified  Automated read-only checks against the live database: 74 of 77 passed.
 --           - identity_verifications gained tier, full_legal_name, date_of_birth,
 --             document_type, document_number, issuing_country (all nullable);
---             id_document_path is now nullable; identity_verifications_tier_check
---             enforces tier in ('instant','manual'); submit_instant_identity_verification
---             (text, numeric) is SECURITY DEFINER with search_path pinned, and is
---             executable by authenticated and service_role but not by anon.
+--             id_document_path is nullable for legacy rows. A later safety
+--             migration disables selfie-only approvals and limits tier to manual review.
 --           - feed_posts, feed_comments, feed_reactions and feed_comment_reactions
 --             created with RLS enabled, 12 policies, 4 indexes, 2 updated_at
 --             triggers, 4 ON DELETE CASCADE foreign keys, grants for

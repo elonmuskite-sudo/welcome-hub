@@ -1,6 +1,6 @@
 /* eslint-disable react/prop-types */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { ArrowLeftIcon, PhoneIcon, LockClosedIcon } from '@heroicons/react/24/solid'
+import { ArrowLeftIcon, PhoneIcon, VideoCameraIcon, LockClosedIcon } from '@heroicons/react/24/solid'
 import Avatar from './Avatar'
 import MessageInput from './MessageInput'
 import MessageBubble from './MessageBubble'
@@ -84,13 +84,14 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
     }, 0)
   }, [])
 
-  const startCall = useCallback(() => {
+  const startCall = useCallback((kind = 'voice') => {
     if (!peerId || call) return
     initiateCall({
       chatId: chat.id,
       peerId,
       peerName: chatDisplayName(chat, user?.id),
       peerAvatar: chat.avatar_url,
+      kind,
     })
   }, [chat, peerId, user?.id, initiateCall, call])
 
@@ -342,12 +343,20 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           <ChatButton title="Search conversation" aria-expanded={showSearch} onClick={() => { setShowSearch(!showSearch); setSearch('') }} className="w-9"><Search className="w-5 h-5" /></ChatButton>
           <ChatButton
-            onClick={startCall}
+            onClick={() => startCall('voice')}
             disabled={!peerId || Boolean(call)}
             className="p-2 hover:bg-muted rounded-full text-foreground disabled:opacity-50 transition"
             title={peerId ? 'Start call' : 'Only available in one-to-one chats'}
           >
             <PhoneIcon className="w-5 h-5" />
+          </ChatButton>
+          <ChatButton
+            onClick={() => startCall('video')}
+            disabled={!peerId || Boolean(call)}
+            className="p-2 hover:bg-muted rounded-full text-foreground disabled:opacity-50 transition"
+            title={peerId ? 'Start video call' : 'Only available in one-to-one chats'}
+          >
+            <VideoCameraIcon className="w-5 h-5" />
           </ChatButton>
         </div>
       </div>

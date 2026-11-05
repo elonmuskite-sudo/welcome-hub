@@ -24,6 +24,7 @@ test('call history events round-trip, validate outcomes, and show direction-awar
     callId: 'call-123',
     outcome: 'completed',
     duration: 87,
+    callType: 'voice',
     startedAt: '2026-10-28T09:00:00.000Z',
     endedAt: '2026-10-28T09:01:27.000Z',
   }
@@ -33,6 +34,9 @@ test('call history events round-trip, validate outcomes, and show direction-awar
   assert.deepEqual(decodeCallHistory(encoded), event)
   assert.equal(callHistoryLabel(event, true), 'Outgoing voice call')
   assert.equal(callHistoryLabel(event, false), 'Incoming voice call')
+  const videoEvent = { ...event, callType: 'video' }
+  assert.equal(callHistoryLabel(videoEvent, true), 'Outgoing video call')
+  assert.equal(callHistoryLabel(videoEvent, false), 'Incoming video call')
   assert.equal(callHistoryLabel({ ...event, outcome: 'missed' }, false), 'Missed call')
   assert.equal(callHistoryLabel({ ...event, outcome: 'declined' }, true), 'Outgoing call · Declined')
   assert.equal(decodeCallHistory('invalid'), null)

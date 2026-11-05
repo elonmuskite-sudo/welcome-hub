@@ -360,6 +360,27 @@ export async function resolveChatFileUrl(fileUrl, chatId) {
   return data.signedUrl
 }
 
+export async function resolveProfilePhotoUrl(fileUrl) {
+  const path = storagePathFromChatFileUrl(fileUrl)
+  if (!path) return fileUrl
+
+  if (isAppwriteAuthEnabled()) {
+    const { fileUrl: signedUrl } = await appwriteData('profile.avatar.url', {
+      storagePath: path,
+      fileUrl,
+    })
+    if (!signedUrl) throw new Error('A secure profile photo link could not be created.')
+    return signedUrl
+  }
+
+  if (!supabase) throw new Error('Profile photo storage is not configured.')
+  const { data: signed, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+  if (error) throw new Error(error.message || 'A secure profile photo link could not be created.')
+  return signed.signedUrl
+}
+
 export async function openChatFile(fileUrl, chatId) {
   if (typeof window === 'undefined') throw new Error('Attachments can only be opened in a browser.')
   const viewer = window.open('about:blank', '_blank')

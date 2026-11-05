@@ -22,6 +22,7 @@ export default async function handler(req, res) {
   if (!url || !key) return send(res, 503, { error: 'Call notifications are not configured.' })
 
   const { chatId, callId, expiresAt } = req.body || {}
+  const callKind = req.body?.kind === 'video' ? 'video' : 'voice'
   const deadline = Number(expiresAt)
   if (!validUuid(chatId) || !validUuid(callId)
     || !Number.isSafeInteger(deadline) || deadline <= Date.now() || deadline > Date.now() + 60000) {
@@ -77,6 +78,7 @@ export default async function handler(req, res) {
       fromUserId: user.id,
       fromName: caller?.full_name || 'Nexus user',
       fromAvatar: caller?.avatar_url || '',
+      callKind,
     })
     if (!result.configured) return send(res, 503, { error: 'Background call push providers are not configured.' })
     return send(res, 200, { ok: true })

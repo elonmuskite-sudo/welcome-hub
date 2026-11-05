@@ -31,6 +31,8 @@ const INACTIVE_CALL_API = {
   declineCall: () => {},
   endCall: () => {},
   toggleMute: () => {},
+  toggleCamera: () => {},
+  switchCamera: async () => {},
 }
 
 // Reuse one context across hot reloads so the provider and consumers never split.
@@ -204,6 +206,7 @@ export function CallProvider({ children }) {
           callId: current.id,
           outcome,
           duration,
+          callType: current.kind === 'video' ? 'video' : 'voice',
           startedAt: current.startedAt ? new Date(current.startedAt).toISOString() : null,
           endedAt,
         }),
@@ -256,10 +259,15 @@ export function CallProvider({ children }) {
 
   const ensureStream = useCallback(async () => {
     if (streamRef.current) return streamRef.current
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    const kind = callRef.current?.kind === 'video' ? 'video' : 'voice'
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: kind === 'video' ? { facingMode: 'user' } : false,
+    })
     streamRef.current = stream
+    patchCall({ localStream: stream, cameraEnabled: kind === 'video' })
     return stream
-  }, [])
+  }, [patchCall])
 
   const createPeerConnection = useCallback(async () => {
     if (typeof RTCPeerConnection === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
@@ -278,6 +286,7 @@ export function CallProvider({ children }) {
       })
     }
     pc.ontrack = (event) => {
+      if (event.streams[0]) patchCall({ remoteStream: event.streams[0] })
       const audio = document.getElementById(AUDIO_ELEMENT_ID)
       if (!audio) return
       audio.srcObject = event.streams[0]
@@ -304,7 +313,7 @@ export function CallProvider({ children }) {
     stream.getTracks().forEach((track) => pc.addTrack(track, stream))
     pcRef.current = pc
     return pc
-  }, [ensureStream, markConnected, endCallInternal])
+  }, [ensureStream, markConnected, endCallInternal, patchCall])
 
   const flushIce = useCallback(async () => {
     const pc = pcRef.current
@@ -391,7 +400,7 @@ export function CallProvider({ children }) {
       })
       if (!sent) throw new Error('The call offer was not acknowledged')
     } catch {
-      endCallInternal({ error: 'Could not start the call. Check microphone access and your connection.' })
+      endCallInternal({ error: 'Could not start the call. Check camera/microphone access and your connection.' })
     }
   }, [createPeerConnection, endCallInternal])
 
@@ -407,6 +416,7 @@ export function CallProvider({ children }) {
       chatId: String(target.chatId || ''),
       direction: 'outgoing',
       peerId,
+      kind: target.kind === 'video' ? 'video' : 'voice',
       peerName: target.peerName || 'Contact',
       peerAvatar: target.peerAvatar || null,
       state: 'ringing',
@@ -433,12 +443,18 @@ export function CallProvider({ children }) {
         name: user?.fullName || user?.firstName || user?.email,
         avatar: user?.avatarUrl,
       },
+      kind: target.kind === 'video' ? 'video' : 'voice',
     }))
     if (!delivered) {
       endCallInternal({ error: 'That contact could not be reached' })
       return
     }
-    void notifyCallPush({ chatId: target.chatId, callId: id, expiresAt }).catch((error) => {
+    void notifyCallPush({
+      chatId: target.chatId,
+      callId: id,
+      expiresAt,
+      kind: target.kind === 'video' ? 'video' : 'voice',
+    }).catch((error) => {
       console.error('Background call notification was not delivered.', error)
     })
 
@@ -489,6 +505,7 @@ export function CallProvider({ children }) {
         peerId: String(payload.fromUserId),
         peerName: payload.fromName || 'Contact',
         peerAvatar: payload.fromAvatar || null,
+        kind: payload.kind === 'video' ? 'video' : 'voice',
         state: 'ringing',
         error: '',
         muted: false,
@@ -517,6 +534,7 @@ export function CallProvider({ children }) {
     const fromUserId = url.searchParams.get('fromUserId')
     const fromName = url.searchParams.get('fromName') || 'Contact'
     const fromAvatar = url.searchParams.get('fromAvatar') || null
+    const kind = url.searchParams.get('callKind') === 'video' ? 'video' : 'voice'
     const chatId = url.pathname.match(/^\/app\/chat\/([^/]+)/)?.[1]
     if (!callId || !fromUserId || !chatId) return
     url.searchParams.delete('incomingCall')
@@ -524,6 +542,7 @@ export function CallProvider({ children }) {
     url.searchParams.delete('fromUserId')
     url.searchParams.delete('fromName')
     url.searchParams.delete('fromAvatar')
+    url.searchParams.delete('callKind')
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
     void handleRing({
@@ -532,6 +551,7 @@ export function CallProvider({ children }) {
       fromUserId,
       fromName,
       fromAvatar,
+      kind,
       expiresAt,
     })
   }, [userId, handleRing])
@@ -600,7 +620,7 @@ export function CallProvider({ children }) {
       await ensureStream()
     } catch {
       sendInbox(current.peerId, CALL_EVENTS.DECLINE, { callId: current.id })
-      endCallInternal({ error: 'Microphone access is required to take the call' })
+      endCallInternal({ error: current.kind === 'video' ? 'Camera and microphone access are required to take the call' : 'Microphone access is required to take the call' })
       return
     }
     const sent = await sendInbox(current.peerId, CALL_EVENTS.READY, { callId: current.id })
@@ -627,6 +647,44 @@ export function CallProvider({ children }) {
     patchCall({ muted })
   }, [patchCall])
 
+  const toggleCamera = useCallback(() => {
+    const track = streamRef.current?.getVideoTracks()[0]
+    if (!track) return
+    const enabled = !track.enabled
+    track.enabled = enabled
+    patchCall({ cameraEnabled: enabled })
+  }, [patchCall])
+
+  const switchCamera = useCallback(async () => {
+    const current = callRef.current
+    const stream = streamRef.current
+    if (!current || current.kind !== 'video' || !stream) return
+    const oldTrack = stream.getVideoTracks()[0]
+    if (!oldTrack) return
+    const facingMode = current.facingMode === 'environment' ? 'user' : 'environment'
+    const replacementStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { exact: facingMode } },
+    })
+    const nextTrack = replacementStream.getVideoTracks()[0]
+    if (!nextTrack) {
+      replacementStream.getTracks().forEach((track) => track.stop())
+      throw new Error('The selected camera is unavailable.')
+    }
+    try {
+      const sender = pcRef.current?.getSenders().find((item) => item.track?.kind === 'video')
+      if (sender) await sender.replaceTrack(nextTrack)
+      nextTrack.enabled = oldTrack.enabled
+      stream.removeTrack(oldTrack)
+      stream.addTrack(nextTrack)
+      oldTrack.stop()
+      patchCall({ localStream: stream, facingMode })
+    } catch (error) {
+      nextTrack.stop()
+      throw error
+    }
+  }, [patchCall])
+
   const value = useMemo(() => ({
     call,
     isAvailable: Boolean(supabase),
@@ -635,7 +693,9 @@ export function CallProvider({ children }) {
     declineCall,
     endCall,
     toggleMute,
-  }), [call, initiateCall, acceptCall, declineCall, endCall, toggleMute])
+    toggleCamera,
+    switchCamera,
+  }), [call, initiateCall, acceptCall, declineCall, endCall, toggleMute, toggleCamera, switchCamera])
 
   return (
     <CallContext.Provider value={value}>
