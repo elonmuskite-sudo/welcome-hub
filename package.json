@@ -7,6 +7,7 @@
     "dev": "vite",
     "env:generate": "node scripts/generate-runtime-env.js",
     "env:validate": "node scripts/validate-production-env.js",
+    "test:env": "node --test tests/productionEnvConfig.test.mjs",
     "test:email": "node --test tests/resendEmailApi.test.mjs",
     "test:schema": "node --test tests/supabaseSchema.test.mjs",
     "test:e2ee": "node --test tests/e2ee.test.mjs",

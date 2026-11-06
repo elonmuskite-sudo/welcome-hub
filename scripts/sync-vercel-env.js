@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { getPartialOptionalEnvGroups } from './optional-env-groups.js'
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const runtimeConfigPath = path.join(rootDir, '.vercel-runtime-env.json')
@@ -45,6 +46,19 @@ const OPTIONAL_ENV_KEYS = [
   'SUPABASE_POOLER_URL',
 ]
 
+const OPTIONAL_SERVER_KEYS = [
+  'IDSWYFT_API_URL',
+  'IDSWYFT_API_KEY',
+  'IDSWYFT_SESSION_ENCRYPTION_KEY',
+  'IDSWYFT_INIT_PATH',
+  'IDSWYFT_STATUS_PATH',
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_AUTH_TOKEN',
+  'TWILIO_MESSAGING_SERVICE_SID',
+  'FILE_SCAN_API_URL',
+  'FILE_SCAN_API_KEY',
+]
+
 // Voice-call ICE config. These are browser-safe (they ship in the bundle) and
 // optional, so they are only synced when a real value is present.
 const OPTIONAL_PUBLIC_KEYS = [
@@ -76,7 +90,7 @@ const OPTIONAL_WEB_PUSH_KEYS = [
   'WEB_PUSH_VAPID_SUBJECT',
 ]
 
-const PUBLIC_KEYS = new Set([
+export const PUBLIC_KEYS = new Set([
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_ANON_KEY',
   'VITE_AUTH_PROVIDER',
@@ -136,8 +150,7 @@ function invalidValue(value) {
   return !normalized || PLACEHOLDER_HINTS.some((hint) => normalized.includes(hint))
 }
 
-function loadValues() {
-  const config = loadJson(runtimeConfigPath, 'Generated runtime environment')
+export function buildSyncedValues(config) {
   const provider = String(config.VITE_AUTH_PROVIDER || 'supabase').trim().toLowerCase()
   if (!['supabase', 'appwrite'].includes(provider)) {
     throw new Error('VITE_AUTH_PROVIDER must be either supabase or appwrite.')
@@ -152,6 +165,21 @@ function loadValues() {
   if (missing.length) {
     throw new Error(`Missing or placeholder values in generated environment: ${missing.join(', ')}`)
   }
+  if (String(config.ADMIN_SESSION_SECRET).trim().length < 32) {
+    throw new Error('ADMIN_SESSION_SECRET must be at least 32 characters.')
+  }
+  const partialGroups = getPartialOptionalEnvGroups(config, invalidValue)
+  if (partialGroups.length) {
+    const details = partialGroups
+      .map((group) => `${group.name}: ${group.missingKeys.join(', ')}`)
+      .join('; ')
+    throw new Error(`Configure each optional integration completely or leave it disabled. Missing values: ${details}`)
+  }
+  const optionalServer = Object.fromEntries(
+    OPTIONAL_SERVER_KEYS
+      .filter((key) => !invalidValue(config[key]))
+      .map((key) => [key, String(config[key])])
+  )
   const optionalPublic = Object.fromEntries(
     OPTIONAL_PUBLIC_KEYS
       .filter((key) => !invalidValue(config[key]))
@@ -172,8 +200,13 @@ function loadValues() {
     ...optionalPublic,
     ...optionalR2,
     ...optionalWebPush,
+    ...optionalServer,
     VITE_AUTH_PROVIDER: provider,
   }
+}
+
+function loadValues() {
+  return buildSyncedValues(loadJson(runtimeConfigPath, 'Generated runtime environment'))
 }
 
 async function request(pathname, { method = 'GET', body } = {}) {
@@ -300,7 +333,9 @@ async function main() {
   console.log('[vercel-env] Production environment sync complete.')
 }
 
-main().catch((error) => {
-  console.error(`[vercel-env] ${error.message}`)
-  process.exitCode = 1
-})
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(`[vercel-env] ${error.message}`)
+    process.exitCode = 1
+  })
+}
