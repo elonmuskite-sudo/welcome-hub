@@ -2,12 +2,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isProductionDeployment } from './deployment-env.js'
 import { getPartialOptionalEnvGroups } from './optional-env-groups.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
-// Only the browser keys are needed to build. Server keys are checked as warnings because Vercel
-// functions read them at runtime.
+// Browser keys are required for every deployment build. Server keys are required
+// for Production deployments and reported as warnings in Preview/local builds.
 const REQUIRED_GROUPS = [
   ['VITE_SUPABASE_URL', 'SUPABASE_URL'],
   ['VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY', 'VITE_SUPABASE_PUBLISHABLE_KEY'],
@@ -68,6 +69,7 @@ function isPlaceholder(value) {
 
 async function main() {
   const isStrictDeploy = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NODE_ENV === 'production')
+  const isProductionDeploy = isProductionDeployment(process.env)
   const provider = getEnvValue('VITE_AUTH_PROVIDER') || 'supabase'
   const missing = REQUIRED_GROUPS.filter((keys) => !keys.some((key) => !isPlaceholder(getEnvValue(key)))).map((keys) => keys.join(' or '))
 
@@ -77,13 +79,19 @@ async function main() {
   }
 
   if (provider === 'appwrite') {
-    const missingAppwrite = [
-      ...['VITE_APPWRITE_ENDPOINT', 'VITE_APPWRITE_PROJECT_ID'],
-      ...APPWRITE_SERVER_KEYS,
-    ].filter((key) => isPlaceholder(getEnvValue(key)))
-    if (isStrictDeploy && missingAppwrite.length) {
-      console.error('[env:validate] Missing Appwrite production environment values:')
-      for (const key of missingAppwrite) console.error(` - ${key}`)
+    const missingAppwriteClient = ['VITE_APPWRITE_ENDPOINT', 'VITE_APPWRITE_PROJECT_ID']
+      .filter((key) => isPlaceholder(getEnvValue(key)))
+    if (isStrictDeploy && missingAppwriteClient.length) {
+      console.error('[env:validate] Missing Appwrite client environment values:')
+      for (const key of missingAppwriteClient) console.error(` - ${key}`)
+      process.exit(1)
+    }
+
+    const missingAppwriteServer = APPWRITE_SERVER_KEYS
+      .filter((key) => isPlaceholder(getEnvValue(key)))
+    if (isProductionDeploy && missingAppwriteServer.length) {
+      console.error('[env:validate] Missing Appwrite production server values:')
+      for (const key of missingAppwriteServer) console.error(` - ${key}`)
       process.exit(1)
     }
   }
@@ -91,16 +99,16 @@ async function main() {
   const missingProductionKeys = REQUIRED_PRODUCTION_KEYS.filter((key) => isPlaceholder(getEnvValue(key)))
   const shortAdminSecret = !isPlaceholder(getEnvValue('ADMIN_SESSION_SECRET'))
     && getEnvValue('ADMIN_SESSION_SECRET').trim().length < 32
-  if (isStrictDeploy && (missingProductionKeys.length || shortAdminSecret)) {
+  if (isProductionDeploy && (missingProductionKeys.length || shortAdminSecret)) {
     console.error('[env:validate] Missing required production server values:')
     for (const key of missingProductionKeys) console.error(` - ${key}`)
     if (shortAdminSecret) console.error(' - ADMIN_SESSION_SECRET must be at least 32 characters')
     process.exit(1)
   }
-  if (!isStrictDeploy && (missingProductionKeys.length || shortAdminSecret)) {
+  if (!isProductionDeploy && (missingProductionKeys.length || shortAdminSecret)) {
     const issues = [...missingProductionKeys]
     if (shortAdminSecret) issues.push('ADMIN_SESSION_SECRET must be at least 32 characters')
-    console.warn(`[env:validate] Production server features will be unavailable until configured: ${issues.join(', ')}`)
+    console.warn(`[env:validate] Production server values are not configured in this deployment environment: ${issues.join(', ')}`)
   }
   // Voice calls relay over TURN when NAT traversal via STUN alone fails.
   const hasTurnUrl = !isPlaceholder(getEnvValue('VITE_TURN_URL'))
@@ -129,7 +137,7 @@ async function main() {
       .map((group) => `${group.name}: ${group.missingKeys.join(', ')}`)
       .join('; ')
     const message = `Optional integrations are partially configured: ${details}`
-    if (isStrictDeploy) {
+    if (isProductionDeploy) {
       console.error(`[env:validate] ${message}`)
       process.exit(1)
     }

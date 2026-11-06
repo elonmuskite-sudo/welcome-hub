@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { isProductionDeployment } from '../scripts/deployment-env.js'
 import { buildSyncedValues, PUBLIC_KEYS } from '../scripts/sync-vercel-env.js'
 import { getPartialOptionalEnvGroups } from '../scripts/optional-env-groups.js'
 
@@ -103,4 +104,11 @@ test('production setup workflow provisions the admin session secret as encrypted
   assert.match(workflow, /ADMIN_SESSION_SECRET: \$\{\{ secrets\.ADMIN_SESSION_SECRET \}\}/)
   assert.match(workflow, /ADMIN_SESSION_SECRET.*must be at least 32 characters/)
   assert.match(workflow, /put ADMIN_SESSION_SECRET "\$ADMIN_SESSION_SECRET" sensitive/)
+})
+
+test('only production deployments require production server environment values', () => {
+  assert.equal(isProductionDeployment({ VERCEL_ENV: 'preview', NODE_ENV: 'production' }), false)
+  assert.equal(isProductionDeployment({ VERCEL_ENV: 'production' }), true)
+  assert.equal(isProductionDeployment({ NODE_ENV: 'production' }), true)
+  assert.equal(isProductionDeployment({ NODE_ENV: 'development' }), false)
 })
