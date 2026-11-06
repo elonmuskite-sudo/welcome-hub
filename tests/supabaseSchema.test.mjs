@@ -68,6 +68,68 @@ test('identity verification cannot approve from client-side face scores', () => 
   assert.doesNotMatch(schema, /submit_instant_identity_verification/i)
 })
 
+test('Idswyft KYC sessions are user-scoped and session credentials are encrypted server-side', () => {
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261106195234_idswyft_kyc_sessions.sql'),
+    'utf8',
+  )
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+  const api = fs.readFileSync(path.join(root, 'api', 'kyc', 'upload.js'), 'utf8')
+  const provider = fs.readFileSync(path.join(root, 'server', 'idswyftKyc.js'), 'utf8')
+
+  for (const sql of [migration, schema]) {
+    assert.match(sql, /create table public\.kyc_sessions/i)
+    assert.match(sql, /id uuid primary key/i)
+    assert.match(sql, /references auth\.users\(id\) on delete cascade/i)
+    assert.match(sql, /session_token text not null/i)
+    assert.match(sql, /metadata jsonb not null/i)
+    assert.match(sql, /enable row level security/i)
+    assert.match(sql, /auth\.uid\(\).*user_id|user_id.*auth\.uid\(\)/i)
+  }
+  assert.match(migration, /create or replace function public\.set_kyc_sessions_updated_at\(\)/i)
+  assert.match(migration, /execute function public\.set_kyc_sessions_updated_at\(\)/i)
+  assert.match(provider, /createCipheriv\('aes-256-gcm'/)
+  assert.match(api, /bodyParser: false/)
+  assert.match(api, /validateKycFile/)
+  assert.doesNotMatch(api, /NEXT_PUBLIC_|VITE_IDSWYFT/)
+})
+
+test('duplicate role-schema migration safely extends existing objects', () => {
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261012105742_7f3801e7-d165-4bbd-a733-0f29089dd2ad.sql'),
+    'utf8',
+  )
+
+  assert.match(migration, /exception\s+when duplicate_object then null/i)
+  for (const table of ['user_roles', 'user_storage_quotas', 'storage_purchases', 'identity_verifications', 'storage_files']) {
+    assert.match(migration, new RegExp(`create table if not exists public\\.${table}\\b`, 'i'))
+  }
+  assert.match(migration, /add column if not exists created_at/i)
+  assert.match(migration, /add column if not exists reviewed_by/i)
+  for (const trigger of ['trg_quota_updated', 'trg_purchases_updated', 'trg_idv_updated']) {
+    assert.match(migration, new RegExp(`drop trigger if exists ${trigger}\\b`, 'i'))
+  }
+})
+
+test('permission migrations tolerate an absent legacy RLS helper', () => {
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261012121953_9125f1c9-8652-4c6a-bcba-27b550cc0686.sql'),
+    'utf8',
+  )
+
+  assert.match(migration, /to_regprocedure\('public\.rls_auto_enable\(\)'\) is not null/i)
+  assert.match(migration, /revoke execute on function public\.rls_auto_enable\(\) from public, anon, authenticated/i)
+})
+
+test('admin claim migration safely changes its function return type', () => {
+  const migration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261013212555_65da1313-00bc-45ac-ae6a-3fd1ce175d94.sql'),
+    'utf8',
+  )
+
+  assert.match(migration, /drop function if exists public\.claim_first_admin\(\);\s*create function public\.claim_first_admin\(\) returns void/i)
+})
+
 test('Appwrite identity links remain inaccessible to browser roles', () => {
   const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
   const migration = fs.readFileSync(

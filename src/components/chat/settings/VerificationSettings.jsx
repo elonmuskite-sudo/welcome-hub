@@ -4,6 +4,7 @@ import { supabase } from '../../../lib/supabase'
 import { useAuth } from '../../../lib/AuthContext'
 import { appwriteData, isAppwriteAuthEnabled } from '../../../lib/appwrite'
 import VerificationBadge from '../VerificationBadge'
+import KycWizard from '../../kyc/KycWizard'
 
 const DOCUMENT_TYPES = [
   { value: 'passport', label: 'Passport' },
@@ -211,6 +212,7 @@ export default function VerificationSettings() {
 
   return (
     <div className="space-y-5">
+      <KycWizard />
       <div className="flex items-center gap-2 rounded-2xl border border-border bg-muted/30 p-4">
         <VerificationBadge userId={user?.id} className="w-6 h-6" />
         <div>
@@ -226,7 +228,7 @@ export default function VerificationSettings() {
                 ? 'Your documents were received and are waiting for admin review. The blue verified check appears once an admin approves them; this page updates automatically.'
                 : status === 'rejected'
                   ? `Your submission was not accepted${record.reviewer_note ? ` — reason: ${record.reviewer_note}` : ''}. Please submit again for manual review.`
-                  : 'Submit a government-issued identity document and a live camera selfie. An administrator will review your submission; automated verification is not enabled.'}
+                  : 'This option sends a government ID and live selfie for administrator review. Use the Idswyft option above for provider-based document and liveness checks.'}
           </p>
         </div>
       </div>
@@ -282,7 +284,7 @@ export default function VerificationSettings() {
             {busy ? <><LoaderCircle className="w-4 h-4 animate-spin" /> {busy}</> : 'Submit for admin review'}
           </button>
           <p className="text-xs text-muted-foreground">
-            Automated document authentication, face matching, and liveness checks are not configured. Your submission remains pending until an administrator reviews it.
+            Manual submissions remain pending until an administrator reviews them. Idswyft KYC results are recorded separately and do not automatically grant the existing profile badge.
           </p>
         </>
       )}

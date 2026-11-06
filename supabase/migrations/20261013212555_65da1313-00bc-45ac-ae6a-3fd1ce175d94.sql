@@ -62,7 +62,8 @@ create or replace function public.admin_exists() returns boolean language sql st
 revoke execute on function public.admin_exists() from public, anon;
 grant execute on function public.admin_exists() to authenticated;
 
-create or replace function public.claim_first_admin() returns void language plpgsql security definer set search_path = public as $$
+drop function if exists public.claim_first_admin();
+create function public.claim_first_admin() returns void language plpgsql security definer set search_path = public as $$
 begin
   if auth.uid() is null then raise exception 'Sign in first'; end if;
   if not exists(select 1 from auth.users where id=auth.uid() and email_confirmed_at is not null) then raise exception 'Confirm your email first'; end if;

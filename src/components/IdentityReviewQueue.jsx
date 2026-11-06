@@ -96,7 +96,7 @@ export default function IdentityReviewQueue() {
   return (
     <section className="mt-8 rounded-[24px] border border-border bg-card p-6">
       <h2 className="text-xl font-semibold text-foreground">ID checks waiting for review</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Manual submissions are held until an admin confirms the government ID matches the selfie. Instant checks are automated and never appear here.</p>
+      <p className="mt-1 text-sm text-muted-foreground">Manual submissions are held until an admin confirms the government ID matches the selfie. Idswyft KYC sessions are recorded separately and do not appear in this queue.</p>
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
       {notice && <p role="status" className="mt-3 text-sm text-muted-foreground">{notice}</p>}
       {notificationRetryId && (

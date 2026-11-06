@@ -41,8 +41,8 @@ ephemerally = No**. **Required = Optional** unless stated.
 | 9 | Audio → Voice or sound recordings | Yes | App functionality (voice notes, call audio) | Yes |
 | 10 | Messages → Other in-app messages | Yes | App functionality (delivery of messages) | Yes |
 | 11 | App activity → Other user-generated content (posts, comments, reactions) | Yes | App functionality | Yes |
-| 12 | Personal info → Government IDs (manual identity verification only) | Yes | App functionality (identity verification) | Yes |
-| 13 | Photos and videos → Photos (selfie, manual verification only) | Yes | App functionality (identity verification) | Yes |
+| 12 | Personal info → Government IDs (optional manual or Idswyft verification) | Yes | App functionality (identity verification) | Yes |
+| 13 | Photos and videos → Photos (selfie for optional manual or Idswyft verification) | Yes | App functionality (identity verification) | Yes |
 
 ### Not collected (leave unchecked)
 
@@ -71,6 +71,7 @@ are **service providers processing data on our behalf**, which Play treats as
 "collection", not "sharing":
 
 - **Supabase** — database, authentication, file storage.
+- **Idswyft** — processes identity documents and selfies, including document extraction, liveness checks, and verification decisions when the user explicitly opts in. Session credentials and a minimized result summary are stored by Nexus; uploaded images are forwarded to Idswyft and are not saved in Nexus chat storage. Confirm Idswyft's retention terms before publishing this disclosure.
 - **Resend** — transactional email (verification codes, one-time welcome email).
 - **Twilio** — optional transactional SMS to a phone number the user verifies and
   explicitly opts in to use for sign-in security alerts and identity-review
@@ -113,7 +114,7 @@ Collected and linked to the user's identity, all used for **App Functionality**:
 | User Content → Photos or Videos | Yes | App Functionality | Avatar, chat media, feed media |
 | User Content → Audio Data | Yes | App Functionality | Voice notes, call audio |
 | User Content → Other User Content | Yes | App Functionality | Messages (E2EE ciphertext), posts, comments, bio |
-| Sensitive Info → (Government ID / selfie) | Yes | App Functionality | Only if the user opts into manual verification |
+| Sensitive Info → (Government ID / selfie) | Yes | App Functionality | Only if the user opts into manual or Idswyft verification |
 
 ### Data Not Linked to You
 
@@ -140,7 +141,7 @@ Analytics, Product Personalization, Advertising, or "Other" purpose.
       **Settings → Account → Delete account**)
 - [ ] Apple privacy policy URL: `https://nexus-chat-world.com/privacy`
 - [ ] Disclosures match the published Policy (name, email, optional phone, messages, media,
-      contacts/feed, optional ID verification, technical data).
+      contacts/feed, optional manual or Idswyft ID verification, technical data).
 - [ ] "Free, no purchases" is stated in the listing and reviewer notes so it
       cannot look like a hidden paywall.
 - [ ] No analytics/ads SDK present in `package.json` (verified).

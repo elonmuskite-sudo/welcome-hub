@@ -22,6 +22,32 @@ create policy "Resubmit own after rejection" on public.identity_verifications fo
 create policy "Admins review" on public.identity_verifications for update to authenticated using (public.has_role(auth.uid(),'admin')) with check (public.has_role(auth.uid(),'admin'));
 create trigger trg_idv_updated before update on public.identity_verifications for each row execute function public.update_updated_at_column();
 
+-- Idswyft sessions. session_token is encrypted by the server before storage;
+-- OCR metadata is reduced to non-identifying scores, verdicts and field names.
+create table public.kyc_sessions (
+  id uuid primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  session_token text not null,
+  status text not null check (status in (
+    'AWAITING_FRONT', 'AWAITING_BACK', 'AWAITING_LIVE', 'PROCESSING',
+    'APPROVED', 'HARD_REJECTED', 'SOFT_REJECTED', 'LIVENESS_FAILED',
+    'REVIEW_REQUIRED', 'FAILED', 'EXPIRED'
+  )),
+  metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(metadata) = 'object'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index kyc_sessions_user_created_idx on public.kyc_sessions(user_id, created_at desc);
+revoke all on public.kyc_sessions from public, anon, authenticated;
+grant select, insert, update on public.kyc_sessions to authenticated;
+grant all on public.kyc_sessions to service_role;
+alter table public.kyc_sessions enable row level security;
+create policy "Users manage own KYC sessions" on public.kyc_sessions
+  for all to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+create trigger trg_kyc_sessions_updated before update on public.kyc_sessions
+  for each row execute function public.update_updated_at_column();
+
 create table public.storage_files (id uuid primary key default gen_random_uuid(), user_id uuid not null, chat_id text, file_name text not null, file_type text not null, mime_type text, size_bytes bigint not null default 0, duration_seconds numeric, storage_path text not null, created_at timestamptz not null default now());
 grant select, insert, delete on public.storage_files to authenticated; grant all on public.storage_files to service_role;
 alter table public.storage_files enable row level security;

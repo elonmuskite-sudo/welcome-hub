@@ -938,6 +938,10 @@ export async function dispatchUserData(config, account, body) {
   })
 }
 
+export async function withAuthenticatedAppwriteTransaction(config, account, operation) {
+  return inUserTransaction(config, account, operation)
+}
+
 export async function authenticateGatewayRequest(req) {
   const config = getConfiguration()
   if (!config) throw new GatewayError('The Appwrite data gateway is not configured on the server.', 503)
