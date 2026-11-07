@@ -4,7 +4,12 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { isProductionDeployment } from '../scripts/deployment-env.js'
-import { buildSyncedValues, PUBLIC_KEYS } from '../scripts/sync-vercel-env.js'
+import {
+  buildSyncedValues,
+  parseVercelTarget,
+  PUBLIC_KEYS,
+  selectSyncedValues,
+} from '../scripts/sync-vercel-env.js'
 import { getPartialOptionalEnvGroups } from '../scripts/optional-env-groups.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -111,4 +116,22 @@ test('only production deployments require production server environment values',
   assert.equal(isProductionDeployment({ VERCEL_ENV: 'production' }), true)
   assert.equal(isProductionDeployment({ NODE_ENV: 'production' }), true)
   assert.equal(isProductionDeployment({ NODE_ENV: 'development' }), false)
+})
+
+test('Vercel sync can be restricted to an explicit allowlist', () => {
+  const synced = buildSyncedValues(requiredRuntimeConfig())
+  assert.deepEqual(
+    selectSyncedValues(synced, ['RESEND_FROM', 'ADMIN_SESSION_SECRET']),
+    {
+      RESEND_FROM: synced.RESEND_FROM,
+      ADMIN_SESSION_SECRET: synced.ADMIN_SESSION_SECRET,
+    },
+  )
+  assert.throws(() => selectSyncedValues(synced, ['UNKNOWN_SECRET']), /UNKNOWN_SECRET/)
+})
+
+test('Vercel sync accepts only Production or Preview targets', () => {
+  assert.equal(parseVercelTarget(undefined), 'production')
+  assert.equal(parseVercelTarget('preview'), 'preview')
+  assert.throws(() => parseVercelTarget('development'), /production or preview/)
 })

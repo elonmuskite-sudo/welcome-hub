@@ -8,6 +8,9 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const runtimeConfigPath = path.join(rootDir, '.vercel-runtime-env.json')
 const linkedProjectPath = path.join(rootDir, '.vercel', 'project.json')
 const dryRun = process.argv.includes('--dry-run')
+const onlyMissing = process.argv.includes('--only-missing')
+const keysArgument = process.argv.find((argument) => argument.startsWith('--keys='))
+const targetArgument = process.argv.find((argument) => argument.startsWith('--target='))
 const localEnvPath = path.join(rootDir, '.env.local')
 
 // Vercel credentials may live in the gitignored .env.local so they survive
@@ -205,6 +208,21 @@ export function buildSyncedValues(config) {
   }
 }
 
+export function selectSyncedValues(values, keys) {
+  if (!keys?.length) return values
+  const unknown = keys.filter((key) => !Object.hasOwn(values, key))
+  if (unknown.length) throw new Error(`Requested environment keys are unavailable: ${unknown.join(', ')}`)
+  return Object.fromEntries(keys.map((key) => [key, values[key]]))
+}
+
+export function parseVercelTarget(target) {
+  const selected = target || 'production'
+  if (!['production', 'preview'].includes(selected)) {
+    throw new Error('Vercel target must be production or preview.')
+  }
+  return selected
+}
+
 function loadValues() {
   return buildSyncedValues(loadJson(runtimeConfigPath, 'Generated runtime environment'))
 }
@@ -239,38 +257,41 @@ async function request(pathname, { method = 'GET', body } = {}) {
   return result
 }
 
-function getProductionMatch(envs, key) {
-  const matches = envs.filter((item) => item.key === key && item.target?.includes('production'))
-  if (matches.length > 1) throw new Error(`Multiple Production variables exist for ${key}; resolve duplicates in Vercel first.`)
+function getTargetMatch(envs, key, target) {
+  const matches = envs.filter((item) =>
+    item.key === key && item.target?.includes(target) && !item.gitBranch
+  )
+  const targetName = target === 'production' ? 'Production' : 'Preview'
+  if (matches.length > 1) throw new Error(`Multiple ${targetName} variables exist for ${key}; resolve duplicates in Vercel first.`)
   if (!matches.length) return null
 
   const targets = [...(matches[0].target || [])].sort()
-  if (targets.length !== 1 || targets[0] !== 'production') {
-    throw new Error(`${key} is shared with other Vercel targets; make it Production-only before syncing.`)
+  if (targets.length !== 1 || targets[0] !== target) {
+    throw new Error(`${key} is shared with other Vercel targets; make it ${targetName}-only before syncing.`)
   }
   return matches[0]
 }
 
-async function upsertProductionVariables(values, projectId, envs) {
+async function upsertTargetVariables(values, projectId, envs, target) {
   const projectPath = `/v10/projects/${encodeURIComponent(projectId)}/env`
   for (const key of Object.keys(values)) {
     const variable = {
       value: values[key],
       type: PUBLIC_KEYS.has(key) ? 'plain' : 'encrypted',
-      target: ['production'],
+      target: [target],
     }
-    const existing = getProductionMatch(envs, key)
+    const existing = getTargetMatch(envs, key, target)
 
     if (existing) {
       try {
         await request(`/v9/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(existing.id)}`, {
           method: 'PATCH',
-          body: { value: values[key], target: ['production'] },
+          body: { value: values[key], target: [target] },
         })
       } catch (error) {
         throw new Error(`Failed to update ${key}: ${error.message}`)
       }
-      console.log(`[vercel-env] Updated ${key} (production)`)
+      console.log(`[vercel-env] Updated ${key} (${target})`)
     } else {
       let created
       try {
@@ -282,7 +303,7 @@ async function upsertProductionVariables(values, projectId, envs) {
         throw new Error(`Failed to create ${key}: ${error.message}`)
       }
       if (created.id) envs.push({ key, ...variable, id: created.id })
-      console.log(`[vercel-env] Added ${key} (production)`)
+      console.log(`[vercel-env] Added ${key} (${target})`)
     }
   }
 }
@@ -301,7 +322,17 @@ let token = ''
 let teamId = ''
 
 async function main() {
-  const values = loadValues()
+  if (onlyMissing && !keysArgument) {
+    throw new Error('--only-missing requires an explicit --keys=KEY1,KEY2 allowlist.')
+  }
+  const requestedKeys = keysArgument
+    ? [...new Set(keysArgument.slice('--keys='.length).split(',').map((key) => key.trim()).filter(Boolean))]
+    : null
+  if (keysArgument && !requestedKeys.length) {
+    throw new Error('--keys must include at least one environment variable name.')
+  }
+  const target = parseVercelTarget(targetArgument?.slice('--target='.length))
+  let values = selectSyncedValues(loadValues(), requestedKeys)
   for (const key of Object.keys(values)) console.log(`[vercel-env] ${key}: ready`)
 
   if (dryRun) {
@@ -328,9 +359,15 @@ async function main() {
   const response = await request(`/v9/projects/${projectId}/env?limit=100`)
   const envs = Array.isArray(response.envs) ? response.envs : []
 
-  await upsertProductionVariables(values, projectConfig.projectId, envs)
-  await removeLegacyPublicSecrets(projectConfig.projectId, envs)
-  console.log('[vercel-env] Production environment sync complete.')
+  if (onlyMissing) {
+    const alreadyConfigured = Object.keys(values).filter((key) => getTargetMatch(envs, key, target))
+    for (const key of alreadyConfigured) console.log(`[vercel-env] Skipped ${key} (already configured for ${target})`)
+    values = Object.fromEntries(Object.entries(values).filter(([key]) => !alreadyConfigured.includes(key)))
+  }
+
+  await upsertTargetVariables(values, projectConfig.projectId, envs, target)
+  if (!requestedKeys) await removeLegacyPublicSecrets(projectConfig.projectId, envs)
+  console.log(`[vercel-env] ${target} environment sync complete.`)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
