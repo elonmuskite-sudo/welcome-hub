@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Readable } from 'node:stream'
 import test from 'node:test'
-import { readKycMultipart } from '../api/kyc/upload.js'
+import { readKycJson, readKycMultipart } from '../api/kyc.js'
 import {
   decryptSessionToken,
   encryptSessionToken,
@@ -164,4 +164,25 @@ test('multipart KYC uploads parse the expected fields and file bytes', async () 
   assert.equal(file.fieldName, 'document')
   assert.equal(file.mimeType, 'image/jpeg')
   assert.deepEqual(file.buffer, Buffer.from([0xff, 0xd8, 0xff]))
+})
+
+test('KYC initialization parses bounded JSON requests', async () => {
+  const req = Readable.from([Buffer.from('{"consent":true}')])
+  req.headers = {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': '16',
+  }
+  assert.deepEqual(await readKycJson(req), { consent: true })
+
+  const unsupported = Readable.from([Buffer.from('{}')])
+  unsupported.headers = { 'content-type': 'text/plain' }
+  await assert.rejects(readKycJson(unsupported), /must use JSON/)
+
+  const malformed = Readable.from([Buffer.from('{')])
+  malformed.headers = { 'content-type': 'application/json' }
+  await assert.rejects(readKycJson(malformed), /invalid JSON/)
+
+  const oversized = Readable.from([Buffer.alloc(16 * 1024 + 1)])
+  oversized.headers = { 'content-type': 'application/json' }
+  await assert.rejects(readKycJson(oversized), /too large/)
 })

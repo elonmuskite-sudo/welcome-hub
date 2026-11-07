@@ -135,3 +135,27 @@ test('Vercel sync accepts only Production or Preview targets', () => {
   assert.equal(parseVercelTarget('preview'), 'preview')
   assert.throws(() => parseVercelTarget('development'), /production or preview/)
 })
+
+test('Vercel Serverless Function count stays within the Hobby plan limit', () => {
+  const apiRoot = path.join(root, 'api')
+  const apiFiles = []
+  const visit = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name)
+      if (entry.isDirectory()) visit(entryPath)
+      else if (entry.isFile() && /\.m?js$/.test(entry.name)) apiFiles.push(entryPath)
+    }
+  }
+  visit(apiRoot)
+  assert.ok(apiFiles.length <= 12, `Expected at most 12 Serverless Functions; found ${apiFiles.length}`)
+
+  const vercelConfig = JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8'))
+  const kycRewrites = new Map(
+    vercelConfig.rewrites
+      .filter(({ source }) => source.startsWith('/api/kyc/'))
+      .map(({ source, destination }) => [source, destination]),
+  )
+  assert.equal(kycRewrites.get('/api/kyc/init'), '/api/kyc?action=init')
+  assert.equal(kycRewrites.get('/api/kyc/upload'), '/api/kyc?action=upload')
+  assert.equal(kycRewrites.get('/api/kyc/status'), '/api/kyc?action=status')
+})

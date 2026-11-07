@@ -4,10 +4,13 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    {      "source": "/api/storage/:action",
+    { "source": "/api/kyc/init", "destination": "/api/kyc?action=init" },
+    { "source": "/api/kyc/upload", "destination": "/api/kyc?action=upload" },
+    { "source": "/api/kyc/status", "destination": "/api/kyc?action=status" },
+    { "source": "/api/storage/:action",
       "destination": "/api/storage"
     },
-    {      "source": "/(.*)",
+    { "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
