@@ -147,7 +147,7 @@ test('Vercel Serverless Function count stays within the Hobby plan limit', () =>
     }
   }
   visit(apiRoot)
-  assert.ok(apiFiles.length <= 12, `Expected at most 12 Serverless Functions; found ${apiFiles.length}`)
+  assert.ok(apiFiles.length <= 11, `Expected at most 11 Serverless Functions for headroom; found ${apiFiles.length}`)
 
   const vercelConfig = JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8'))
   const kycRewrites = new Map(
@@ -158,4 +158,12 @@ test('Vercel Serverless Function count stays within the Hobby plan limit', () =>
   assert.equal(kycRewrites.get('/api/kyc/init'), '/api/kyc?action=init')
   assert.equal(kycRewrites.get('/api/kyc/upload'), '/api/kyc?action=upload')
   assert.equal(kycRewrites.get('/api/kyc/status'), '/api/kyc?action=status')
+
+  const callRewrites = new Map(
+    vercelConfig.rewrites
+      .filter(({ source }) => source.startsWith('/api/calls/'))
+      .map(({ source, destination }) => [source, destination]),
+  )
+  assert.equal(callRewrites.get('/api/calls/notify'), '/api/calls?action=notify')
+  assert.equal(callRewrites.get('/api/calls/push-subscription'), '/api/calls?action=push-subscription')
 })
