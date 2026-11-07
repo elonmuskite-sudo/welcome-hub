@@ -93,3 +93,5 @@ android-sdk/
 
 # Database backups — contain member data (names, chat titles, UUIDs). Never commit.
 supabase/backups/
+# Supabase CLI local runtime state may contain generated secrets.
+supabase/.temp/

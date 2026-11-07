@@ -8,6 +8,7 @@ import { useSyncStatus } from '../../hooks/useSyncStatus'
 import { SyncSpinner } from '../SyncIndicator'
 import { createChat, getChats, getContacts, addContact, formatNexusId, searchUserByNexusId, isContactSaved } from '../../lib/persistence'
 import { VerificationBadgeIcon, fetchVerificationBadges, BADGE_REFRESH_EVENT } from './VerificationBadge'
+import { participantNamesFor } from '../../lib/chatPreview'
 
 const nexusDigits = (value) => String(value || '').replace(/\D/g, '')
 
@@ -67,12 +68,15 @@ export default function ContactsPanel() {
       return ids.length === participants.length && ids.every((id, index) => id === participants[index])
     })
     if (existing) return existing.id
+    const recipientName = recipient.fullName || fallbackTitle || recipient.nexusIdDisplay || recipient.nexusId
+    const myName = user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.nexusIdDisplay || user.nexusId
     const newChat = await createChat({
-      title: recipient.fullName || fallbackTitle,
+      title: recipientName,
       type: 'private',
       avatar_url: recipient.avatarUrl || null,
       owner_id: user.id,
       participantIds: participants,
+      participantNames: participantNamesFor(user.id, myName, recipient.id, recipientName),
     })
     return newChat.id
   }

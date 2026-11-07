@@ -3,6 +3,11 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/query-client.js";
 import App from "./App.jsx";
 import "./index.css";
+import { initializeNativeCallPush } from "./lib/callPush.js";
+
+void initializeNativeCallPush().catch((error) => {
+  console.error("Native call push initialization failed:", error);
+});
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

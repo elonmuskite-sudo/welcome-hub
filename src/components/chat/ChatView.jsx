@@ -1,9 +1,10 @@
 /* eslint-disable react/prop-types */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { ArrowLeftIcon, PhoneIcon, LockClosedIcon } from '@heroicons/react/24/solid'
+import { ArrowLeftIcon, PhoneIcon, VideoCameraIcon, LockClosedIcon } from '@heroicons/react/24/solid'
 import Avatar from './Avatar'
 import MessageInput from './MessageInput'
 import MessageBubble from './MessageBubble'
+import CallHistoryEntry from './CallHistoryEntry'
 import { useSetting } from '../../hooks/useSetting'
 import { useSyncStatus } from '../../hooks/useSyncStatus'
 import { getWallpaperById } from '../../lib/wallpapers'
@@ -19,13 +20,15 @@ import { SyncSpinner } from '../SyncIndicator'
 import { peerIdOf, chatDisplayName } from '../../lib/chatPreview'
 import { requiresE2EEEncryption } from '../../lib/crypto/envelope'
 import { resolveMessages, decodeContent, encodeReply } from '../../lib/chatProtocol'
+import { useChatTyping } from '../../hooks/useChatTyping'
+import ChatProfileSheet from './ChatProfileSheet'
 
 // Single placeholder for any encrypted message we cannot read yet (missing peer
 // key or a payload from another key), so pending and failed never look different.
 const UNDECRYPTABLE_MESSAGE = '🔒 Encrypted message — unable to decrypt'
 
 // eslint-disable-next-line react/prop-types
-export default function ChatView({ chat, onBack, autoStartCall = false }) {
+export default function ChatView({ chat, onBack, autoStartCall = false, cacheWarning = false }) {
   const [messages, setMessages] = useState(chat?.messages || [])
   const [decryptedMessages, setDecryptedMessages] = useState({})
   const [sendError, setSendError] = useState('')
@@ -33,6 +36,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
   const [showSearch, setShowSearch] = useState(false)
   const [search, setSearch] = useState('')
   const [reacting, setReacting] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const messagesEndRef = useRef(null)
   // Message ids already attempted in this chat; keeps the decrypt effect from
   // retrying a failure on every render while still allowing a retry after the
@@ -64,16 +68,32 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
   const { user } = useAuth()
   const didAutoStartCall = useRef(false)
   const peerId = peerIdOf(chat, user?.id)
+  const peerName = chatDisplayName(chat, user?.id)
+  const { isPeerTyping, setLocalTyping } = useChatTyping(chat.id, user?.id, Boolean(peerId) && chat.type !== 'group')
 
-  const startCall = useCallback(() => {
-    if (!peerId) return
+  const closeProfile = useCallback(() => setShowProfile(false), [])
+  const openSearch = useCallback(() => {
+    setShowSearch(true)
+    setSearch('')
+  }, [])
+  const openMessage = useCallback((messageId) => {
+    setSearch('')
+    setShowSearch(false)
+    window.setTimeout(() => {
+      document.getElementById(`chat-message-${messageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 0)
+  }, [])
+
+  const startCall = useCallback((kind = 'voice') => {
+    if (!peerId || call) return
     initiateCall({
       chatId: chat.id,
       peerId,
       peerName: chatDisplayName(chat, user?.id),
       peerAvatar: chat.avatar_url,
+      kind,
     })
-  }, [chat, peerId, user?.id, initiateCall])
+  }, [chat, peerId, user?.id, initiateCall, call])
 
   // The number-lookup "Call" action arrives with autoStartCall; fire the call once.
   useEffect(() => {
@@ -109,7 +129,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
     if (!readReceiptsEnabled || !user?.id) return
     const pending = { delivered: [], read: [] }
     for (const message of messages) {
-      if (message.type === 'receipt' || message.type === 'reaction') continue
+      if (message.type === 'receipt' || message.type === 'reaction' || message.type === 'call') continue
       const sender = String(message.sender_id || '')
       if (!sender || sender === 'me' || sender === String(user.id)) continue
       const alreadySent = receiptStateRef.current.get(message.id)
@@ -295,36 +315,57 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
           >
             <ArrowLeftIcon className="w-5 h-5" />
           </ChatButton>
-          <div className="flex-shrink-0">
-            <Avatar src={chat.avatar_url} alt={chatDisplayName(chat, user?.id)} size="sm" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1 min-w-0">
-              <h2 className="font-bold text-foreground truncate text-sm sm:text-base">{chatDisplayName(chat, user?.id)}</h2>
-              {peerId && <VerificationBadge userId={peerId} className="w-4 h-4 flex-shrink-0" />}
-              {chat.encrypted && (
-                <LockClosedIcon className="w-3.5 h-3.5 text-primary flex-shrink-0" title="End-to-end encrypted" />
-              )}
-            </div>
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              {call?.state === 'connected' ? 'On call' : chat.type === 'group' ? 'Group conversation' : 'Private conversation'}
-            </p>
-          </div>
+          <ChatButton
+            title={peerId ? 'Open contact profile' : 'Conversation details'}
+            aria-haspopup={peerId ? 'dialog' : undefined}
+            onClick={() => { if (peerId) setShowProfile(true) }}
+            disabled={!peerId}
+            className="flex min-w-0 items-center gap-2 sm:gap-3 rounded-xl text-left"
+          >
+            <span className="flex-shrink-0">
+              <Avatar src={chat.avatar_url} alt={peerName} size="sm" />
+            </span>
+            <span className="min-w-0">
+              <span className="flex items-center gap-1">
+                <span className="truncate font-bold text-foreground text-sm sm:text-base">{peerName}</span>
+                {peerId && <VerificationBadge userId={peerId} className="h-4 w-4 flex-shrink-0" />}
+                {chat.encrypted && (
+                  <LockClosedIcon className="h-3.5 w-3.5 flex-shrink-0 text-primary" title="End-to-end encrypted" />
+                )}
+              </span>
+              <span className={`block truncate text-xs sm:text-sm ${isPeerTyping ? 'font-medium text-primary' : 'text-muted-foreground'}`} aria-live="polite">
+                {call?.state === 'connected' ? 'On call' : isPeerTyping ? 'Typing…' : chat.type === 'group' ? 'Group conversation' : 'Private conversation'}
+              </span>
+            </span>
+          </ChatButton>
         </div>
 
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           <ChatButton title="Search conversation" aria-expanded={showSearch} onClick={() => { setShowSearch(!showSearch); setSearch('') }} className="w-9"><Search className="w-5 h-5" /></ChatButton>
           <ChatButton
-            onClick={startCall}
+            onClick={() => startCall('voice')}
             disabled={!peerId || Boolean(call)}
             className="p-2 hover:bg-muted rounded-full text-foreground disabled:opacity-50 transition"
             title={peerId ? 'Start call' : 'Only available in one-to-one chats'}
           >
             <PhoneIcon className="w-5 h-5" />
           </ChatButton>
+          <ChatButton
+            onClick={() => startCall('video')}
+            disabled={!peerId || Boolean(call)}
+            className="p-2 hover:bg-muted rounded-full text-foreground disabled:opacity-50 transition"
+            title={peerId ? 'Start video call' : 'Only available in one-to-one chats'}
+          >
+            <VideoCameraIcon className="w-5 h-5" />
+          </ChatButton>
         </div>
       </div>
 
+      {cacheWarning && (
+        <p role="status" className="border-b border-border bg-muted/60 chat-page-x py-2 text-xs text-muted-foreground">
+          Showing saved messages. Reconnect to refresh this conversation.
+        </p>
+      )}
       {showSearch && <div className="flex items-center gap-2 chat-page-x py-3 bg-card border-b border-border chat-enter"><Search className="w-4 h-4 text-muted-foreground" /><input autoFocus type="search" enterKeyHint="search" autoComplete="off" spellCheck="false" aria-label="Search messages" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search messages" className="flex-1 min-w-0 bg-muted text-foreground px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-ring" /><ChatButton title="Close search" onClick={() => { setSearch(''); setShowSearch(false) }} className="w-9"><X className="w-4 h-4" /></ChatButton></div>}
       <div className="flex-1 min-h-0 min-w-0 relative overflow-hidden" style={wallpaperStyle}>
         <div className="absolute inset-0 bg-card/60 dark:bg-background/70 pointer-events-none" />
@@ -352,16 +393,22 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
               </div>
             ) : (
               visibleMessages.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  userId={user?.id}
-                  onReact={handleReact}
-                  onReply={setReply}
-                  reacting={reacting}
-                  receiptsEnabled={readReceiptsEnabled}
-                  isOwn={String(message.sender_id) === String(user?.id) || message.sender_id === 'me'}
-                />
+                <div key={message.id} id={`chat-message-${message.id}`} className="scroll-mt-20">
+                  {message.type === 'call' ? (
+                    <CallHistoryEntry message={message} userId={user?.id} />
+                  ) : (
+                    <MessageBubble
+                      message={message}
+                      userId={user?.id}
+                      chatId={chat.id}
+                      onReact={handleReact}
+                      onReply={setReply}
+                      reacting={reacting}
+                      receiptsEnabled={readReceiptsEnabled}
+                      isOwn={String(message.sender_id) === String(user?.id) || message.sender_id === 'me'}
+                    />
+                  )}
+                </div>
               ))
             )}
             <div ref={messagesEndRef} />
@@ -370,7 +417,18 @@ export default function ChatView({ chat, onBack, autoStartCall = false }) {
       </div>
 
       {sendError && <p role="alert" className="border-t border-destructive/30 bg-destructive/10 chat-page-x py-2 text-sm text-destructive break-words">{sendError}</p>}
-      <MessageInput onSendMessage={handleSendMessage} reply={reply} onCancelReply={() => setReply(null)} chatId={chat.id} />
+      <MessageInput onSendMessage={handleSendMessage} onTypingChange={setLocalTyping} reply={reply} onCancelReply={() => setReply(null)} chatId={chat.id} />
+      <ChatProfileSheet
+        open={showProfile}
+        chat={chat}
+        peerId={peerId}
+        peerName={peerName}
+        callDisabled={Boolean(call)}
+        onClose={closeProfile}
+        onCall={startCall}
+        onSearch={openSearch}
+        onOpenMessage={openMessage}
+      />
     </div>
   )
 }

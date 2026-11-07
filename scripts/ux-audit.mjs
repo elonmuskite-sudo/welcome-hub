@@ -21,8 +21,10 @@
  */
 
 import { chromium, firefox, webkit } from 'playwright'
+import { webcrypto } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
+import { E2EE_PROTOCOL, isEncryptedTextEnvelope } from '../src/lib/crypto/envelope.js'
 
 const PORT = Number(process.env.UX_AUDIT_PORT || 4178)
 const BASE_URL = `http://localhost:${PORT}`
@@ -35,6 +37,10 @@ const SYNC_DELAY_MS = 900
 const SELF = { id: '11111111-1111-4111-8111-111111111111', email: 'audit.a@example.com' }
 const PEER_ID = '22222222-2222-4222-8222-222222222222'
 const CHAT_ID = '33333333-3333-4333-8333-333333333333'
+const PEER_PUBLIC_KEY = webcrypto.subtle
+  .generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey'])
+  .then(({ publicKey }) => webcrypto.subtle.exportKey('raw', publicKey))
+  .then((key) => Buffer.from(key).toString('base64'))
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -175,7 +181,10 @@ function createBackend() {
         return json({})
       }
 
-      if (path.includes('/rest/v1/rpc/')) return json(path.endsWith('has_role') ? false : null)
+      if (path.includes('/rest/v1/rpc/')) {
+        if (path.endsWith('list_chat_public_keys')) return json([{ public_key: await PEER_PUBLIC_KEY }])
+        return json(path.endsWith('has_role') ? false : null)
+      }
       if (path.includes('/rest/v1/members')) return rows([state.profile])
 
       if (path.includes('/rest/v1/chats')) {
@@ -501,9 +510,23 @@ async function auditReceipts(browser, target, { receiptsEnabled }) {
     // --- own message starts as "Sent" -------------------------------------
     await page.fill('textarea[aria-label="Message"]', 'audit-out-1')
     await page.keyboard.press('Enter')
-    const posted = await waitFor(() => backend.state.messages.some((m) => m.content === 'audit-out-1'), 8000)
+    const posted = await waitFor(() => backend.state.messages.some((m) => (
+      m.type === 'text' && m.encrypted === true && isEncryptedTextEnvelope(m.content)
+    )), 8000)
     if (!posted) throw new Error('the sent message never reached the backend')
-    const mine = backend.state.messages.find((m) => m.content === 'audit-out-1')
+    const mine = backend.state.messages.find((m) => (
+      m.type === 'text' && m.encrypted === true && isEncryptedTextEnvelope(m.content)
+    ))
+    const payload = JSON.parse(mine.content)
+    if (payload.alg !== E2EE_PROTOCOL) {
+      failures.push({ check: `receipts/${label}/encryption`, detail: `unexpected message protocol ${JSON.stringify(payload.alg)}` })
+    }
+
+    const visible = await waitFor(
+      () => page.evaluate((id) => document.getElementById(`message-${id}`)?.textContent?.includes('audit-out-1') || false, mine.id),
+      8000,
+    )
+    if (!visible) failures.push({ check: `receipts/${label}/message`, detail: 'the sent plaintext was not rendered in the conversation' })
 
     const sentOk = await waitFor(
       () => page.evaluate(`${ariaLabelExpr(mine.id)} === 'Sent'`),

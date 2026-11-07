@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../../../lib/AuthContext'
+import { uploadChatFile } from '../../../lib/storageManager'
 import Avatar from '../Avatar'
 import BioWriter from './BioWriter'
 import { Camera, Copy, Check, Save } from 'lucide-react'
@@ -12,7 +13,10 @@ export default function ProfileEdit() {
   const [interests, setInterests] = useState(user?.interests || [])
   const [copied, setCopied] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const [avatarPreview, setAvatarPreview] = useState(user?.avatarUrl || null)
+  const [avatarFile, setAvatarFile] = useState(null)
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -20,10 +24,15 @@ export default function ProfileEdit() {
       setFirstName(user.firstName || '')
       setLastName(user.lastName || '')
       setAvatarPreview(user.avatarUrl || null)
+      setAvatarFile(null)
       setBio(user.bio || '')
       setInterests(user.interests || [])
     }
   }, [user])
+
+  useEffect(() => () => {
+    if (avatarPreview?.startsWith('blob:')) URL.revokeObjectURL(avatarPreview)
+  }, [avatarPreview])
 
   const handleAvatarClick = () => {
     fileInputRef.current?.click()
@@ -31,16 +40,19 @@ export default function ProfileEdit() {
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const base64Url = event.target?.result
-        if (typeof base64Url === 'string') {
-          setAvatarPreview(base64Url)
-        }
-      }
-      reader.readAsDataURL(file)
+    e.target.value = ''
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('Choose a JPG, PNG, or WebP image.')
+      return
     }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Profile photos must be 5 MB or smaller.')
+      return
+    }
+    setError('')
+    setAvatarFile(file)
+    setAvatarPreview(URL.createObjectURL(file))
   }
 
   const handleCopyNexusId = () => {
@@ -53,6 +65,8 @@ export default function ProfileEdit() {
 
   const handleSave = async (e) => {
     e.preventDefault()
+    setSaving(true)
+    setError('')
     const updates = {
       firstName,
       lastName,
@@ -60,12 +74,25 @@ export default function ProfileEdit() {
       bio: bio.trim(),
       interests,
     }
-    if (avatarPreview && avatarPreview !== user?.avatarUrl) {
-      updates.avatarUrl = avatarPreview
+    try {
+      if (avatarFile) {
+        const { fileUrl } = await uploadChatFile({
+          userId: user.id,
+          chatId: null,
+          file: avatarFile,
+          kind: 'image',
+        })
+        updates.avatarUrl = fileUrl
+      }
+      await updateProfile(updates)
+      setAvatarFile(null)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (saveError) {
+      setError(saveError?.message || 'Your profile could not be saved.')
+    } finally {
+      setSaving(false)
     }
-    await updateProfile(updates)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
   }
 
   return (
@@ -94,11 +121,11 @@ export default function ProfileEdit() {
         >
           Change Profile Photo
         </button>
-        <input 
+        <input
           type="file" 
           ref={fileInputRef} 
           onChange={handleFileChange} 
-          accept="image/*" 
+          accept="image/jpeg,image/png,image/webp"
           className="hidden" 
         />
       </div>
@@ -160,11 +187,16 @@ export default function ProfileEdit() {
 
         <BioWriter name={`${firstName} ${lastName}`.trim()} bio={bio} setBio={setBio} interests={interests} setInterests={setInterests} />
 
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
         <button
           type="submit"
+          disabled={saving}
           className="w-full flex items-center justify-center gap-2 py-3 bg-primary text-primary-foreground font-medium rounded-xl hover:opacity-90 active:scale-[0.99] transition duration-200"
         >
-          {saved ? (
+          {saving ? (
+            'Saving…'
+          ) : saved ? (
             <>
               <Check className="w-4 h-4" />
               Saved!

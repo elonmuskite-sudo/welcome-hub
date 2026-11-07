@@ -33,19 +33,30 @@ export default function BioWriter({ name, bio, setBio, interests, setInterests }
         body: JSON.stringify({ name, interests, draft: bio }),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not write a bio.')
+      if (!res.body) throw new Error('The AI writer did not return a response stream.')
       const reader = res.body.getReader(); const dec = new TextDecoder()
       let buf = '', out = ''
-      for (;;) {
+      while (true) {
         const { value, done } = await reader.read(); if (done) break
         buf += dec.decode(value, { stream: true })
-        const lines = buf.split('\n'); buf = lines.pop()
+        const lines = buf.split('\n'); buf = lines.pop() ?? ''
         for (const line of lines) {
-          if (!line.startsWith('data:')) continue
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const payload = trimmed.slice(5).trim()
+          if (!payload || payload === '[DONE]') continue
           try {
-            const ev = JSON.parse(line.slice(5).trim())
-            if (ev.type === 'response.output_text.delta') { out += ev.delta; setBio(out) }
-            if (ev.type === 'error' || ev.type === 'response.failed') throw new Error(ev.error?.message || ev.response?.error?.message || 'The AI stopped unexpectedly.')
-          } catch (e) { if (e instanceof Error && !(e instanceof SyntaxError)) throw e }
+            const ev = JSON.parse(payload)
+            if (ev?.type === 'response.output_text.delta' && typeof ev.delta === 'string') {
+              out += ev.delta
+              setBio(out)
+            }
+            if (ev?.type === 'error' || ev?.type === 'response.failed') {
+              throw new Error(ev.error?.message || ev.response?.error?.message || 'The AI stopped unexpectedly.')
+            }
+          } catch (e) {
+            if (e instanceof Error && !(e instanceof SyntaxError)) throw e
+          }
         }
       }
       if (!out.trim()) throw new Error('The AI returned no text.')

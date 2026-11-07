@@ -9,6 +9,7 @@ import { useSyncStatus } from '../../hooks/useSyncStatus'
 import { useNow } from '../../lib/useNow'
 import { SyncSpinner } from '../SyncIndicator'
 import { createChat, getChats, searchUserByNexusId, formatNexusId, addContact, isContactSaved } from '../../lib/persistence'
+import { participantNamesFor, chatDisplayName } from '../../lib/chatPreview'
 
 // eslint-disable-next-line react/prop-types
 export default function ChatSidebar({ activeTab, onTabChange }) {
@@ -104,18 +105,15 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
       return ids.length === participantIds.length && ids.every((id, index) => id === participantIds[index])
     })
     if (existing) return existing.id
-    const chatTitle = recipient.fullName || `${recipient.firstName} ${recipient.lastName}`.trim() || recipient.nexusIdDisplay
-    const myName = user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.nexusId
+    const chatTitle = recipient.fullName || `${recipient.firstName || ''} ${recipient.lastName || ''}`.trim() || recipient.nexusIdDisplay
+    const myName = user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.nexusIdDisplay || user.nexusId
     const newChat = await createChat({
       title: chatTitle,
       type: 'private',
       avatar_url: recipient.avatarUrl || null,
       owner_id: user.id,
       participantIds: [user.id, recipient.id],
-      participantNames: {
-        [String(user.id)]: myName,
-        [String(recipient.id)]: chatTitle,
-      },
+      participantNames: participantNamesFor(user.id, myName, recipient.id, chatTitle),
     })
     return newChat.id
   }
@@ -191,9 +189,15 @@ export default function ChatSidebar({ activeTab, onTabChange }) {
     await runLookupAction(action, foundUser)
   }
 
-  const filteredChats = chats.filter(chat =>
-    chat.title.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  // Search matches the name the row actually shows and the stored title, and
+  // tolerates a null/absent title so one malformed row cannot break the list.
+  const filteredChats = chats.filter((chat) => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return true
+    const label = chatDisplayName(chat, user?.id)
+    const title = typeof chat.title === 'string' ? chat.title : ''
+    return label.toLowerCase().includes(query) || title.toLowerCase().includes(query)
+  })
 
   const handleChatSelect = (chat) => {
     navigate(`/app/chat/${chat.id}`)

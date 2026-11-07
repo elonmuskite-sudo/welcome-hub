@@ -2,16 +2,23 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isProductionDeployment } from './deployment-env.js'
+import { getPartialOptionalEnvGroups } from './optional-env-groups.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
-// Only the browser keys are needed to build. Server keys are checked as warnings because Vercel
-// functions read them at runtime.
+// Browser keys are required for every deployment build. Server keys are required
+// for Production deployments and reported as warnings in Preview/local builds.
 const REQUIRED_GROUPS = [
   ['VITE_SUPABASE_URL', 'SUPABASE_URL'],
   ['VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY', 'VITE_SUPABASE_PUBLISHABLE_KEY'],
 ]
-const RECOMMENDED_KEYS = ['SUPABASE_SERVICE_ROLE_KEY', 'RESEND_API_KEY', 'RESEND_FROM']
+const REQUIRED_PRODUCTION_KEYS = [
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'RESEND_API_KEY',
+  'RESEND_FROM',
+  'ADMIN_SESSION_SECRET',
+]
 const APPWRITE_SERVER_KEYS = [
   'APPWRITE_ENDPOINT',
   'APPWRITE_PROJECT_ID',
@@ -62,9 +69,9 @@ function isPlaceholder(value) {
 
 async function main() {
   const isStrictDeploy = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NODE_ENV === 'production')
+  const isProductionDeploy = isProductionDeployment(process.env)
   const provider = getEnvValue('VITE_AUTH_PROVIDER') || 'supabase'
   const missing = REQUIRED_GROUPS.filter((keys) => !keys.some((key) => !isPlaceholder(getEnvValue(key)))).map((keys) => keys.join(' or '))
-  const missingRecommended = RECOMMENDED_KEYS.filter((key) => isPlaceholder(getEnvValue(key)))
 
   if (!['supabase', 'appwrite'].includes(provider)) {
     console.error('[env:validate] VITE_AUTH_PROVIDER must be either supabase or appwrite.')
@@ -72,24 +79,36 @@ async function main() {
   }
 
   if (provider === 'appwrite') {
-    const missingAppwrite = [
-      ...['VITE_APPWRITE_ENDPOINT', 'VITE_APPWRITE_PROJECT_ID'],
-      ...APPWRITE_SERVER_KEYS,
-    ].filter((key) => isPlaceholder(getEnvValue(key)))
-    if (isStrictDeploy && missingAppwrite.length) {
-      console.error('[env:validate] Missing Appwrite production environment values:')
-      for (const key of missingAppwrite) console.error(` - ${key}`)
+    const missingAppwriteClient = ['VITE_APPWRITE_ENDPOINT', 'VITE_APPWRITE_PROJECT_ID']
+      .filter((key) => isPlaceholder(getEnvValue(key)))
+    if (isStrictDeploy && missingAppwriteClient.length) {
+      console.error('[env:validate] Missing Appwrite client environment values:')
+      for (const key of missingAppwriteClient) console.error(` - ${key}`)
+      process.exit(1)
+    }
+
+    const missingAppwriteServer = APPWRITE_SERVER_KEYS
+      .filter((key) => isPlaceholder(getEnvValue(key)))
+    if (isProductionDeploy && missingAppwriteServer.length) {
+      console.error('[env:validate] Missing Appwrite production server values:')
+      for (const key of missingAppwriteServer) console.error(` - ${key}`)
       process.exit(1)
     }
   }
 
-  if (missingRecommended.length) {
-    console.warn(`[env:validate] Not set (sign-up emails will fail until added): ${missingRecommended.join(', ')}`)
+  const missingProductionKeys = REQUIRED_PRODUCTION_KEYS.filter((key) => isPlaceholder(getEnvValue(key)))
+  const shortAdminSecret = !isPlaceholder(getEnvValue('ADMIN_SESSION_SECRET'))
+    && getEnvValue('ADMIN_SESSION_SECRET').trim().length < 32
+  if (isProductionDeploy && (missingProductionKeys.length || shortAdminSecret)) {
+    console.error('[env:validate] Missing required production server values:')
+    for (const key of missingProductionKeys) console.error(` - ${key}`)
+    if (shortAdminSecret) console.error(' - ADMIN_SESSION_SECRET must be at least 32 characters')
+    process.exit(1)
   }
-  // Without this secret Edge Middleware fails closed, so every /admin* request
-  // would be redirected to the sign-in page.
-  if (isPlaceholder(getEnvValue('ADMIN_SESSION_SECRET'))) {
-    console.warn('[env:validate] ADMIN_SESSION_SECRET is not set: /admin* requests will be blocked in production until it is.')
+  if (!isProductionDeploy && (missingProductionKeys.length || shortAdminSecret)) {
+    const issues = [...missingProductionKeys]
+    if (shortAdminSecret) issues.push('ADMIN_SESSION_SECRET must be at least 32 characters')
+    console.warn(`[env:validate] Production server values are not configured in this deployment environment: ${issues.join(', ')}`)
   }
   // Voice calls relay over TURN when NAT traversal via STUN alone fails.
   const hasTurnUrl = !isPlaceholder(getEnvValue('VITE_TURN_URL'))
@@ -99,7 +118,33 @@ async function main() {
     console.warn('[env:validate] VITE_TURN_URL is not set: voice calls use STUN only and may fail behind strict NATs.')
   }
   if (hasTurnUser !== hasTurnCredential) {
-    console.warn('[env:validate] TURN username and credential must be set together; relay credentials will be ignored.')
+    console.warn('[env:validate] TURN username and credential must be set together; configure both or leave both unset.')
+  }
+  const optionalEnvValues = Object.fromEntries(
+    [
+      'IDSWYFT_API_URL', 'IDSWYFT_API_KEY', 'IDSWYFT_SESSION_ENCRYPTION_KEY',
+      'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_MESSAGING_SERVICE_SID',
+      'FILE_SCAN_API_URL', 'FILE_SCAN_API_KEY',
+      'R2_BUCKET_NAME', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY',
+      'VITE_WEB_PUSH_PUBLIC_KEY', 'WEB_PUSH_VAPID_PUBLIC_KEY',
+      'WEB_PUSH_VAPID_PRIVATE_KEY', 'WEB_PUSH_VAPID_SUBJECT',
+      'VITE_TURN_USERNAME', 'VITE_TURN_CREDENTIAL',
+    ].map((key) => [key, getEnvValue(key)])
+  )
+  const partialGroups = getPartialOptionalEnvGroups(optionalEnvValues, isPlaceholder)
+  if (partialGroups.length) {
+    const details = partialGroups
+      .map((group) => `${group.name}: ${group.missingKeys.join(', ')}`)
+      .join('; ')
+    const message = `Optional integrations are partially configured: ${details}`
+    if (isProductionDeploy) {
+      console.error(`[env:validate] ${message}`)
+      process.exit(1)
+    }
+    console.warn(`[env:validate] ${message}`)
+  }
+  if (isPlaceholder(getEnvValue('FIREBASE_SERVICE_ACCOUNT_JSON'))) {
+    console.warn('[env:validate] Native background call alerts are disabled until FIREBASE_SERVICE_ACCOUNT_JSON is configured.')
   }
   if (isStrictDeploy && missing.length) {
     console.error('[env:validate] Missing production env values before deploy:')

@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.system-email]
 verify_jwt = false
+
+[functions.create-storage-checkout]
+enabled = false

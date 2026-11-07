@@ -33,13 +33,13 @@ function emit(name, detail) {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(name, detail ? { detail } : undefined))
 }
 const notifyContactsUpdate = () => emit('nexus-contacts:updated')
-const notifyChatUpdate = () => emit('nexus-chat:updated')
+const notifyChatUpdate = (detail = {}) => emit('nexus-chat:updated', { ...detail, cacheUpdated: true })
 const notifyChange = notifyChatUpdate
 
-// Reactions and receipts are protocol control rows: they are stored as messages
-// but must never become a conversation preview.
+// Reactions, receipts, and call-history rows are protocol events. They are
+// stored as messages but must never become a conversation preview.
 function isPreviewRow(row) {
-  return Boolean(row) && row.type !== 'reaction' && row.type !== 'receipt'
+  return Boolean(row) && row.type !== 'reaction' && row.type !== 'receipt' && row.type !== 'call'
 }
 
 // Folds a chat's newest message into the summary fields the contact list reads.
@@ -150,8 +150,9 @@ export function startRealtimeListeners() {
       const known = readLocalChats().some((c) => String(c.id) === String(row.chat_id))
       if (!known) { await readChats(currentUserId); notifyChatUpdate() }
       await appendMessage(String(row.chat_id), mapMessage(row))
-      if (row.type !== 'reaction' && row.type !== 'receipt' && String(row.sender_id || '') !== String(currentUserId || '')) {
+      if (row.type !== 'reaction' && row.type !== 'receipt' && row.type !== 'call' && String(row.sender_id || '') !== String(currentUserId || '')) {
         emit('nexus:incoming-notification', {
+          chatId: String(row.chat_id),
           title: 'New message',
           preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',
           avatarUrl: '/logo.png', type: 'message',
@@ -179,11 +180,27 @@ export async function readChats(userId) {
   return withSync('chats', () => readChatsFromSource(userId))
 }
 
+async function addCurrentPeerAvatars(chats, userId) {
+  const peerIds = [...new Set(chats
+    .filter((chat) => chat.type !== 'group')
+    .flatMap((chat) => (chat.participant_ids || []).map(String).filter((id) => id !== String(userId || ''))))]
+  if (!peerIds.length) return chats
+  const { data: profiles, error } = await supabase.rpc('list_member_profiles', { p_ids: peerIds })
+  if (error) throw error
+  const avatars = new Map((profiles || []).map((profile) => [String(profile.id), profile.avatar_url]))
+  return chats.map((chat) => {
+    if (chat.type === 'group') return chat
+    const peerId = (chat.participant_ids || []).map(String).find((id) => id !== String(userId || ''))
+    return peerId && avatars.has(peerId) ? { ...chat, avatar_url: avatars.get(peerId) } : chat
+  })
+}
+
 async function readChatsFromSource(userId) {
   if (isAppwriteAuthEnabled()) {
     const { chats = [] } = await appwriteData('chats.list')
-    const mappedChats = chats.map(({ chat_members: members, latest, ...chat }) => ({
+    const mappedChats = chats.map(({ chat_members: members, latest, peer_avatar_url: peerAvatarUrl, ...chat }) => ({
       ...chat,
+      avatar_url: peerAvatarUrl || chat.avatar_url,
       id: String(chat.id),
       participant_ids: (members || []).map((member) => String(member.profile_id)),
       latest: Array.isArray(latest) ? latest[0] : latest,
@@ -222,6 +239,7 @@ async function readChatsFromSource(userId) {
     }
   }
 
+  if (remoteChats) remoteChats = await addCurrentPeerAvatars(remoteChats, userId)
   const local = readLocalChats()
   if (!remoteChats) {
     if (!userId) return local
@@ -311,10 +329,15 @@ function applyMessagesToChats(chats, chatId, messages) {
   const index = chats.findIndex((item) => String(item.id) === String(chatId))
   if (index === -1) return chats
   const chat = chats[index]
+  const updatedChat = applyIncomingMessagesToChat(chat, messages)
+  const nextChats = chats.slice()
+  nextChats[index] = updatedChat
+  return nextChats
+}
+
+function applyIncomingMessagesToChat(chat, messages) {
   const existing = Array.isArray(chat.messages) ? chat.messages : []
-  // A Map keeps existing messages in place while upserting, so an update never
-  // reorders the thread and new messages append in arrival order.
-  const byId = new Map(existing.map((m) => [m.id, m]))
+  const byId = new Map(existing.map((message) => [String(message.id), message]))
   let lastMessage = chat.last_message
   let lastMessageTime = chat.last_message_time
   let lastMessageSenderId = chat.last_message_sender_id
@@ -323,16 +346,25 @@ function applyMessagesToChats(chats, chatId, messages) {
 
   for (const message of messages) {
     const nextMessage = {
-      id: message.id || `${Date.now()}`, sender_id: message.sender_id || 'me', content: message.content || '',
-      type: message.type || 'text', encrypted: Boolean(message.encrypted), file_url: message.file_url || null,
-      file_name: message.file_name || null, duration: message.duration || null,
+      id: message.id || `${Date.now()}`,
+      sender_id: message.sender_id || 'me',
+      content: message.content || '',
+      type: message.type || 'text',
+      encrypted: Boolean(message.encrypted),
+      file_url: message.file_url || null,
+      file_name: message.file_name || null,
+      duration: message.duration || null,
       created_at: message.created_at || new Date().toISOString(),
     }
-    byId.set(nextMessage.id, nextMessage)
-    // Reactions and receipts are protocol control rows: they never become the
-    // conversation's last message preview. The preview is the newest by
-    // timestamp, so a batch that arrives out of order still settles correctly.
-    if (nextMessage.type !== 'reaction' && nextMessage.type !== 'receipt') {
+    const previous = byId.get(String(nextMessage.id))
+    if (previous && previous !== nextMessage) {
+      byId.set(String(nextMessage.id), { ...previous, ...nextMessage })
+    } else {
+      byId.set(String(nextMessage.id), nextMessage)
+    }
+
+    // Protocol events never become the conversation's last message preview.
+    if (nextMessage.type !== 'reaction' && nextMessage.type !== 'receipt' && nextMessage.type !== 'call') {
       const nextTime = Date.parse(nextMessage.created_at)
       const currentTime = lastMessageTime ? Date.parse(lastMessageTime) : NaN
       if (!Number.isFinite(currentTime) || !Number.isFinite(nextTime) || nextTime >= currentTime) {
@@ -345,7 +377,7 @@ function applyMessagesToChats(chats, chatId, messages) {
     }
   }
 
-  const updatedChat = {
+  return {
     ...chat,
     messages: [...byId.values()],
     last_message: lastMessage,
@@ -355,9 +387,6 @@ function applyMessagesToChats(chats, chatId, messages) {
     last_message_encrypted: lastMessageEncrypted,
     unread_count: 0,
   }
-  const nextChats = chats.slice()
-  nextChats[index] = updatedChat
-  return nextChats
 }
 
 // Persists a batch of messages for one chat with a single storage write and a
@@ -370,7 +399,7 @@ export async function appendMessages(chatId, messages) {
   const nextChats = applyMessagesToChats(chats, chatId, list)
   if (nextChats === chats) return null
   writeLocalChats(nextChats)
-  notifyChatUpdate()
+  notifyChatUpdate({ chatId: String(chatId) })
   return nextChats.find((item) => String(item.id) === String(chatId)) || null
 }
 
@@ -395,8 +424,9 @@ export function applyChatSyncBatch(remoteChats, messages) {
     const bucket = byChat.get(chatId)
     if (bucket) bucket.push(row)
     else byChat.set(chatId, [row])
-    if (row.type !== 'reaction' && row.type !== 'receipt') {
+    if (row.type !== 'reaction' && row.type !== 'receipt' && row.type !== 'call') {
       notifications.push({
+        chatId,
         title: 'New message',
         preview: row.encrypted ? 'Encrypted message' : row.type === 'text' ? row.content : 'New attachment received',
         avatarUrl: '/logo.png',
@@ -420,6 +450,15 @@ export function applyChatSyncBatch(remoteChats, messages) {
 
 export async function getChatById(chatId, userId) {
   return withSync('chat', () => loadChatById(chatId, userId))
+}
+
+export function getCachedChatById(chatId, userId) {
+  if (!userId) return null
+  const user = String(userId)
+  return readLocalChats().find((chat) => (
+    String(chat.id) === String(chatId)
+    && (String(chat.owner_id || '') === user || (chat.participant_ids || []).map(String).includes(user))
+  )) || null
 }
 
 // A full chat load replaces the cached row but never recomputes the contact-list

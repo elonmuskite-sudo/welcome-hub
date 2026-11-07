@@ -25,6 +25,7 @@ import { encryptMessage } from '../lib/crypto/e2ee'
 import { useNow } from '../lib/useNow'
 import { blockUser } from '../lib/moderation'
 import { createChat, getChats, sendChatMessage, getContacts, searchUserByNexusId } from '../lib/persistence'
+import { participantNamesFor } from '../lib/chatPreview'
 import UniversalEmojiPicker from '../components/chat/UniversalEmojiPicker'
 import {
   listFeed,
@@ -44,20 +45,21 @@ import {
   isFeedAvailable,
 } from '../lib/feeds'
 import { FEED_COMMENT_MAX_LENGTH, FEED_POST_MAX_LENGTH } from '../lib/feedContent'
+import { resolveFeedMediaUrl } from '../lib/storageManager'
 
 const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.avi'
 const MAX_MEDIA = 10
 
-function MediaGrid({ media }) {
+function MediaGrid({ media, urlMap }) {
   if (!media?.length) return null
   return (
     <div className={`grid gap-1 px-4 pb-3 ${media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
       {media.map((item, index) => (
         <div key={`${item.url}-${index}`} className="overflow-hidden rounded-xl border border-border bg-black/5">
           {item.type === 'video' ? (
-            <video src={item.url} controls playsInline preload="metadata" className="max-h-[420px] w-full bg-black object-contain" />
+            <video src={urlMap?.[item.url] || item.url} controls playsInline preload="metadata" className="max-h-[420px] w-full bg-black object-contain" />
           ) : (
-            <img src={item.url} alt={item.name || `Post media ${index + 1}`} loading="lazy" className="max-h-[420px] w-full object-cover" />
+            <img src={urlMap?.[item.url] || item.url} alt={item.name || `Post media ${index + 1}`} loading="lazy" className="max-h-[420px] w-full object-cover" />
           )}
         </div>
       ))}
@@ -98,7 +100,12 @@ export default function FeedsPage() {
   const [composerOpen, setComposerOpen] = useState(false)
   const [composerId, setComposerId] = useState(null)
   const [composerText, setComposerText] = useState('')
+  const [composerPostType, setComposerPostType] = useState('general')
+  const [composerTitle, setComposerTitle] = useState('')
+  const [composerEventStartsAt, setComposerEventStartsAt] = useState('')
+  const [composerEventLocation, setComposerEventLocation] = useState('')
   const [composerMedia, setComposerMedia] = useState([])
+  const [mediaUrlMap, setMediaUrlMap] = useState({})
   const [composerBusy, setComposerBusy] = useState(false)
   const [composerProgress, setComposerProgress] = useState(null)
   const fileInputRef = useRef(null)
@@ -168,11 +175,43 @@ export default function FeedsPage() {
     setCopiedStatus(false)
   }, [activeShareFeedId])
 
+  // Durable media references (r2://, storage://) are resolved to real URLs here
+  // while the stored reference on the post stays untouched.
+  useEffect(() => {
+    let cancelled = false
+    const urls = new Set()
+    for (const feed of feeds) {
+      for (const item of Array.isArray(feed.media) ? feed.media : []) {
+        if (item?.url) urls.add(item.url)
+      }
+    }
+    for (const item of composerMedia) {
+      if (item?.url) urls.add(item.url)
+    }
+    if (!urls.size) {
+      setMediaUrlMap({})
+      return undefined
+    }
+    const run = async () => {
+      const map = {}
+      await Promise.all([...urls].map(async (url) => {
+        try { map[url] = await resolveFeedMediaUrl(url) } catch { map[url] = url }
+      }))
+      if (!cancelled) setMediaUrlMap(map)
+    }
+    run()
+    return () => { cancelled = true }
+  }, [feeds, composerMedia])
+
   // ---- Composer -----------------------------------------------------------
   const resetComposer = () => {
     setComposerOpen(false)
     setComposerId(null)
     setComposerText('')
+    setComposerPostType('general')
+    setComposerTitle('')
+    setComposerEventStartsAt('')
+    setComposerEventLocation('')
     setComposerMedia([])
     setComposerProgress(null)
   }
@@ -180,6 +219,10 @@ export default function FeedsPage() {
   const startEdit = (feed) => {
     setComposerId(feed.id)
     setComposerText(feed.content || '')
+    setComposerPostType(feed.postType || 'general')
+    setComposerTitle(feed.title || '')
+    setComposerEventStartsAt(feed.eventStartsAt ? new Date(feed.eventStartsAt).toISOString().slice(0, 16) : '')
+    setComposerEventLocation(feed.eventLocation || '')
     setComposerMedia(Array.isArray(feed.media) ? feed.media : [])
     setComposerOpen(true)
     setMenuFeedId(null)
@@ -224,10 +267,26 @@ export default function FeedsPage() {
     setComposerBusy(true)
     try {
       if (composerId) {
-        await updateFeedPost({ id: composerId, content: composerText, media: composerMedia })
+        await updateFeedPost({
+          id: composerId,
+          content: composerText,
+          media: composerMedia,
+          postType: composerPostType,
+          title: composerTitle,
+          eventStartsAt: composerEventStartsAt ? new Date(composerEventStartsAt).toISOString() : null,
+          eventLocation: composerEventLocation,
+        })
         setNotice('Post updated.')
       } else {
-        await createFeedPost({ content: composerText, media: composerMedia, isAdmin })
+        await createFeedPost({
+          content: composerText,
+          media: composerMedia,
+          isAdmin,
+          postType: composerPostType,
+          title: composerTitle,
+          eventStartsAt: composerEventStartsAt ? new Date(composerEventStartsAt).toISOString() : null,
+          eventLocation: composerEventLocation,
+        })
         setNotice('Post published.')
       }
       resetComposer()
@@ -367,15 +426,18 @@ export default function FeedsPage() {
         return ids.length === participants.length && ids.every((id, index) => id === participants[index])
       })
       if (!chat) {
+        const recipientName = recipient.fullName || contact.name || recipient.nexusIdDisplay || recipient.nexusId
+        const myName = user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.nexusIdDisplay || user.nexusId
         chat = await createChat({
-          title: recipient.fullName || contact.name,
+          title: recipientName,
           type: 'private',
           avatar_url: recipient.avatarUrl || null,
           owner_id: user.id,
           participantIds: participants,
+          participantNames: participantNamesFor(user.id, myName, recipient.id, recipientName),
         })
       }
-      const content = `📢 Shared post by ${activeShareFeed.userName}:\n\n"${activeShareFeed.content}"`
+      const content = `📢 Shared post by ${activeShareFeed.userName}:\n${activeShareFeed.title ? `${activeShareFeed.title}\n` : ''}${activeShareFeed.eventStartsAt ? `Event: ${new Date(activeShareFeed.eventStartsAt).toLocaleString()}${activeShareFeed.eventLocation ? ` · ${activeShareFeed.eventLocation}` : ''}\n` : ''}\n"${activeShareFeed.content}"`
       const encrypted = await encryptMessage(chat.id, content)
       if (!encrypted.encrypted) throw new Error('Text messages must be end-to-end encrypted.')
       await sendChatMessage(chat.id, {
@@ -586,8 +648,16 @@ export default function FeedsPage() {
                   </div>
                 </div>
 
+                {feed.postType === 'event' ? (
+                  <div className="mx-4 mb-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-primary">Event</span>
+                    <h2 className="mt-1 text-lg font-semibold text-foreground">{feed.title}</h2>
+                    {feed.eventStartsAt && <p className="mt-1 text-sm text-muted-foreground">{new Date(feed.eventStartsAt).toLocaleString()}</p>}
+                    {feed.eventLocation && <p className="text-sm text-muted-foreground">{feed.eventLocation}</p>}
+                  </div>
+                ) : feed.title ? <h2 className="px-4 pb-2 text-lg font-semibold">{feed.title}</h2> : null}
                 {feed.content && <p className="whitespace-pre-wrap px-4 pb-3 leading-relaxed text-foreground">{feed.content}</p>}
-                <MediaGrid media={feed.media} />
+                <MediaGrid media={feed.media} urlMap={mediaUrlMap} />
 
                 <div className="flex items-center justify-between border-b border-border px-4 py-2">
                   <ReactionSummary reactions={feed.reactions} reactedBy={feed.reactedBy} userId={user?.id} />
@@ -647,6 +717,27 @@ export default function FeedsPage() {
               </button>
             </div>
             <div className="flex-1 space-y-3 overflow-y-auto p-4">
+              <label className="block space-y-1 text-sm font-medium">
+                Post type
+                <select
+                  value={composerPostType}
+                  onChange={(e) => setComposerPostType(e.target.value)}
+                  disabled={Boolean(composerId)}
+                  className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm"
+                >
+                  <option value="general">General post</option>
+                  <option value="event">Event</option>
+                </select>
+              </label>
+              {composerPostType === 'event' ? (
+                <div className="space-y-2">
+                  <input value={composerTitle} onChange={(e) => setComposerTitle(e.target.value)} maxLength={160} placeholder="Event title" className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm" required />
+                  <input type="datetime-local" value={composerEventStartsAt} onChange={(e) => setComposerEventStartsAt(e.target.value)} className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm" required />
+                  <input value={composerEventLocation} onChange={(e) => setComposerEventLocation(e.target.value)} maxLength={240} placeholder="Location (optional)" className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm" />
+                </div>
+              ) : (
+                <input value={composerTitle} onChange={(e) => setComposerTitle(e.target.value)} maxLength={160} placeholder="Title (optional)" className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm" />
+              )}
               <textarea
                 value={composerText}
                 onChange={(e) => setComposerText(e.target.value)}
@@ -659,7 +750,7 @@ export default function FeedsPage() {
                 <div className="grid grid-cols-3 gap-2">
                   {composerMedia.map((item, index) => (
                     <div key={`${item.url}-${index}`} className="relative overflow-hidden rounded-lg border border-border">
-                      {item.type === 'video' ? <video src={item.url} className="h-24 w-full object-cover" muted /> : <img src={item.url} alt="" className="h-24 w-full object-cover" />}
+                      {item.type === 'video' ? <video src={mediaUrlMap[item.url] || item.url} className="h-24 w-full object-cover" muted /> : <img src={mediaUrlMap[item.url] || item.url} alt="" className="h-24 w-full object-cover" />}
                       <button
                         onClick={() => setComposerMedia((prev) => prev.filter((_, i) => i !== index))}
                         className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white"
@@ -692,7 +783,8 @@ export default function FeedsPage() {
               </div>
               <button
                 onClick={publish}
-                disabled={composerBusy || (!composerText.trim() && composerMedia.length === 0)}
+                disabled={composerBusy || (!composerText.trim() && composerMedia.length === 0
+                  && !(composerPostType === 'event' && composerTitle.trim() && composerEventStartsAt))}
                 className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               >
                 {composerBusy ? 'Saving…' : composerId ? 'Save changes' : 'Publish'}
