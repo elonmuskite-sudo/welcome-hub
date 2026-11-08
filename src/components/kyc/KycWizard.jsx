@@ -130,8 +130,9 @@ export default function KycWizard() {
     let active = true
     let timer
     const poll = async () => {
+      let updated
       try {
-        const { session: updated } = await getKycSession(session.id)
+        ({ session: updated } = await getKycSession(session.id))
         if (!active) return
         if (updated) setSession(updated)
         setPollError('')

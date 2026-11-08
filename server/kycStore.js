@@ -149,3 +149,12 @@ export async function updateKycSession(auth, id, update) {
 export function getKycSessionToken(row) {
   return decryptSessionToken(row?.session_token)
 }
+
+// Instant identity approval is granted only by the server once the provider reports
+// APPROVED. The RPC is service_role-only, so the browser can never self-approve.
+export async function grantIdentityFromKyc(auth, sessionId) {
+  return withKycUserTransaction(auth, async ({ admin }) => {
+    const { error } = await admin.rpc('approve_identity_from_kyc', { _session_id: sessionId })
+    if (error) throw error
+  })
+}

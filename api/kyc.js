@@ -19,6 +19,7 @@ import {
 import {
   createKycSession,
   getKycSessionToken,
+  grantIdentityFromKyc,
   readKycSession,
   updateKycSession,
 } from '../server/kycStore.js'
@@ -212,6 +213,11 @@ async function status(req, res) {
     const providerStatus = await fetchProviderStatus(current.id, getKycSessionToken(current))
     const session = await updateKycSession(auth, current.id, providerStatus)
     if (!session) throw new KycError('The verification session is no longer available.', 404)
+    // Grant the instant badge only on the transition the provider reports, so the
+    // browser cannot approve itself and repeated polls do not re-write the row.
+    if (session.status === 'APPROVED' && current.status !== 'APPROVED') {
+      await grantIdentityFromKyc(auth, session.id)
+    }
     return sendKycResponse(res, 200, { session })
   } catch (error) {
     return kycErrorResponse(res, error)

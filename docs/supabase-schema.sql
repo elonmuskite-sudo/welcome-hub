@@ -13,7 +13,7 @@ create policy "Users see own roles" on public.user_roles for select to authentic
 
 create or replace function public.update_updated_at_column() returns trigger language plpgsql set search_path = public as $$ begin new.updated_at = now(); return new; end; $$;
 
-create table public.identity_verifications (id uuid primary key default gen_random_uuid(), user_id uuid not null unique, status text not null default 'pending', match_score numeric, selfie_path text not null, id_document_path text not null, reviewer_note text, reviewed_by uuid, reviewed_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table public.identity_verifications (id uuid primary key default gen_random_uuid(), user_id uuid not null unique, status text not null default 'pending', match_score numeric, selfie_path text, id_document_path text not null, reviewer_note text, reviewed_by uuid, reviewed_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
 grant select, insert, update on public.identity_verifications to authenticated; grant all on public.identity_verifications to service_role;
 alter table public.identity_verifications enable row level security;
 create policy "Own or admin read" on public.identity_verifications for select to authenticated using (user_id = auth.uid() or public.has_role(auth.uid(),'admin'));
@@ -635,15 +635,15 @@ grant execute on function public.review_identity_verification(uuid, boolean, tex
 -- APPLIED to production woavhlkgylarngqyvphf ("Nexus Next") on 2026-10-17. See the deployment record at the end of this file.
 -- Dual-tier identity verification.
 --
--- Tier 1 (instant, primary): the app matches the selfie on-device and calls the
---   security-definer RPC below, which records an already-approved row for the
---   caller only. The blue verified badge is shown as soon as this succeeds.
+-- Tier 1 (instant, primary): the member completes an Idswyft KYC session; once the
+--   provider returns APPROVED the server records an approved row for that member.
+--   The blue verified badge is shown as soon as this succeeds.
 -- Tier 2 (manual, secondary): the member completes a structured form and uploads
 --   a government ID plus a selfie; the row stays 'pending' until an admin
 --   approves it through review_identity_verification.
 --
 -- Both tiers resolve to the same blue verified badge. Email confirmation never
--- grants any badge, and only this RPC (not the browser) can self-approve.
+-- grants any badge, and only the server (never the browser) can self-approve.
 alter table public.identity_verifications
   add column if not exists tier text,
   add column if not exists full_legal_name text,
@@ -655,16 +655,45 @@ alter table public.identity_verifications
 -- Rows created before this migration are treated as manual submissions.
 update public.identity_verifications set tier = 'manual' where tier is null;
 
--- Keep the ID path nullable for legacy data; new submissions require an ID.
+-- The instant tier has no government document, so the ID path becomes optional.
 alter table public.identity_verifications alter column id_document_path drop not null;
 
 do $$ begin
   alter table public.identity_verifications
-    add constraint identity_verifications_tier_check check (tier = 'manual');
+    add constraint identity_verifications_tier_check check (tier in ('instant', 'manual'));
 exception when duplicate_object then null; end $$;
 
--- No client-side face score can approve an identity. The authenticated submission
--- path must include a government document and remain pending for admin review.
+-- 20261108090000_gate_instant_kyc_approval.sql
+-- Instant approvals are granted only from a server-verified Idswyft KYC session.
+-- The execute privilege is revoked from every browser role, so the browser can
+-- never self-approve: only the server (the webhook or the status poll, acting as
+-- service_role) can call this, and it approves exactly the member that owns the
+-- APPROVED session. The local selfie path is optional because the provider holds
+-- the verification media.
+create or replace function public.approve_identity_from_kyc(_session_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare _user_id uuid;
+begin
+  if _session_id is null then raise exception 'A verification session is required'; end if;
+  select user_id into _user_id
+    from public.kyc_sessions
+   where id = _session_id and status = 'APPROVED';
+  if _user_id is null then raise exception 'No approved verification session was found'; end if;
+
+  insert into public.identity_verifications
+    (user_id, status, tier, match_score, selfie_path, id_document_path, reviewer_note, reviewed_by, reviewed_at)
+  values (_user_id, 'approved', 'instant', null, null, null, null, null, now())
+  on conflict (user_id) do update
+    set status = 'approved',
+        tier = 'instant',
+        selfie_path = null,
+        id_document_path = null,
+        reviewer_note = null,
+        reviewed_by = null,
+        reviewed_at = now();
+end $$;
+revoke execute on function public.approve_identity_from_kyc(uuid) from public, anon, authenticated;
+grant execute on function public.approve_identity_from_kyc(uuid) to service_role;
 
 -- 20261017040000_social_feed.sql
 -- APPLIED to production woavhlkgylarngqyvphf ("Nexus Next") on 2026-10-17. See the deployment record at the end of this file.

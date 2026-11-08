@@ -768,6 +768,8 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
       if (!selfiePath.startsWith(`${supabaseUserId}/`) || !idPath.startsWith(`${supabaseUserId}/`)) {
         throw new GatewayError('Identity document paths are invalid.')
       }
+      const score = Number(body.matchScore)
+      if (!Number.isFinite(score) || score < 0 || score > 1) throw new GatewayError('Face match score is invalid.')
       const fullLegalName = requiredString(body.fullLegalName, 'Full legal name', 200)
       const dateOfBirth = requiredString(body.dateOfBirth, 'Date of birth', 10)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) throw new GatewayError('Date of birth is invalid.')
@@ -794,7 +796,7 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
           (user_id, status, tier, match_score, selfie_path, id_document_path,
            full_legal_name, date_of_birth, document_type, document_number, issuing_country,
            reviewer_note, reviewed_by, reviewed_at)
-          values ($1, 'pending', 'manual', null, $2, $3, $4, $5, $6, $7, $8, null, null, null)
+          values ($1, 'pending', 'manual', $2, $3, $4, $5, $6, $7, $8, $9, null, null, null)
          on conflict (user_id) do update set status = 'pending', tier = 'manual', match_score = excluded.match_score,
            selfie_path = excluded.selfie_path, id_document_path = excluded.id_document_path,
            full_legal_name = excluded.full_legal_name, date_of_birth = excluded.date_of_birth,
@@ -802,7 +804,7 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
            issuing_country = excluded.issuing_country,
            reviewer_note = null, reviewed_by = null, reviewed_at = null
          returning status, tier, match_score, reviewer_note, created_at`,
-        [supabaseUserId, selfiePath, idPath, fullLegalName, dateOfBirth, documentType, documentNumber, issuingCountry],
+        [supabaseUserId, Number(score.toFixed(3)), selfiePath, idPath, fullLegalName, dateOfBirth, documentType, documentNumber, issuingCountry],
       )
       return { record: rows[0] }
     }

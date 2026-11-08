@@ -9,6 +9,7 @@ export const FEED_MEDIA_MAX_ITEMS = 10
 export const FEED_MEDIA_NAME_MAX_LENGTH = 200
 
 // Control characters except tab/newline, plus runaway blank lines.
+// eslint-disable-next-line no-control-regex -- control characters are stripped on purpose
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g
 
 export function sanitizeFeedText(value, maxLength, label = 'post') {

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase } from './supabase'
 import { useAuth } from './AuthContext'
 import { ICE_SERVERS } from './callIce'
+import { applyCallMediaPreferences } from './callMedia'
 import { notifyCallPush } from './callPush'
 import { sendChatMessage, newId } from './persistence'
 import {
@@ -264,8 +265,9 @@ export function CallProvider({ children }) {
       audio: true,
       video: kind === 'video' ? { facingMode: 'user' } : false,
     })
+    const cameraEnabled = applyCallMediaPreferences(stream, callRef.current)
     streamRef.current = stream
-    patchCall({ localStream: stream, cameraEnabled: kind === 'video' })
+    patchCall({ localStream: stream, cameraEnabled })
     return stream
   }, [patchCall])
 
@@ -422,6 +424,7 @@ export function CallProvider({ children }) {
       state: 'ringing',
       error: '',
       muted: false,
+      cameraEnabled: target.kind === 'video',
       startedAt: null,
       duration: 0,
     })
@@ -509,6 +512,7 @@ export function CallProvider({ children }) {
         state: 'ringing',
         error: '',
         muted: false,
+        cameraEnabled: payload.kind === 'video',
         startedAt: null,
         duration: 0,
       })
@@ -640,18 +644,17 @@ export function CallProvider({ children }) {
 
   const toggleMute = useCallback(() => {
     const current = callRef.current
-    const stream = streamRef.current
-    if (!current || !stream) return
+    if (!current) return
     const muted = !current.muted
-    stream.getAudioTracks().forEach((track) => { track.enabled = !muted })
+    streamRef.current?.getAudioTracks().forEach((track) => { track.enabled = !muted })
     patchCall({ muted })
   }, [patchCall])
 
   const toggleCamera = useCallback(() => {
-    const track = streamRef.current?.getVideoTracks()[0]
-    if (!track) return
-    const enabled = !track.enabled
-    track.enabled = enabled
+    const current = callRef.current
+    if (!current || current.kind !== 'video') return
+    const enabled = !(current.cameraEnabled ?? true)
+    streamRef.current?.getVideoTracks().forEach((track) => { track.enabled = enabled })
     patchCall({ cameraEnabled: enabled })
   }, [patchCall])
 

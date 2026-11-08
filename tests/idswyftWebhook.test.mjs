@@ -162,6 +162,10 @@ test('webhook handler persists verified events by session id using server creden
     async maybeSingle() {
       return { data: { id: sessionId }, error: null }
     },
+    rpc(name, params) {
+      calls.rpc = [name, params]
+      return { error: null }
+    },
   }
   const req = Readable.from([body])
   req.method = 'POST'
@@ -189,6 +193,8 @@ test('webhook handler persists verified events by session id using server creden
       updated_at: calls.update.updated_at,
     })
     assert.match(calls.update.updated_at, /^\d{4}-\d\d-\d\dT/)
+    // An APPROVED provider result is the only event that grants the instant badge.
+    assert.deepEqual(calls.rpc, ['approve_identity_from_kyc', { _session_id: sessionId }])
     assert.equal(calls.client[0], process.env.SUPABASE_URL)
     assert.equal(calls.client[1], process.env.SUPABASE_SERVICE_ROLE_KEY)
     assert.deepEqual(calls.client[2], {

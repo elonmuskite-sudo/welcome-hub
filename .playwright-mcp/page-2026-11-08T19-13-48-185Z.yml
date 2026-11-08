@@ -1,0 +1,64 @@
+- generic [ref=e119]:
+  - banner [ref=e120]:
+    - generic [ref=e121]:
+      - img "Nexus logo" [ref=e124]
+      - generic [ref=e125]:
+        - heading "Nexus Chat" [level=1] [ref=e126]
+        - paragraph [ref=e127]: Privacy-first encrypted messaging
+    - generic [ref=e147]:
+      - button "Toggle theme" [ref=e148] [cursor=pointer]
+      - button "SD" [ref=e152] [cursor=pointer]
+  - generic [ref=e498]:
+    - generic [ref=e499]:
+      - generic [ref=e500]:
+        - button "Back to chats" [ref=e501] [cursor=pointer]
+        - button "Open contact profile" [ref=e504] [cursor=pointer]:
+          - generic [ref=e505]: CT
+          - generic [ref=e508]:
+            - generic [ref=e509]: Call Test Two
+            - generic [ref=e511]: Private conversation
+      - generic [ref=e512]:
+        - button "Search conversation" [ref=e513] [cursor=pointer]
+        - button "Start call" [disabled] [ref=e517]
+        - button "Start video call" [disabled] [ref=e520]
+    - generic [ref=e529]:
+      - generic [ref=e532]:
+        - paragraph [ref=e533]: Call test - can you receive this?
+        - generic [ref=e534]: 7:08 PM
+        - generic "Message actions" [ref=e535]:
+          - button "React to message" [ref=e536] [cursor=pointer]
+          - button "Reply to message" [ref=e540] [cursor=pointer]
+          - button "Copy message" [ref=e544] [cursor=pointer]
+      - generic [ref=e574]:
+        - paragraph [ref=e575]: Received. Ready to test the call.
+        - generic [ref=e576]:
+          - text: 7:10 PM
+          - img "Read" [ref=e596]
+        - generic "Message actions" [ref=e579]:
+          - button "React to message" [ref=e580] [cursor=pointer]
+          - button "Reply to message" [ref=e584] [cursor=pointer]
+          - button "Copy message" [ref=e588] [cursor=pointer]
+    - generic [ref=e549]:
+      - button "Emoji" [ref=e550] [cursor=pointer]
+      - button "Stickers" [ref=e554] [cursor=pointer]
+      - button "Attach files" [ref=e559] [cursor=pointer]
+      - textbox "Message" [ref=e563]:
+        - /placeholder: Message…
+      - button "Record voice message" [ref=e592] [cursor=pointer]
+  - generic [ref=e384]:
+    - button "Chats" [ref=e385] [cursor=pointer]
+    - button "Feeds" [ref=e390] [cursor=pointer]
+    - button "Contacts" [ref=e394] [cursor=pointer]
+    - button "Settings" [ref=e399] [cursor=pointer]
+  - generic [ref=e610]:
+    - generic [ref=e624]:
+      - generic [ref=e626]: CT
+      - generic [ref=e628]: Camera off
+    - generic [ref=e611]:
+      - heading "Call Test Two" [level=2] [ref=e614]
+      - paragraph [ref=e615]: Connecting…
+    - generic [ref=e616]:
+      - button "Mute" [ref=e631] [cursor=pointer]
+      - button "Turn camera on" [ref=e635] [cursor=pointer]
+      - button "Switch camera" [ref=e640] [cursor=pointer]
+      - button "End call" [ref=e647] [cursor=pointer]

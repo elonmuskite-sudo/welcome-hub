@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, SwitchCamera } from 'lucide-react'
 import Avatar from './Avatar'
+import ChatButton from './ChatButton'
 import { useCall } from '../../lib/CallContext'
 
 // Calls can run past an hour, so unlike the voice-note timer this includes hours.
@@ -41,7 +42,7 @@ export default function VoiceCallOverlay() {
   const canControlCamera = videoCall && (call.state === 'connected' || call.state === 'connecting')
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-gray-950 px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
+    <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center overflow-y-auto bg-gray-950 px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
       {videoCall && call.state !== 'ringing' && (
         <div className="relative flex min-h-0 w-full max-w-5xl flex-1 items-center justify-center overflow-hidden rounded-2xl bg-black">
           <video ref={remoteVideoRef} autoPlay muted playsInline className="h-full max-h-[75vh] w-full object-contain" />
@@ -67,45 +68,53 @@ export default function VoiceCallOverlay() {
       </div>
 
       {call.state !== 'ended' && (
-        <div className="mt-12 flex items-center gap-6">
+        <div className="mt-8 flex w-full max-w-sm flex-wrap items-center justify-center gap-3 sm:mt-12 sm:gap-6" aria-label="Call controls">
           {isIncomingRinging && (
-            <button
+            <ChatButton
+              variant="call"
               type="button"
               onClick={acceptCall}
               title="Accept call"
               aria-label="Accept call"
-              className="rounded-full bg-green-600 p-5 text-white transition-colors hover:bg-green-700"
+              className="h-12 w-12 rounded-full bg-green-600 p-3 text-white hover:bg-green-700 focus-visible:ring-white"
             >
               <Phone className="h-7 w-7" />
-            </button>
+            </ChatButton>
           )}
 
           {canMute && (
-            <button
+            <ChatButton
+              variant="call"
               type="button"
               onClick={toggleMute}
               title={call.muted ? 'Unmute' : 'Mute'}
               aria-label={call.muted ? 'Unmute' : 'Mute'}
-              className={`rounded-full p-4 text-white transition-colors ${
+              aria-pressed={Boolean(call.muted)}
+              className={`h-12 w-12 rounded-full p-3 text-white focus-visible:ring-white ${
                 call.muted ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700 hover:bg-gray-600'
               }`}
             >
               {call.muted ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
-            </button>
+            </ChatButton>
           )}
 
           {canControlCamera && (
             <>
-              <button
+              <ChatButton
+                variant="call"
                 type="button"
                 onClick={toggleCamera}
                 title={call.cameraEnabled ? 'Turn camera off' : 'Turn camera on'}
                 aria-label={call.cameraEnabled ? 'Turn camera off' : 'Turn camera on'}
-                className="rounded-full bg-gray-700 p-4 text-white transition-colors hover:bg-gray-600"
+                aria-pressed={Boolean(call.cameraEnabled)}
+                className={`h-12 w-12 rounded-full p-3 text-white focus-visible:ring-white ${
+                  call.cameraEnabled ? 'bg-gray-700 hover:bg-gray-600' : 'bg-red-600 hover:bg-red-700'
+                }`}
               >
                 {call.cameraEnabled ? <Video className="h-6 w-6" /> : <VideoOff className="h-6 w-6" />}
-              </button>
-              <button
+              </ChatButton>
+              <ChatButton
+                variant="call"
                 type="button"
                 onClick={() => {
                   setCameraError('')
@@ -113,22 +122,23 @@ export default function VoiceCallOverlay() {
                 }}
                 title="Switch camera"
                 aria-label="Switch camera"
-                className="rounded-full bg-gray-700 p-4 text-white transition-colors hover:bg-gray-600"
+                className="h-12 w-12 rounded-full bg-gray-700 p-3 text-white hover:bg-gray-600 focus-visible:ring-white"
               >
                 <SwitchCamera className="h-6 w-6" />
-              </button>
+              </ChatButton>
             </>
           )}
 
-          <button
+          <ChatButton
+            variant="call"
             type="button"
             onClick={isIncomingRinging ? declineCall : endCall}
             title={isIncomingRinging ? 'Decline call' : 'End call'}
             aria-label={isIncomingRinging ? 'Decline call' : 'End call'}
-            className="rounded-full bg-red-600 p-5 text-white transition-colors hover:bg-red-700"
+            className="h-12 w-12 rounded-full bg-red-600 p-3 text-white hover:bg-red-700 focus-visible:ring-white"
           >
             <PhoneOff className="h-7 w-7" />
-          </button>
+          </ChatButton>
         </div>
       )}
     </div>

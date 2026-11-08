@@ -1,0 +1,58 @@
+- generic [ref=e74]:
+  - banner [ref=e75]:
+    - generic [ref=e76]:
+      - img "Nexus logo" [ref=e79]
+      - generic [ref=e80]:
+        - heading "Nexus Chat" [level=1] [ref=e81]
+        - paragraph [ref=e82]: Privacy-first encrypted messaging
+    - generic [ref=e102]:
+      - button "Toggle theme" [ref=e103] [cursor=pointer]
+      - button "CT" [ref=e107] [cursor=pointer]
+  - generic [ref=e261]:
+    - generic [ref=e262]:
+      - generic [ref=e263]:
+        - button "Back to chats" [ref=e264] [cursor=pointer]
+        - button "Open contact profile" [ref=e267] [cursor=pointer]:
+          - generic [ref=e268]: SD
+          - generic [ref=e271]:
+            - generic [ref=e272]: Start Daeryt
+            - generic [ref=e274]: Private conversation
+      - generic [ref=e275]:
+        - button "Search conversation" [ref=e276] [cursor=pointer]
+        - button "Start call" [disabled] [ref=e280]
+        - button "Start video call" [disabled] [ref=e283]
+    - generic [ref=e292]:
+      - generic [ref=e328]:
+        - paragraph [ref=e329]: Call test - can you receive this?
+        - generic [ref=e330]:
+          - text: 7:08 PM
+          - img "Read" [ref=e350]
+        - generic "Message actions" [ref=e333]:
+          - button "React to message" [ref=e334] [cursor=pointer]
+          - button "Reply to message" [ref=e338] [cursor=pointer]
+          - button "Copy message" [ref=e342] [cursor=pointer]
+      - generic [ref=e355]:
+        - paragraph [ref=e356]: Received. Ready to test the call.
+        - generic [ref=e357]: 7:10 PM
+        - generic "Message actions" [ref=e358]:
+          - button "React to message" [ref=e359] [cursor=pointer]
+          - button "Reply to message" [ref=e363] [cursor=pointer]
+          - button "Copy message" [ref=e367] [cursor=pointer]
+    - generic [ref=e300]:
+      - button "Emoji" [ref=e301] [cursor=pointer]
+      - button "Stickers" [ref=e305] [cursor=pointer]
+      - button "Attach files" [ref=e310] [cursor=pointer]
+      - textbox "Message" [ref=e314]:
+        - /placeholder: Message…
+      - button "Record voice message" [ref=e346] [cursor=pointer]
+  - generic [ref=e175]:
+    - button "Chats" [ref=e176] [cursor=pointer]
+    - button "Feeds" [ref=e181] [cursor=pointer]
+    - button "Contacts" [ref=e185] [cursor=pointer]
+    - button "Settings" [ref=e190] [cursor=pointer]
+  - generic [ref=e390]:
+    - generic [ref=e391]:
+      - generic [ref=e392]: SD
+      - heading "Start Daeryt" [level=2] [ref=e394]
+      - paragraph [ref=e395]: Calling…
+    - button "End call" [ref=e397] [cursor=pointer]

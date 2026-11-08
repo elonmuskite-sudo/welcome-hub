@@ -305,7 +305,7 @@ export default function ChatView({ chat, onBack, autoStartCall = false, cacheWar
   ), [wallpaper.url, wallpaper.preview])
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 h-full bg-background">
+    <div className="flex-1 flex min-h-0 min-w-0 flex-col h-full bg-background">
       <div className="bg-card border-b border-border chat-page-x py-2 sm:py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <ChatButton

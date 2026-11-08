@@ -109,7 +109,7 @@ export default function ChatLayout() {
           <ChatSidebar activeTab={activeTab} onTabChange={handleTabChange} />
         </div>
 
-        <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <ErrorBoundary label="chat" resetKey={location.pathname}>
             <Outlet />
           </ErrorBoundary>

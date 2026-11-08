@@ -36,7 +36,7 @@ export default function BioWriter({ name, bio, setBio, interests, setInterests }
       if (!res.body) throw new Error('The AI writer did not return a response stream.')
       const reader = res.body.getReader(); const dec = new TextDecoder()
       let buf = '', out = ''
-      while (true) {
+      for (;;) {
         const { value, done } = await reader.read(); if (done) break
         buf += dec.decode(value, { stream: true })
         const lines = buf.split('\n'); buf = lines.pop() ?? ''

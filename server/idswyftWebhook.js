@@ -148,6 +148,16 @@ export async function handleIdswyftWebhook(req, res, { createSupabaseClient = cr
       return send(res, 500, { error: 'The verification result could not be saved.' })
     }
     if (!data) return send(res, 404, { error: 'The verification session was not found.' })
+
+    // An approved provider result is the only trigger that grants the instant
+    // badge. The RPC is service_role-only, so a client cannot call it directly.
+    if (event.update.status === 'APPROVED') {
+      const { error: grantError } = await supabase.rpc('approve_identity_from_kyc', { _session_id: event.sessionId })
+      if (grantError) {
+        console.error('Idswyft webhook identity approval failed', { code: grantError.code || 'unknown' })
+        return send(res, 500, { error: 'The verification result could not be saved.' })
+      }
+    }
     return send(res, 200, { success: true })
   } catch (error) {
     if (error instanceof IdswyftWebhookError) {

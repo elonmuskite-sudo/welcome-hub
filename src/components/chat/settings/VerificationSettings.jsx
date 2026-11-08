@@ -1,18 +1,44 @@
 import { useEffect, useRef, useState } from 'react'
-import { Camera, IdCard, LoaderCircle } from 'lucide-react'
+import { Camera, IdCard, LoaderCircle, Zap, ShieldCheck } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { useAuth } from '../../../lib/AuthContext'
 import { appwriteData, isAppwriteAuthEnabled } from '../../../lib/appwrite'
 import VerificationBadge from '../VerificationBadge'
 import KycWizard from '../../kyc/KycWizard'
 
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model'
 const DOCUMENT_TYPES = [
   { value: 'passport', label: 'Passport' },
   { value: 'national_id', label: 'National ID card' },
   { value: 'drivers_licence', label: 'Driving licence' },
 ]
 const ACCEPTED_IMAGE_TYPES = 'image/jpeg,image/png,image/webp'
-const MAX_IDENTITY_IMAGE_BYTES = 15 * 1024 * 1024
+
+let faceApiPromise
+async function loadFaceApi() {
+  if (!faceApiPromise) {
+    faceApiPromise = (async () => {
+      const { default: faceApiUrl } = await import('@vladmandic/face-api/dist/face-api.esm.js?url')
+      const faceapi = await import(/* @vite-ignore */ faceApiUrl)
+      await Promise.all([
+        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+      ])
+      return faceapi
+    })()
+  }
+  return faceApiPromise
+}
+
+// Returns the face descriptor plus the detector's confidence, or null when no
+// face is present. The confidence doubles as the automated instant-tier score.
+async function detectFace(faceapi, blob) {
+  const img = await faceapi.bufferToImage(blob)
+  const result = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor()
+  if (!result) return null
+  return { descriptor: result.descriptor, score: result.detection?.score ?? 1 }
+}
 
 const EMPTY_FORM = {
   fullLegalName: '',
@@ -27,6 +53,7 @@ export default function VerificationSettings() {
   const videoRef = useRef(null)
   const streamRef = useRef(null)
   const [record, setRecord] = useState(null)
+  const [mode, setMode] = useState('instant')
   const [selfie, setSelfie] = useState(null)
   const [selfiePreview, setSelfiePreview] = useState('')
   const [idDoc, setIdDoc] = useState(null)
@@ -94,31 +121,7 @@ export default function VerificationSettings() {
     stopCamera()
   }
 
-  const selectIdentityDocument = (event) => {
-    const file = event.target.files?.[0] || null
-    event.target.value = ''
-    if (!file) return
-    if (!ACCEPTED_IMAGE_TYPES.split(',').includes(file.type)) {
-      setIdDoc(null)
-      setError('Choose a JPG, PNG, or WebP image of your identity document.')
-      return
-    }
-    if (file.size < 1 || file.size > MAX_IDENTITY_IMAGE_BYTES) {
-      setIdDoc(null)
-      setError('Identity images must be smaller than 15 MB.')
-      return
-    }
-    setError('')
-    setIdDoc(file)
-  }
-
   const uploadIdentityFile = async (blob, fileName, mimeType) => {
-    if (!blob || blob.size < 1 || blob.size > MAX_IDENTITY_IMAGE_BYTES) {
-      throw new Error('Identity images must be smaller than 15 MB.')
-    }
-    if (!ACCEPTED_IMAGE_TYPES.split(',').includes(mimeType)) {
-      throw new Error('Choose a JPG, PNG, or WebP image of your identity document.')
-    }
     if (isAppwriteAuthEnabled()) {
       if (!supabase) throw new Error('Secure identity uploads are not configured.')
       const { path, token } = await appwriteData('verification.upload.prepare', {
@@ -135,6 +138,7 @@ export default function VerificationSettings() {
     return path
   }
 
+  // Tier 2 — Manual: structured form + government ID + selfie, held for admin review.
   const submitManual = async () => {
     if (!selfie || !idDoc || busy) return
     if (!form.fullLegalName.trim() || !form.dateOfBirth || !form.documentNumber.trim() || !form.issuingCountry.trim()) {
@@ -143,6 +147,16 @@ export default function VerificationSettings() {
     }
     setError(''); setInfo('')
     try {
+      setBusy('Checking your photos…')
+      const faceapi = await loadFaceApi()
+      const [selfieFace, idFace] = await Promise.all([
+        detectFace(faceapi, selfie),
+        detectFace(faceapi, idDoc),
+      ])
+      if (!selfieFace) throw new Error('No face found in your selfie. Try again in good light.')
+      const distance = idFace ? faceapi.euclideanDistance(selfieFace.descriptor, idFace.descriptor) : null
+      const score = distance == null ? null : Math.max(0, Math.min(1, 1 - distance))
+
       setBusy('Uploading securely…')
       const stamp = Date.now()
       const idExt = (idDoc.name?.split('.').pop() || 'jpg').toLowerCase()
@@ -151,6 +165,7 @@ export default function VerificationSettings() {
 
       const details = {
         tier: 'manual',
+        matchScore: score == null ? null : Number(score.toFixed(3)),
         fullLegalName: form.fullLegalName.trim(),
         dateOfBirth: form.dateOfBirth,
         documentType: form.documentType,
@@ -164,7 +179,7 @@ export default function VerificationSettings() {
       } else {
         const { error: insError } = await supabase.from('identity_verifications').upsert({
           user_id: user.id, status: 'pending', tier: 'manual',
-          match_score: null,
+          match_score: details.matchScore,
           selfie_path: selfiePath, id_document_path: idPath,
           full_legal_name: details.fullLegalName,
           date_of_birth: details.dateOfBirth,
@@ -174,12 +189,12 @@ export default function VerificationSettings() {
           reviewer_note: null, reviewed_by: null, reviewed_at: null,
         }, { onConflict: 'user_id' })
         if (insError) throw insError
-        setRecord({ status: 'pending', tier: 'manual', match_score: null })
+        setRecord({ status: 'pending', tier: 'manual', match_score: details.matchScore })
       }
       setSelfie(null)
       setIdDoc(null)
       setForm(EMPTY_FORM)
-      setInfo('Your submission is pending review by an administrator. Automated identity checks are not enabled.')
+      setInfo('Your documents were submitted for admin review.')
     } catch (err) {
       setError(err.message || 'Verification could not be submitted.')
     } finally {
@@ -189,6 +204,7 @@ export default function VerificationSettings() {
 
   const status = record?.status
   const canSubmit = !status || status === 'rejected'
+  const tierLabel = record?.tier === 'instant' ? 'instant' : 'manual review'
 
   const SelfieCard = (
     <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
@@ -212,80 +228,102 @@ export default function VerificationSettings() {
 
   return (
     <div className="space-y-5">
-      <KycWizard />
       <div className="flex items-center gap-2 rounded-2xl border border-border bg-muted/30 p-4">
         <VerificationBadge userId={user?.id} className="w-6 h-6" />
         <div>
           {status && (
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {status === 'approved' ? 'Verified' : status === 'pending' ? 'Pending Verification' : status === 'rejected' ? 'Rejected' : 'Not Verified'}
+              {status === 'approved' ? 'Verified' : status === 'pending' ? 'Pending Verification' : 'Not verified'}
             </p>
           )}
           <p className="text-sm text-foreground">
             {status === 'approved'
-              ? 'An administrator approved your identity submission. The blue verified check is shown on your profile.'
+              ? `Your identity is verified via ${tierLabel}. The blue verified check is shown on your profile.`
               : status === 'pending'
                 ? 'Your documents were received and are waiting for admin review. The blue verified check appears once an admin approves them; this page updates automatically.'
                 : status === 'rejected'
-                  ? `Your submission was not accepted${record.reviewer_note ? ` — reason: ${record.reviewer_note}` : ''}. Please submit again for manual review.`
-                  : 'This option sends a government ID and live selfie for administrator review. Use the Idswyft option above for provider-based document and liveness checks.'}
+                  ? `Your documents were not accepted${record.reviewer_note ? ` — reason: ${record.reviewer_note}` : ''}. Please submit again.`
+                  : 'Verify your identity to earn the blue verified check. Instant verification is automatic; manual verification is reviewed by an admin.'}
           </p>
         </div>
       </div>
 
       {canSubmit && (
         <>
-          {SelfieCard}
-
-          <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-            <p className="font-semibold text-foreground">Identity details</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-sm">
-                <span className="mb-1 block text-muted-foreground">Full legal name</span>
-                <input value={form.fullLegalName} onChange={(e) => setForm({ ...form, fullLegalName: e.target.value })}
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="As shown on your ID" />
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-muted-foreground">Date of birth</span>
-                <input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })}
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" />
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-muted-foreground">Document type</span>
-                <select value={form.documentType} onChange={(e) => setForm({ ...form, documentType: e.target.value })}
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm">
-                  {DOCUMENT_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-              <label className="text-sm">
-                <span className="mb-1 block text-muted-foreground">Document number</span>
-                <input value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })}
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" />
-              </label>
-              <label className="text-sm sm:col-span-2">
-                <span className="mb-1 block text-muted-foreground">Issuing country</span>
-                <input value={form.issuingCountry} onChange={(e) => setForm({ ...form, issuingCountry: e.target.value })}
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="e.g. United Kingdom" />
-              </label>
-            </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => { setMode('instant'); setError('') }}
+              className={`flex flex-col items-start gap-1 rounded-2xl border p-3 text-left transition ${mode === 'instant' ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted/40'}`}
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold text-foreground"><Zap className="w-4 h-4 text-primary" /> Instant</span>
+              <span className="text-xs text-muted-foreground">Automated document and selfie check. Verified once the provider approves.</span>
+            </button>
+            <button
+              onClick={() => { setMode('manual'); setError('') }}
+              className={`flex flex-col items-start gap-1 rounded-2xl border p-3 text-left transition ${mode === 'manual' ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted/40'}`}
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold text-foreground"><ShieldCheck className="w-4 h-4 text-primary" /> Manual</span>
+              <span className="text-xs text-muted-foreground">Government ID + selfie. Reviewed by an admin.</span>
+            </button>
           </div>
 
-          <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-            <p className="flex items-center gap-2 font-semibold text-foreground"><IdCard className="w-4 h-4" /> Upload your government ID</p>
-            <input type="file" accept={ACCEPTED_IMAGE_TYPES} onChange={selectIdentityDocument} className="text-sm" />
-            <p className="text-xs text-muted-foreground">A clear photo of the photo page of your passport, national ID or driving licence. Maximum file size: 15 MB.</p>
-          </div>
+          {mode === 'instant' ? (
+            <KycWizard />
+          ) : (
+            <>
+              {SelfieCard}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {info && <p className="text-sm text-primary">{info}</p>}
+              <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+                <p className="font-semibold text-foreground">Identity details</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Full legal name</span>
+                    <input value={form.fullLegalName} onChange={(e) => setForm({ ...form, fullLegalName: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="As shown on your ID" />
+                  </label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Date of birth</span>
+                    <input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" />
+                  </label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Document type</span>
+                    <select value={form.documentType} onChange={(e) => setForm({ ...form, documentType: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm">
+                      {DOCUMENT_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Document number</span>
+                    <input value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" />
+                  </label>
+                  <label className="text-sm sm:col-span-2">
+                    <span className="mb-1 block text-muted-foreground">Issuing country</span>
+                    <input value={form.issuingCountry} onChange={(e) => setForm({ ...form, issuingCountry: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="e.g. United Kingdom" />
+                  </label>
+                </div>
+              </div>
 
-          <button onClick={submitManual} disabled={!selfie || !idDoc || !!busy}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
-            {busy ? <><LoaderCircle className="w-4 h-4 animate-spin" /> {busy}</> : 'Submit for admin review'}
-          </button>
-          <p className="text-xs text-muted-foreground">
-            Manual submissions remain pending until an administrator reviews them. Idswyft KYC results are recorded separately and do not automatically grant the existing profile badge.
-          </p>
+              <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+                <p className="flex items-center gap-2 font-semibold text-foreground"><IdCard className="w-4 h-4" /> Upload your government ID</p>
+                <input type="file" accept={ACCEPTED_IMAGE_TYPES} onChange={(e) => setIdDoc(e.target.files?.[0] || null)} className="text-sm" />
+                <p className="text-xs text-muted-foreground">A clear photo of the photo page of your passport, national ID or driving licence.</p>
+              </div>
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              {info && <p className="text-sm text-primary">{info}</p>}
+
+              <button onClick={submitManual} disabled={!selfie || !idDoc || !!busy}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+                {busy ? <><LoaderCircle className="w-4 h-4 animate-spin" /> {busy}</> : 'Submit for admin review'}
+              </button>
+              <p className="text-xs text-muted-foreground">
+                Face matching runs on your device. Your photos are stored privately and only reviewers can see them.
+              </p>
+            </>
+          )}
         </>
       )}
     </div>

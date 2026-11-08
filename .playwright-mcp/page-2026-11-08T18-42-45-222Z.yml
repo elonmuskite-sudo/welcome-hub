@@ -1,0 +1,39 @@
+- generic [ref=e48]:
+  - banner [ref=e49]:
+    - generic [ref=e50]:
+      - img "Nexus logo" [ref=e53]
+      - generic [ref=e54]:
+        - heading "Nexus Chat" [level=1] [ref=e55]
+        - paragraph [ref=e56]: Privacy-first encrypted messaging
+    - generic [ref=e57]:
+      - button "Toggle theme" [ref=e58] [cursor=pointer]
+      - link "Sign in" [ref=e61] [cursor=pointer]:
+        - /url: /login
+  - main [ref=e62]:
+    - generic [ref=e63]:
+      - heading "Welcome back to Nexus" [level=2] [ref=e64]
+      - paragraph [ref=e65]: Sign in using the email address associated with your Nexus account.
+    - generic [ref=e67]:
+      - generic [ref=e68]:
+        - button "Password" [ref=e69] [cursor=pointer]
+        - button "Email code" [ref=e70] [cursor=pointer]
+      - generic [ref=e71]:
+        - generic [ref=e72]:
+          - generic [ref=e73]: Email address
+          - textbox "Email address" [ref=e74]:
+            - /placeholder: you@example.com
+            - text: rypefa3852@givmail.com
+        - generic [ref=e75]:
+          - generic [ref=e76]: Password
+          - generic [ref=e77]:
+            - textbox "Password" [ref=e78]:
+              - /placeholder: ••••••••
+            - button "Show password" [ref=e79] [cursor=pointer]
+        - button "Sign in" [ref=e83] [cursor=pointer]
+      - generic [ref=e84]:
+        - link "Forgot password?" [ref=e85] [cursor=pointer]:
+          - /url: /forgot-password
+        - paragraph [ref=e86]:
+          - text: New here?
+          - link "Create account" [ref=e87] [cursor=pointer]:
+            - /url: /register

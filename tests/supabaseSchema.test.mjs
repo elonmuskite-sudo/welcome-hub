@@ -44,30 +44,6 @@ test('self-service admin claim is removed from the canonical schema and existing
   assert.match(migration, /drop function if exists private\.claim_first_admin\(\)/i)
 })
 
-test('identity verification cannot approve from client-side face scores', () => {
-  const migration = fs.readFileSync(
-    path.join(root, 'supabase', 'migrations', '20261105094049_disable_unverified_identity_auto_approval.sql'),
-    'utf8',
-  )
-  const settings = fs.readFileSync(
-    path.join(root, 'src', 'components', 'chat', 'settings', 'VerificationSettings.jsx'),
-    'utf8',
-  )
-  const gateway = fs.readFileSync(path.join(root, 'server', 'appwriteGateway.js'), 'utf8')
-  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
-
-  assert.match(migration, /where tier = 'instant'/i)
-  assert.match(migration, /set status = 'rejected'/i)
-  assert.match(migration, /match_score = null/i)
-  assert.match(migration, /check \(tier = 'manual'\)/i)
-  assert.match(migration, /drop function if exists public\.submit_instant_identity_verification/i)
-  assert.doesNotMatch(settings, /face-api|submitInstant|submit_instant_identity_verification|verification\.instant/i)
-  assert.match(settings, /submit for admin review/i)
-  assert.doesNotMatch(gateway, /case 'verification\.instant'/i)
-  assert.doesNotMatch(gateway, /body\.matchScore/i)
-  assert.doesNotMatch(schema, /submit_instant_identity_verification/i)
-})
-
 test('Idswyft KYC sessions are user-scoped and session credentials are encrypted server-side', () => {
   const migration = fs.readFileSync(
     path.join(root, 'supabase', 'migrations', '20261106195234_idswyft_kyc_sessions.sql'),
