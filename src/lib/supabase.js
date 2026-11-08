@@ -9,6 +9,8 @@ const appwriteSelected = env.VITE_AUTH_PROVIDER === 'appwrite'
 export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
+        // Supabase's browser session uses persisted refresh tokens; refreshing
+        // access JWTs keeps users signed in until they explicitly sign out.
         persistSession: !appwriteSelected,
         autoRefreshToken: !appwriteSelected,
         detectSessionInUrl: false,

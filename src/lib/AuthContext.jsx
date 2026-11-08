@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react'
+import { keepUserOnSessionHydrationError } from './authSessionState'
 export function isAdminRole(role) {
   return role === 'admin' || role === 'supabase_admin'
 }
@@ -125,7 +126,9 @@ export function AuthProvider({ children }) {
         }))
       } catch (error) {
         console.error('Authenticated profile lookup failed', error)
-        if (active) setUser(null)
+        if (active) {
+          setUser((currentUser) => keepUserOnSessionHydrationError(currentUser, session.user.id))
+        }
       } finally {
         if (active) setLoading(false)
       }
@@ -143,7 +146,6 @@ export function AuthProvider({ children }) {
       .catch((error) => {
         console.error('Supabase session lookup failed', error)
         if (active) {
-          setUser(null)
           setLoading(false)
         }
       })
