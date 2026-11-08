@@ -35,12 +35,14 @@ test('generated server integration keys are available to Vercel runtime sync', (
   const keys = [
     'IDSWYFT_API_URL',
     'IDSWYFT_API_KEY',
+    'IDSWYFT_WEBHOOK_SECRET',
     'IDSWYFT_SESSION_ENCRYPTION_KEY',
     'TWILIO_ACCOUNT_SID',
     'TWILIO_AUTH_TOKEN',
     'TWILIO_MESSAGING_SERVICE_SID',
     'FILE_SCAN_API_URL',
     'FILE_SCAN_API_KEY',
+    'FIREBASE_SERVICE_ACCOUNT_JSON',
   ]
 
   for (const key of keys) {
@@ -51,25 +53,51 @@ test('generated server integration keys are available to Vercel runtime sync', (
   assert.match(vercelIgnore, /^\.vercel-runtime-env\.json$/m)
 })
 
+test('Idswyft credentials are server-only examples and include webhook configuration', () => {
+  const example = fs.readFileSync(path.join(root, '.env.example'), 'utf8')
+  const values = Object.fromEntries(
+    example.split(/\r?\n/)
+      .map((line) => line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/))
+      .filter(Boolean)
+      .map(([, key, value]) => [key, value]),
+  )
+
+  assert.equal(values.IDSWYFT_API_URL, 'https://api.idswyft.app')
+  assert.equal(values.IDSWYFT_API_KEY, '')
+  assert.equal(values.IDSWYFT_WEBHOOK_SECRET, '')
+  assert.ok(values.SUPABASE_URL)
+  assert.ok(values.SUPABASE_SERVICE_ROLE_KEY)
+  assert.doesNotMatch(example, /^VITE_IDSWYFT_/m)
+})
+
 test('server-only integration variables are synced without exposing them as public values', () => {
   const config = {
     ...requiredRuntimeConfig(),
     IDSWYFT_API_URL: 'https://kyc.example.org',
     IDSWYFT_API_KEY: 'idswyft-key',
+    IDSWYFT_WEBHOOK_SECRET: 'webhook-signing-secret',
     IDSWYFT_SESSION_ENCRYPTION_KEY: 'encryption-key',
     TWILIO_ACCOUNT_SID: 'account-sid',
     TWILIO_AUTH_TOKEN: 'auth-token',
     TWILIO_MESSAGING_SERVICE_SID: 'messaging-sid',
     FILE_SCAN_API_URL: 'https://scanner.example.org',
     FILE_SCAN_API_KEY: 'scan-key',
+    FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+      type: 'service_account',
+      project_id: 'nexus-test',
+      client_email: 'push@nexus-test.iam.gserviceaccount.com',
+      private_key: '-----BEGIN PRIVATE KEY-----\\ntest\\n-----END PRIVATE KEY-----',
+    }),
   }
   const synced = buildSyncedValues(config)
 
   for (const key of [
     'IDSWYFT_API_KEY',
+    'IDSWYFT_WEBHOOK_SECRET',
     'IDSWYFT_SESSION_ENCRYPTION_KEY',
     'TWILIO_AUTH_TOKEN',
     'FILE_SCAN_API_KEY',
+    'FIREBASE_SERVICE_ACCOUNT_JSON',
   ]) {
     assert.equal(synced[key], config[key])
     assert.equal(PUBLIC_KEYS.has(key), false)
@@ -90,6 +118,13 @@ test('optional integrations reject partial configuration', () => {
   assert.deepEqual(
     getPartialOptionalEnvGroups({ IDSWYFT_API_URL: '', IDSWYFT_API_KEY: '' }, invalidValue),
     [],
+  )
+  assert.deepEqual(
+    getPartialOptionalEnvGroups({ VITE_TURN_URL: 'turn:relay.example:3478' }, invalidValue),
+    [{
+      name: 'TURN relay credentials',
+      missingKeys: ['VITE_TURN_USERNAME', 'VITE_TURN_CREDENTIAL'],
+    }],
   )
   assert.throws(
     () => buildSyncedValues({ ...requiredRuntimeConfig(), ...partialKyc }),
@@ -156,8 +191,13 @@ test('Vercel Serverless Function count stays within the Hobby plan limit', () =>
       .map(({ source, destination }) => [source, destination]),
   )
   assert.equal(kycRewrites.get('/api/kyc/init'), '/api/kyc?action=init')
+  assert.equal(kycRewrites.get('/api/kyc/initialize'), '/api/kyc?action=initialize')
   assert.equal(kycRewrites.get('/api/kyc/upload'), '/api/kyc?action=upload')
   assert.equal(kycRewrites.get('/api/kyc/status'), '/api/kyc?action=status')
+  assert.equal(
+    vercelConfig.rewrites.find(({ source }) => source === '/api/webhooks/idswyft')?.destination,
+    '/api/kyc?action=webhook',
+  )
 
   const callRewrites = new Map(
     vercelConfig.rewrites

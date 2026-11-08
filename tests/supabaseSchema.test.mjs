@@ -74,8 +74,12 @@ test('Idswyft KYC sessions are user-scoped and session credentials are encrypted
     'utf8',
   )
   const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
-  const api = fs.readFileSync(path.join(root, 'api', 'kyc', 'upload.js'), 'utf8')
+  const api = fs.readFileSync(path.join(root, 'api', 'kyc.js'), 'utf8')
   const provider = fs.readFileSync(path.join(root, 'server', 'idswyftKyc.js'), 'utf8')
+  const statusMigration = fs.readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261108075723_idswyft_kyc_status_details.sql'),
+    'utf8',
+  )
 
   for (const sql of [migration, schema]) {
     assert.match(sql, /create table public\.kyc_sessions/i)
@@ -91,7 +95,12 @@ test('Idswyft KYC sessions are user-scoped and session credentials are encrypted
   assert.match(provider, /createCipheriv\('aes-256-gcm'/)
   assert.match(api, /bodyParser: false/)
   assert.match(api, /validateKycFile/)
+  assert.match(api, /multipart\/form-data/)
   assert.doesNotMatch(api, /NEXT_PUBLIC_|VITE_IDSWYFT/)
+  assert.match(statusMigration, /add column if not exists current_step/i)
+  assert.match(statusMigration, /add column if not exists ocr_data/i)
+  assert.match(statusMigration, /add column if not exists liveness_results/i)
+  assert.match(statusMigration, /add column if not exists cross_validation_results/i)
 })
 
 test('duplicate role-schema migration safely extends existing objects', () => {

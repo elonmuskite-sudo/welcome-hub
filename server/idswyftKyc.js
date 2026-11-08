@@ -14,6 +14,10 @@ export const KYC_STATUSES = new Set([
   'FAILED',
   'EXPIRED',
 ])
+const PROVIDER_STATUS_ALIASES = new Map([
+  ['REVIEW', 'REVIEW_REQUIRED'],
+  ['UNDER_REVIEW', 'REVIEW_REQUIRED'],
+])
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MIME_TYPES = new Set(['image/jpeg', 'image/png', 'application/pdf'])
@@ -166,11 +170,19 @@ function providerData(payload) {
 
 export function normalizeProviderStatus(payload) {
   const record = providerData(payload)
-  const status = String(record?.status || record?.code || record?.error_code || '').trim().toUpperCase()
+  const rawStatus = String(record?.status || record?.code || record?.error_code || '').trim().toUpperCase()
+  const status = PROVIDER_STATUS_ALIASES.get(rawStatus) || rawStatus
   if (!KYC_STATUSES.has(status)) {
     throw new KycError('The identity provider returned an unsupported verification status.', 502)
   }
   return status
+}
+
+export function kycStepForStatus(status) {
+  if (status === 'AWAITING_FRONT') return 2
+  if (status === 'AWAITING_BACK') return 3
+  if (status === 'AWAITING_LIVE') return 4
+  return 5
 }
 
 function safeScore(value) {
@@ -194,6 +206,14 @@ export function summarizeProviderMetadata(payload) {
       .slice(0, 40)
     : []
   const livenessResult = liveness && typeof liveness === 'object' ? liveness : null
+  const crossValidation = record.cross_validation || record.cross_validation_results
+    || record.cross_validation_result
+  const crossValidationResult = crossValidation && typeof crossValidation === 'object'
+    ? crossValidation
+    : null
+  const rejectionCode = String(record.rejection_code || record.rejection_reason || '')
+    .trim()
+    .toUpperCase()
   const summary = {
     ocr: ocr ? {
       status: safeLabel(ocr.status || (fieldNames.length ? 'EXTRACTED' : 'UNAVAILABLE')),
@@ -204,7 +224,13 @@ export function summarizeProviderMetadata(payload) {
       score: safeScore(livenessResult ? livenessResult.score : liveness ?? record.liveness_score),
       verdict: safeLabel(livenessResult ? livenessResult.verdict : record.liveness_verdict),
     } : null,
+    cross_validation: crossValidationResult ? {
+      status: safeLabel(crossValidationResult.status),
+      confidence: safeScore(crossValidationResult.confidence ?? crossValidationResult.score),
+      verdict: safeLabel(crossValidationResult.verdict),
+    } : null,
     verdict: safeLabel(record.verdict || record.decision),
+    rejection_reason: /^[A-Z0-9][A-Z0-9_-]{0,39}$/.test(rejectionCode) ? rejectionCode : null,
   }
   return Object.fromEntries(Object.entries(summary).filter(([, value]) => value !== null))
 }

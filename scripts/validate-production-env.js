@@ -4,6 +4,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isProductionDeployment } from './deployment-env.js'
 import { getPartialOptionalEnvGroups } from './optional-env-groups.js'
+import { validateFirebaseServiceAccount } from '../server/firebaseServiceAccount.js'
+import { validateIceConfiguration } from '../src/lib/callIce.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
@@ -56,9 +58,11 @@ function readEnvFile(filePath) {
 }
 
 function getEnvValue(key) {
-  const localValues = readEnvFile(path.join(rootDir, '.env'))
+  const productionLocalValues = readEnvFile(path.join(rootDir, '.env.production.local'))
+  const localOverrideValues = readEnvFile(path.join(rootDir, '.env.local'))
   const productionValues = readEnvFile(path.join(rootDir, '.env.production'))
-  return process.env[key] ?? productionValues[key] ?? localValues[key] ?? ''
+  const localValues = readEnvFile(path.join(rootDir, '.env'))
+  return process.env[key] ?? productionLocalValues[key] ?? localOverrideValues[key] ?? productionValues[key] ?? localValues[key] ?? ''
 }
 
 function isPlaceholder(value) {
@@ -111,14 +115,21 @@ async function main() {
     console.warn(`[env:validate] Production server values are not configured in this deployment environment: ${issues.join(', ')}`)
   }
   // Voice calls relay over TURN when NAT traversal via STUN alone fails.
-  const hasTurnUrl = !isPlaceholder(getEnvValue('VITE_TURN_URL'))
-  const hasTurnUser = !isPlaceholder(getEnvValue('VITE_TURN_USERNAME'))
-  const hasTurnCredential = !isPlaceholder(getEnvValue('VITE_TURN_CREDENTIAL'))
-  if (!hasTurnUrl) {
-    console.warn('[env:validate] VITE_TURN_URL is not set: voice calls use STUN only and may fail behind strict NATs.')
+  const iceConfig = Object.fromEntries(
+    ['VITE_STUN_URL', 'VITE_TURN_URL', 'VITE_TURN_USERNAME', 'VITE_TURN_CREDENTIAL']
+      .map((key) => [key, getEnvValue(key)])
+  )
+  try {
+    validateIceConfiguration(iceConfig)
+  } catch (error) {
+    if (isProductionDeploy) {
+      console.error(`[env:validate] ${error.message}`)
+      process.exit(1)
+    }
+    console.warn(`[env:validate] ${error.message}`)
   }
-  if (hasTurnUser !== hasTurnCredential) {
-    console.warn('[env:validate] TURN username and credential must be set together; configure both or leave both unset.')
+  if (isPlaceholder(getEnvValue('VITE_TURN_URL'))) {
+    console.warn('[env:validate] VITE_TURN_URL is not set: voice calls use STUN only and may fail behind strict NATs.')
   }
   const optionalEnvValues = Object.fromEntries(
     [
@@ -128,7 +139,7 @@ async function main() {
       'R2_BUCKET_NAME', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY',
       'VITE_WEB_PUSH_PUBLIC_KEY', 'WEB_PUSH_VAPID_PUBLIC_KEY',
       'WEB_PUSH_VAPID_PRIVATE_KEY', 'WEB_PUSH_VAPID_SUBJECT',
-      'VITE_TURN_USERNAME', 'VITE_TURN_CREDENTIAL',
+      'VITE_TURN_URL', 'VITE_TURN_USERNAME', 'VITE_TURN_CREDENTIAL',
     ].map((key) => [key, getEnvValue(key)])
   )
   const partialGroups = getPartialOptionalEnvGroups(optionalEnvValues, isPlaceholder)
@@ -143,8 +154,19 @@ async function main() {
     }
     console.warn(`[env:validate] ${message}`)
   }
-  if (isPlaceholder(getEnvValue('FIREBASE_SERVICE_ACCOUNT_JSON'))) {
+  const firebaseServiceAccount = getEnvValue('FIREBASE_SERVICE_ACCOUNT_JSON')
+  if (isPlaceholder(firebaseServiceAccount)) {
     console.warn('[env:validate] Native background call alerts are disabled until FIREBASE_SERVICE_ACCOUNT_JSON is configured.')
+  } else {
+    try {
+      validateFirebaseServiceAccount(firebaseServiceAccount)
+    } catch (error) {
+      if (isProductionDeploy) {
+        console.error(`[env:validate] ${error.message}`)
+        process.exit(1)
+      }
+      console.warn(`[env:validate] ${error.message}`)
+    }
   }
   if (isStrictDeploy && missing.length) {
     console.error('[env:validate] Missing production env values before deploy:')

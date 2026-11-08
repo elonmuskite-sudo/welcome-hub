@@ -3,9 +3,7 @@
 // environment variables this app reads (see src/lib/callIce.js).
 //
 // Usage:
-//   npm run turn:credentials             # print the values
 //   npm run turn:credentials -- --write  # update .env.local in place
-//   npm run turn:credentials -- --write --vercel   # also remind about Vercel
 //
 // Needs: METERED_API_KEY (and METERED_APP_NAME, the subdomain shown in your
 //        dashboard) in .env.local (gitignored) or the environment.
@@ -31,11 +29,7 @@ function readFromFile(file, key) {
 
 function resolveSetting(key) {
   if (process.env[key]) return String(process.env[key]).trim()
-  for (const file of ['.env.local', '.env']) {
-    const value = readFromFile(path.join(ROOT, file), key)
-    if (value) return value
-  }
-  return ''
+  return readFromFile(LOCAL_FILE, key)
 }
 
 export function toList(urls) {
@@ -106,6 +100,11 @@ function writeEnvLocal(values) {
 
 async function main() {
   const write = process.argv.includes('--write')
+  if (!write) {
+    console.log('[turn] Rerun with --write to save relay credentials to the ignored .env.local file.')
+    return
+  }
+
   const apiKey = resolveSetting('METERED_API_KEY')
   const appName = resolveSetting('METERED_APP_NAME')
 
@@ -130,15 +129,9 @@ async function main() {
 
   const values = buildValues(await response.json())
 
-  if (write) {
-    writeEnvLocal(values)
-    console.log(`[turn] Updated ${LOCAL_FILE}`)
-    console.log('[turn] Set the same four variables in Vercel for production, then run `npm run env:generate`.')
-    return
-  }
-
-  console.log('# Paste into .env.local (dev) and Vercel (production):')
-  for (const key of KEYS) console.log(`${key}="${values[key]}"`)
+  writeEnvLocal(values)
+  console.log(`[turn] Updated ${LOCAL_FILE}`)
+  console.log(`[turn] Set ${KEYS.join(', ')} in Vercel for production, then redeploy.`)
 }
 
 // Only run when invoked directly so the mapper can be unit tested.

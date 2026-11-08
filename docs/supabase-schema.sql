@@ -33,6 +33,11 @@ create table public.kyc_sessions (
     'APPROVED', 'HARD_REJECTED', 'SOFT_REJECTED', 'LIVENESS_FAILED',
     'REVIEW_REQUIRED', 'FAILED', 'EXPIRED'
   )),
+  current_step smallint not null default 1 check (current_step between 1 and 5),
+  ocr_data jsonb check (ocr_data is null or jsonb_typeof(ocr_data) = 'object'),
+  liveness_results jsonb check (liveness_results is null or jsonb_typeof(liveness_results) = 'object'),
+  cross_validation_results jsonb check (cross_validation_results is null or jsonb_typeof(cross_validation_results) = 'object'),
+  rejection_reason text,
   metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(metadata) = 'object'),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

@@ -22,9 +22,10 @@ import {
   readKycSession,
   updateKycSession,
 } from '../server/kycStore.js'
+import { handleIdswyftWebhook } from '../server/idswyftWebhook.js'
 
-// Route the init, upload, and status paths through one function to stay within
-// Vercel Hobby's Serverless Function deployment limit.
+// Route KYC operations and the provider webhook through one function to stay
+// within Vercel Hobby's Serverless Function deployment limit.
 export const config = { api: { bodyParser: false } }
 
 const MAX_KYC_JSON_BYTES = 16 * 1024
@@ -63,6 +64,11 @@ export async function readKycJson(req) {
 
 export function readKycMultipart(req) {
   return new Promise((resolve, reject) => {
+    const contentType = String(req.headers?.['content-type'] || '').split(';', 1)[0].trim().toLowerCase()
+    if (contentType !== 'multipart/form-data') {
+      reject(new KycError('The upload must use multipart form data.', 415))
+      return
+    }
     const fields = {}
     let uploadedFile = null
     let parseError = null
@@ -215,8 +221,9 @@ async function status(req, res) {
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
   const action = typeof req.query?.action === 'string' ? req.query.action : ''
-  if (action === 'init') return initialize(req, res)
+  if (action === 'init' || action === 'initialize') return initialize(req, res)
   if (action === 'upload') return upload(req, res)
   if (action === 'status') return status(req, res)
+  if (action === 'webhook') return handleIdswyftWebhook(req, res)
   return sendKycResponse(res, 404, { error: 'Not found.' })
 }

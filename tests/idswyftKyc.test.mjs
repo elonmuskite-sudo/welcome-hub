@@ -7,6 +7,7 @@ import {
   encryptSessionToken,
   initializeProviderSession,
   MAX_KYC_FILE_BYTES,
+  kycStepForStatus,
   normalizeProviderStatus,
   summarizeProviderMetadata,
   uploadProviderDocument,
@@ -69,6 +70,12 @@ test('provider status is validated and KYC metadata excludes extracted personal 
   }
   assert.equal(normalizeProviderStatus(providerResponse), 'APPROVED')
   assert.equal(normalizeProviderStatus({ code: 'LIVENESS_FAILED' }), 'LIVENESS_FAILED')
+  assert.equal(normalizeProviderStatus({ status: 'REVIEW' }), 'REVIEW_REQUIRED')
+  assert.equal(normalizeProviderStatus({ status: 'UNDER_REVIEW' }), 'REVIEW_REQUIRED')
+  assert.equal(kycStepForStatus('AWAITING_FRONT'), 2)
+  assert.equal(kycStepForStatus('AWAITING_BACK'), 3)
+  assert.equal(kycStepForStatus('AWAITING_LIVE'), 4)
+  assert.equal(kycStepForStatus('REVIEW_REQUIRED'), 5)
   assert.deepEqual(summarizeProviderMetadata({ liveness: null }), {})
   assert.throws(() => normalizeProviderStatus({ status: 'UNKNOWN_PROVIDER_STATE' }), /unsupported/)
 
@@ -185,4 +192,10 @@ test('KYC initialization parses bounded JSON requests', async () => {
   const oversized = Readable.from([Buffer.alloc(16 * 1024 + 1)])
   oversized.headers = { 'content-type': 'application/json' }
   await assert.rejects(readKycJson(oversized), /too large/)
+})
+
+test('KYC multipart parser rejects non-multipart requests', async () => {
+  const req = Readable.from([Buffer.from('{}')])
+  req.headers = { 'content-type': 'application/json' }
+  await assert.rejects(readKycMultipart(req), /must use multipart form data/)
 })

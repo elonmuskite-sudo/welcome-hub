@@ -37,7 +37,7 @@ export function getKycSession(id) {
 }
 
 export function startKycSession() {
-  return request('/api/kyc/init', {
+  return request('/api/kyc/initialize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ consent: true }),

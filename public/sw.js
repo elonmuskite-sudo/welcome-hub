@@ -61,7 +61,7 @@ self.addEventListener('push', (event) => {
   const data = payload.data || payload
   const chatId = String(data.chatId || '')
   const url = chatId
-    ? `/app/chat/${encodeURIComponent(chatId)}?incomingCall=${encodeURIComponent(String(data.callId || ''))}&expiresAt=${encodeURIComponent(String(data.expiresAt || ''))}&fromUserId=${encodeURIComponent(String(data.fromUserId || ''))}&fromName=${encodeURIComponent(String(data.fromName || 'Contact'))}&fromAvatar=${encodeURIComponent(String(data.fromAvatar || ''))}`
+    ? `/app/chat/${encodeURIComponent(chatId)}?incomingCall=${encodeURIComponent(String(data.callId || ''))}&expiresAt=${encodeURIComponent(String(data.expiresAt || ''))}&fromUserId=${encodeURIComponent(String(data.fromUserId || ''))}&fromName=${encodeURIComponent(String(data.fromName || 'Contact'))}&fromAvatar=${encodeURIComponent(String(data.fromAvatar || ''))}&callKind=${encodeURIComponent(data.callKind === 'video' ? 'video' : 'voice')}`
     : '/app'
 
   event.waitUntil(self.registration.showNotification(payload.title || 'Incoming voice call', {

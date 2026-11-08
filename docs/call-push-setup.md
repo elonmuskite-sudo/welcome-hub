@@ -25,6 +25,8 @@ Apply the new `call_push_subscriptions` migration to the production Supabase pro
 4. Add `FIREBASE_SERVICE_ACCOUNT_JSON` as a server-only Vercel environment variable containing the Firebase service-account JSON as a single-line JSON value. Never use a service-account key in a `VITE_` variable or mobile client.
 5. Run `npx cap sync`, build and install the native apps, then enable call alerts in Settings → Notifications on each device.
 
+The Vercel environment sync allowlist treats `FIREBASE_SERVICE_ACCOUNT_JSON` as an encrypted server-only value. Verify it is configured for the deployment target; the environment validator rejects malformed service-account JSON. The Firebase client files (`google-services.json` and `GoogleService-Info.plist`) are separate from this server secret and must be obtained from the Firebase console for the matching native app IDs.
+
 The app's push notification opens the conversation and reconnects to the ephemeral Realtime call channel so the user can answer. This implementation does not provide a native CallKit/Android ConnectionService full-screen call UI while the app is terminated. iOS/Android may also defer or suppress notifications according to OS notification, battery, focus, and network settings.
 
 ## Voice and video call relay
@@ -32,8 +34,8 @@ The app's push notification opens the conversation and reconnects to the ephemer
 Voice and video use browser WebRTC media; there is no per-call API key or media-server account. STUN may connect directly, but reliable calls on restrictive mobile/NAT networks need TURN. To provision the current Metered Open Relay integration:
 
 1. Create an account at [Metered Open Relay](https://dashboard.metered.ca/signup?tool=turnserver), then copy the API key and the app subdomain/name from its dashboard.
-2. Put them in the ignored local `.env.local` as `METERED_API_KEY` and `METERED_APP_NAME` (never use `VITE_` for the Metered API key).
-3. Run `npm run turn:credentials -- --write`. This writes the TURN URLs and browser-required temporary relay username/credential to `.env.local`.
+2. Put them in the ignored local `.env.local` as `METERED_API_KEY` and `METERED_APP_NAME` (never use `VITE_` for the Metered API key). The helper reads `.env.local` or shell variables only, not `.env`.
+3. Run `npm run turn:credentials -- --write`. This writes the TURN URLs and browser-required temporary relay username/credential to `.env.local` without printing credential values.
 4. Add `VITE_STUN_URL`, `VITE_TURN_URL`, `VITE_TURN_USERNAME`, and `VITE_TURN_CREDENTIAL` to the Vercel project for each environment, then redeploy. WebRTC must receive relay credentials in the client, so these credentials are visible to signed-in browsers; use expiring provider-issued credentials and rotate them. Do not copy the Metered API key to Vercel/browser variables.
 5. Test a voice call and video call between separate networks (for example Wi-Fi and cellular) and verify camera permission, mute, camera-off, switch-camera, hangup, and reconnect behavior.
 

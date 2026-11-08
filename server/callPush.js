@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import webpush from 'web-push'
 import { cert, getApps, initializeApp } from 'firebase-admin/app'
 import { getMessaging } from 'firebase-admin/messaging'
+import { validateFirebaseServiceAccount } from './firebaseServiceAccount.js'
 
 let supabaseAdmin
 
@@ -19,12 +20,7 @@ function getSupabaseAdmin() {
 function firebaseMessaging() {
   const serviceAccountValue = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim()
   if (!serviceAccountValue) return null
-  let serviceAccount
-  try {
-    serviceAccount = JSON.parse(serviceAccountValue)
-  } catch {
-    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON must contain valid JSON.')
-  }
+  const serviceAccount = validateFirebaseServiceAccount(serviceAccountValue)
   const app = getApps().find((entry) => entry.name === 'nexus-call-push')
     || initializeApp({ credential: cert(serviceAccount) }, 'nexus-call-push')
   return getMessaging(app)

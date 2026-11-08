@@ -31,8 +31,7 @@ const STATUS_LABELS = {
   EXPIRED: 'Session expired',
 }
 const FINAL_STATUSES = new Set([
-  'APPROVED', 'HARD_REJECTED', 'SOFT_REJECTED', 'LIVENESS_FAILED',
-  'REVIEW_REQUIRED', 'FAILED', 'EXPIRED',
+  'APPROVED', 'HARD_REJECTED', 'LIVENESS_FAILED', 'FAILED', 'EXPIRED',
 ])
 
 function stepForStatus(status) {
@@ -139,7 +138,7 @@ export default function KycWizard() {
       } catch (statusError) {
         if (active) setPollError(statusError.message || 'Status update failed; checking again shortly.')
       }
-      if (active) timer = setTimeout(poll, 5000)
+      if (active) timer = setTimeout(poll, updated?.status === 'REVIEW_REQUIRED' ? 15000 : 5000)
     }
     timer = setTimeout(poll, 5000)
     return () => {
@@ -270,7 +269,7 @@ export default function KycWizard() {
       ? 'Back of your ID'
       : 'Live selfie'
   const isActive = session && !FINAL_STATUSES.has(session.status)
-  const canResume = isActive && step >= 2 && step <= 4
+  const canResume = Boolean(isActive)
   const actionLabel = canResume
     ? 'Continue'
     : isActive

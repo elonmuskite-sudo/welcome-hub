@@ -44,7 +44,7 @@ export default function VoiceCallOverlay() {
     <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-gray-950 px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
       {videoCall && call.state !== 'ringing' && (
         <div className="relative flex min-h-0 w-full max-w-5xl flex-1 items-center justify-center overflow-hidden rounded-2xl bg-black">
-          <video ref={remoteVideoRef} autoPlay playsInline className="h-full max-h-[75vh] w-full object-contain" />
+          <video ref={remoteVideoRef} autoPlay muted playsInline className="h-full max-h-[75vh] w-full object-contain" />
           {!call.remoteStream && <Avatar src={call.peerAvatar} alt={call.peerName} size="2xl" />}
           <div className="absolute bottom-4 right-4 aspect-video w-28 overflow-hidden rounded-xl border border-white/30 bg-gray-900 sm:w-44">
             <video ref={localVideoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
