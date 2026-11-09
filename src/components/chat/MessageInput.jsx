@@ -4,7 +4,8 @@ import { Smile, Sticker, Paperclip, Mic, Send, Square, X, LoaderCircle, Reply } 
 import StickerPicker from './StickerPicker'
 import VoiceNoteDialog from './VoiceNoteDialog'
 import ChatButton from './ChatButton'
-import { uploadChatFile, ATTACHMENT_ACCEPT } from '../../lib/storageManager'
+import { uploadChatFile, validateUpload, ATTACHMENT_ACCEPT } from '../../lib/storageManager'
+import { useChatUploader } from '../../hooks/useChatUploader'
 import { extractWaveformPeaks } from '../../lib/audioWaveform'
 import { useAuth } from '../../lib/AuthContext'
 
@@ -26,8 +27,9 @@ const CHAT_INPUT_HINTS = {
   autoCapitalize: 'sentences',
 }
 
-export default function MessageInput({ onSendMessage, reply, onCancelReply, chatId }) {
+export default function MessageInput({ onSendMessage, onTypingChange, reply, onCancelReply, chatId }) {
   const { user } = useAuth()
+  const { uploadFile: uploadToR2 } = useChatUploader()
   const [inputText, setInputText] = useState('')
   const [activePanel, setActivePanel] = useState(null) // 'stickers' | 'emoji' | null
   const [isSending, setIsSending] = useState(false)
@@ -45,18 +47,20 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
   const aliveRef = useRef(true)
   const chunksRef = useRef([])
   const pendingUrlRef = useRef(null)
+  const typingActiveRef = useRef(false)
 
   useEffect(() => {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
+      if (typingActiveRef.current) onTypingChange?.(false)
       if (recorderRef.current) recorderRef.current.onstop = null
       if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
       streamRef.current?.getTracks().forEach(track => track.stop())
       clearInterval(intervalRef.current)
       if (pendingUrlRef.current) URL.revokeObjectURL(pendingUrlRef.current)
     }
-  }, [])
+  }, [onTypingChange])
   useEffect(() => { if (reply) textareaRef.current?.focus() }, [reply])
 
   // Auto-grows the composer up to a cap derived from the *visible* viewport: on
@@ -94,8 +98,47 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
   const submit = async event => {
     event.preventDefault()
     if (!inputText.trim() || isSending) return
-    if (await send({ content: inputText.trim(), type: 'text' })) setInputText('')
+    if (await send({ content: inputText.trim(), type: 'text' })) {
+      typingActiveRef.current = false
+      onTypingChange?.(false)
+      setInputText('')
+    }
   }
+  const updateInput = (value) => {
+    const typing = Boolean(value.trim())
+    typingActiveRef.current = typing
+    onTypingChange?.(typing)
+    setInputText(value)
+  }
+
+  // Attachments go through the R2 object-storage pipeline when it is configured
+  // and fall back to the existing Supabase pipeline only when the server reports
+  // that object storage is unconfigured (HTTP 503). Validation runs once up front
+  // so both paths enforce the same type/size/duration rules.
+  const uploadAttachment = useCallback(async ({ file, kind = 'file', durationSeconds = null, label }) => {
+    const meta = await validateUpload(file, { userId: user?.id, kind, durationSeconds })
+    const reportProgress = percent => setUploadProgress({ percent, label })
+    try {
+      const stored = await uploadToR2({ file, channelId: chatId ?? null, onProgress: reportProgress })
+      return {
+        fileUrl: stored.reference,
+        fileName: file.name,
+        fileType: meta.fileType,
+        durationSeconds: meta.durationSeconds,
+        scanStatus: 'unavailable',
+      }
+    } catch (r2Error) {
+      if (r2Error?.status !== 503) throw r2Error
+      return uploadChatFile({
+        userId: user?.id,
+        chatId,
+        file,
+        kind,
+        durationSeconds,
+        onProgress: reportProgress,
+      })
+    }
+  }, [user?.id, chatId, uploadToR2])
 
   // Multi-file attachments: each file is validated, uploaded with progress, and
   // sent as its own message so one bad file never blocks the rest.
@@ -112,12 +155,7 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
         const label = files.length > 1 ? `Uploading ${index + 1} of ${files.length}: ${file.name}` : `Uploading ${file.name}`
         setUploadProgress({ percent: 0, label })
         try {
-          const uploaded = await uploadChatFile({
-            userId: user?.id,
-            chatId,
-            file,
-            onProgress: percent => setUploadProgress({ percent, label }),
-          })
+          const uploaded = await uploadAttachment({ file, label })
           await send({
             content: uploaded.fileName,
             type: uploaded.fileType === 'sticker' ? 'image' : uploaded.fileType,
@@ -189,13 +227,11 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
     setError('')
     setUploadProgress({ percent: 0, label: 'Uploading voice note' })
     try {
-      const uploaded = await uploadChatFile({
-        userId: user?.id,
-        chatId,
+      const uploaded = await uploadAttachment({
         file: pendingVoice.file,
         kind: 'voice',
         durationSeconds: pendingVoice.durationSeconds,
-        onProgress: percent => setUploadProgress({ percent, label: 'Uploading voice note' }),
+        label: 'Uploading voice note',
       })
       const sent = await send({
         content: uploaded.fileName,
@@ -225,13 +261,13 @@ export default function MessageInput({ onSendMessage, reply, onCancelReply, chat
       <div className="chat-upload-progress"><span style={{ width: `${uploadProgress.percent}%` }} /></div>
     </div>}
     {error && <div role="alert" className="flex gap-2 items-start text-sm text-destructive mb-2"><p className="flex-1">{error}</p><ChatButton title="Dismiss attachment error" onClick={() => setError('')} className="w-7 shrink-0"><X className="w-4 h-4" /></ChatButton></div>}
-    {isRecording ? <div className="flex items-center gap-2"><div className="flex-1 text-destructive flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-destructive motion-safe:animate-pulse" /><span className="text-sm">Recording {recordingDuration}s</span></div><ChatButton title="Stop recording" onClick={stopRecording} className="w-11 h-11 bg-destructive text-destructive-foreground"><Square className="w-5 h-5" /></ChatButton></div> : <form onSubmit={submit} className="flex items-end gap-2">
-      <ChatButton title="Emoji" disabled={busy} onClick={() => togglePanel('emoji')} aria-expanded={activePanel === 'emoji'} className={`w-11 h-11 shrink-0 ${activePanel === 'emoji' ? 'bg-primary/10 text-primary' : ''}`}><Smile className="w-5 h-5" /></ChatButton>
-      <ChatButton title="Stickers" disabled={busy} onClick={() => togglePanel('stickers')} aria-expanded={activePanel === 'stickers'} className={`w-11 h-11 shrink-0 ${activePanel === 'stickers' ? 'bg-primary/10 text-primary' : ''}`}><Sticker className="w-5 h-5" /></ChatButton>
-      <ChatButton title="Attach files" disabled={busy} onClick={() => fileInputRef.current?.click()} className="w-11 h-11 shrink-0"><Paperclip className="w-5 h-5" /></ChatButton>
+    {isRecording ? <div className="flex items-center gap-2"><div className="flex-1 text-destructive flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-destructive motion-safe:animate-pulse" /><span className="text-sm">Recording {recordingDuration}s</span></div><ChatButton title="Stop recording" onClick={stopRecording} className="h-10 w-10 shrink-0 bg-destructive text-destructive-foreground sm:h-11 sm:w-11"><Square className="w-5 h-5" /></ChatButton></div> : <form onSubmit={submit} className="flex min-w-0 items-end gap-1.5 sm:gap-2">
+      <ChatButton title="Emoji" disabled={busy} onClick={() => togglePanel('emoji')} aria-expanded={activePanel === 'emoji'} className={`h-10 w-10 shrink-0 sm:h-11 sm:w-11 ${activePanel === 'emoji' ? 'bg-primary/10 text-primary' : ''}`}><Smile className="w-5 h-5" /></ChatButton>
+      <ChatButton title="Stickers" disabled={busy} onClick={() => togglePanel('stickers')} aria-expanded={activePanel === 'stickers'} className={`h-10 w-10 shrink-0 sm:h-11 sm:w-11 ${activePanel === 'stickers' ? 'bg-primary/10 text-primary' : ''}`}><Sticker className="w-5 h-5" /></ChatButton>
+      <ChatButton title="Attach files" disabled={busy} onClick={() => fileInputRef.current?.click()} className="h-10 w-10 shrink-0 sm:h-11 sm:w-11"><Paperclip className="w-5 h-5" /></ChatButton>
       <input ref={fileInputRef} type="file" multiple accept={ATTACHMENT_ACCEPT} className="hidden" onChange={selectFiles} />
-      <textarea ref={textareaRef} rows={1} disabled={busy} aria-label="Message" maxLength={16000} value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) submit(e) }} placeholder="Message…" {...CHAT_INPUT_HINTS} className="chat-textarea flex-1 min-w-0 min-h-11 resize-none rounded-lg bg-muted px-3 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-      <ChatButton type={inputText.trim() ? 'submit' : 'button'} variant="primary" title={busy ? 'Sending message' : inputText.trim() ? 'Send message' : 'Record voice message'} disabled={busy} onClick={!inputText.trim() ? startRecording : undefined} className="w-11 h-11 shrink-0">{busy ? <LoaderCircle className="w-5 h-5 animate-spin" /> : inputText.trim() ? <Send className="w-5 h-5" /> : <Mic className="w-5 h-5" />}</ChatButton>
+      <textarea ref={textareaRef} rows={1} disabled={busy} aria-label="Message" maxLength={16000} value={inputText} onChange={e => updateInput(e.target.value)} onBlur={() => { typingActiveRef.current = false; onTypingChange?.(false) }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) submit(e) }} placeholder="Message…" {...CHAT_INPUT_HINTS} className="chat-textarea flex-1 min-w-0 min-h-10 sm:min-h-11 resize-none rounded-lg bg-muted px-2.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring sm:px-3 sm:py-3" />
+      <ChatButton type={inputText.trim() ? 'submit' : 'button'} variant="primary" title={busy ? 'Sending message' : inputText.trim() ? 'Send message' : 'Record voice message'} disabled={busy} onClick={!inputText.trim() ? startRecording : undefined} className="h-10 w-10 shrink-0 sm:h-11 sm:w-11">{busy ? <LoaderCircle className="w-5 h-5 animate-spin" /> : inputText.trim() ? <Send className="w-5 h-5" /> : <Mic className="w-5 h-5" />}</ChatButton>
     </form>}
     {pendingVoice && <VoiceNoteDialog audioUrl={pendingVoice.url} durationSeconds={pendingVoice.durationSeconds} peaks={pendingVoice.peaks} isSending={busy} error={error} onSend={sendPendingVoice} onDelete={discardPendingVoice} />}
   </div>

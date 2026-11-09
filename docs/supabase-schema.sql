@@ -13,7 +13,7 @@ create policy "Users see own roles" on public.user_roles for select to authentic
 
 create or replace function public.update_updated_at_column() returns trigger language plpgsql set search_path = public as $$ begin new.updated_at = now(); return new; end; $$;
 
-create table public.identity_verifications (id uuid primary key default gen_random_uuid(), user_id uuid not null unique, status text not null default 'pending', match_score numeric, selfie_path text not null, id_document_path text not null, reviewer_note text, reviewed_by uuid, reviewed_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table public.identity_verifications (id uuid primary key default gen_random_uuid(), user_id uuid not null unique, status text not null default 'pending', match_score numeric, selfie_path text, id_document_path text not null, reviewer_note text, reviewed_by uuid, reviewed_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
 grant select, insert, update on public.identity_verifications to authenticated; grant all on public.identity_verifications to service_role;
 alter table public.identity_verifications enable row level security;
 create policy "Own or admin read" on public.identity_verifications for select to authenticated using (user_id = auth.uid() or public.has_role(auth.uid(),'admin'));
@@ -22,10 +22,115 @@ create policy "Resubmit own after rejection" on public.identity_verifications fo
 create policy "Admins review" on public.identity_verifications for update to authenticated using (public.has_role(auth.uid(),'admin')) with check (public.has_role(auth.uid(),'admin'));
 create trigger trg_idv_updated before update on public.identity_verifications for each row execute function public.update_updated_at_column();
 
+-- Idswyft sessions. session_token is encrypted by the server before storage;
+-- OCR metadata is reduced to non-identifying scores, verdicts and field names.
+create table public.kyc_sessions (
+  id uuid primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  session_token text not null,
+  status text not null check (status in (
+    'AWAITING_FRONT', 'AWAITING_BACK', 'AWAITING_LIVE', 'PROCESSING',
+    'APPROVED', 'HARD_REJECTED', 'SOFT_REJECTED', 'LIVENESS_FAILED',
+    'REVIEW_REQUIRED', 'FAILED', 'EXPIRED'
+  )),
+  current_step smallint not null default 1 check (current_step between 1 and 5),
+  ocr_data jsonb check (ocr_data is null or jsonb_typeof(ocr_data) = 'object'),
+  liveness_results jsonb check (liveness_results is null or jsonb_typeof(liveness_results) = 'object'),
+  cross_validation_results jsonb check (cross_validation_results is null or jsonb_typeof(cross_validation_results) = 'object'),
+  rejection_reason text,
+  metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(metadata) = 'object'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index kyc_sessions_user_created_idx on public.kyc_sessions(user_id, created_at desc);
+revoke all on public.kyc_sessions from public, anon, authenticated;
+grant select, insert, update on public.kyc_sessions to authenticated;
+grant all on public.kyc_sessions to service_role;
+alter table public.kyc_sessions enable row level security;
+create policy "Users manage own KYC sessions" on public.kyc_sessions
+  for all to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+create trigger trg_kyc_sessions_updated before update on public.kyc_sessions
+  for each row execute function public.update_updated_at_column();
+
 create table public.storage_files (id uuid primary key default gen_random_uuid(), user_id uuid not null, chat_id text, file_name text not null, file_type text not null, mime_type text, size_bytes bigint not null default 0, duration_seconds numeric, storage_path text not null, created_at timestamptz not null default now());
 grant select, insert, delete on public.storage_files to authenticated; grant all on public.storage_files to service_role;
 alter table public.storage_files enable row level security;
 create policy "Own files" on public.storage_files for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Per-user 10GB storage quota counter and the R2/S3 attachment registry.
+create table public.user_storage (user_id uuid primary key references auth.users(id) on delete cascade, used_bytes bigint not null default 0 check (used_bytes >= 0), max_bytes bigint not null default 10737418240, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+grant select on public.user_storage to authenticated; grant all on public.user_storage to service_role;
+alter table public.user_storage enable row level security;
+create policy "Own storage quota read" on public.user_storage for select to authenticated using (user_id = auth.uid());
+create trigger trg_user_storage_updated before update on public.user_storage for each row execute function public.update_updated_at_column();
+
+create or replace function public.reserve_user_storage(p_user_id uuid, p_file_size bigint) returns boolean language plpgsql security definer set search_path = public as $$
+declare v_limit bigint; v_used bigint;
+begin
+  if p_file_size is null or p_file_size < 0 then raise exception 'INVALID_FILE_SIZE'; end if;
+  insert into public.user_storage (user_id) values (p_user_id) on conflict (user_id) do nothing;
+  select max_bytes, used_bytes into v_limit, v_used from public.user_storage where user_id = p_user_id for update;
+  if v_used + p_file_size > v_limit then raise exception 'STORAGE_QUOTA_EXCEEDED'; end if;
+  return true;
+end $$;
+
+create or replace function public.commit_user_storage(p_user_id uuid, p_file_size bigint) returns bigint language plpgsql security definer set search_path = public as $$
+declare v_limit bigint; v_used bigint;
+begin
+  insert into public.user_storage (user_id) values (p_user_id) on conflict (user_id) do nothing;
+  select max_bytes, used_bytes into v_limit, v_used from public.user_storage where user_id = p_user_id for update;
+  if v_used + p_file_size > v_limit then raise exception 'STORAGE_QUOTA_EXCEEDED'; end if;
+  if v_used + p_file_size < 0 then raise exception 'STORAGE_USAGE_UNDERFLOW'; end if;
+  update public.user_storage set used_bytes = used_bytes + p_file_size, updated_at = now() where user_id = p_user_id returning used_bytes into v_used;
+  return v_used;
+end $$;
+
+create or replace function public.create_user_storage() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.user_storage (user_id) values (new.id) on conflict (user_id) do nothing;
+  return new;
+end $$;
+create trigger on_auth_user_created_storage after insert on auth.users for each row execute function public.create_user_storage();
+
+insert into public.user_storage (user_id) select id from auth.users on conflict (user_id) do nothing;
+
+revoke execute on function public.reserve_user_storage(uuid, bigint) from public, anon;
+grant execute on function public.reserve_user_storage(uuid, bigint) to authenticated, service_role;
+revoke execute on function public.commit_user_storage(uuid, bigint) from public, anon;
+grant execute on function public.commit_user_storage(uuid, bigint) to authenticated, service_role;
+revoke execute on function public.create_user_storage() from public, anon, authenticated;
+
+create table public.attachments (id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade, channel_id text, file_name text not null default '', file_key text unique, storage_type text not null default 'external_bucket' check (storage_type in ('inline_base64', 'external_bucket')), file_data text, mime_type text not null, file_size bigint not null default 0 check (file_size >= 0), created_at timestamptz not null default now(), constraint attachments_payload_check check ((storage_type = 'inline_base64' and file_data is not null and file_key is null) or (storage_type = 'external_bucket' and file_key is not null and file_data is null)));
+create index idx_attachments_user on public.attachments(user_id);
+create index idx_attachments_channel on public.attachments(channel_id);
+grant select, insert, delete on public.attachments to authenticated; grant all on public.attachments to service_role;
+alter table public.attachments enable row level security;
+create policy "Own attachments" on public.attachments for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create table public.call_push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  platform text not null check (platform in ('web', 'android', 'ios')),
+  endpoint text not null,
+  p256dh text,
+  auth text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint call_push_subscription_web_keys check (
+    (platform = 'web' and p256dh is not null and auth is not null)
+    or (platform in ('android', 'ios') and p256dh is null and auth is null)
+  ),
+  constraint call_push_subscription_endpoint_unique unique (platform, endpoint)
+);
+create index call_push_subscriptions_user_id_idx on public.call_push_subscriptions (user_id);
+grant select, insert, update, delete on public.call_push_subscriptions to authenticated;
+grant select, delete on public.call_push_subscriptions to service_role;
+alter table public.call_push_subscriptions enable row level security;
+create policy "Users manage their own call push subscriptions"
+  on public.call_push_subscriptions for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 create or replace function public.get_verification_badge(_user_id uuid) returns text language sql stable security definer set search_path = public as $$
   select case
@@ -37,7 +142,6 @@ grant execute on function public.get_verification_badge(uuid) to anon, authentic
 create policy "ID docs own upload" on storage.objects for insert to authenticated with check (bucket_id='identity-docs' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "ID docs own or admin read" on storage.objects for select to authenticated using (bucket_id='identity-docs' and ((storage.foldername(name))[1] = auth.uid()::text or public.has_role(auth.uid(),'admin')));
 create policy "Chat files own upload" on storage.objects for insert to authenticated with check (bucket_id='chat-files' and (storage.foldername(name))[1] = auth.uid()::text);
-create policy "Chat files signed-in read" on storage.objects for select to authenticated using (bucket_id='chat-files');
 create policy "Chat files own delete" on storage.objects for delete to authenticated using (bucket_id='chat-files' and (storage.foldername(name))[1] = auth.uid()::text);
 -- from 20261012105808_722066b4-005b-47d7-aa9a-df0f18f3aeed.sql
 revoke execute on function public.has_role(uuid, public.app_role) from public, anon;
@@ -191,7 +295,7 @@ create table public.messages (
   sender_id uuid, content text not null check (char_length(content) between 1 and 65535), type text not null default 'text',
   file_url text, file_name text, duration numeric, encrypted boolean not null default false, created_at timestamptz not null default now(),
   constraint messages_text_requires_encryption check (
-    type in ('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document') or (
+    type in ('reaction', 'receipt', 'image', 'video', 'voice', 'file', 'document', 'call') or (
       encrypted is true
       and jsonb_typeof(content::jsonb) = 'object'
       and (content::jsonb - 'alg' - 'iv' - 'data') = '{}'::jsonb
@@ -220,7 +324,61 @@ alter table public.chats enable row level security;
 alter table public.chat_members enable row level security;
 alter table public.messages enable row level security;
 create or replace function public.is_chat_member(_chat uuid, _user uuid) returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.chat_members where chat_id = _chat and profile_id = _user) $$;
+  select _user = (select auth.uid())
+    and exists (select 1 from public.chat_members where chat_id = _chat and profile_id = _user) $$;
+drop policy if exists "Chat files signed-in read" on storage.objects;
+create policy "Chat members read chat files" on storage.objects for select to authenticated
+using (
+  bucket_id = 'chat-files'
+  and (
+    (storage.foldername(name))[1] = (select auth.uid())::text
+    or case
+      when (storage.foldername(name))[2] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        then public.is_chat_member(
+          ((storage.foldername(name))[2])::uuid,
+          (select auth.uid())
+        )
+      else false
+    end
+  )
+);
+create or replace function public.can_read_contact_avatar(_owner_id text, _path text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and exists (
+    select 1 from public.members m
+    where m.id::text = _owner_id
+      and m.avatar_url = 'storage://' || _path
+      and (
+        m.id = auth.uid()
+        or (
+          (
+            exists (select 1 from public.contacts c where c.nexus_id = m.member_id and c.user_id = auth.uid())
+            or exists (select 1 from public.feed_posts p where p.author_id = m.id and p.status = 'active')
+            or exists (
+              select 1 from public.feed_comments fc
+              join public.feed_posts fp on fp.id = fc.post_id
+              where fc.author_id = m.id
+                and (fp.status = 'active' or fp.author_id = auth.uid() or public.has_role(auth.uid(), 'admin'))
+                and (fc.status = 'active' or fc.author_id = auth.uid() or public.has_role(auth.uid(), 'admin'))
+            )
+            or public.has_role(auth.uid(), 'admin')
+          )
+          and not exists (
+            select 1 from public.blocked_users bu
+            where bu.blocker_id = auth.uid() and bu.blocked_id = m.id
+          )
+        )
+      )
+  )
+$$;
+revoke execute on function public.can_read_contact_avatar(text, text) from public, anon;
+grant execute on function public.can_read_contact_avatar(text, text) to authenticated, service_role;
+drop policy if exists "Contacts read active profile photos" on storage.objects;
+create policy "Contacts read active profile photos" on storage.objects for select to authenticated
+using (
+  bucket_id = 'chat-files'
+  and public.can_read_contact_avatar((storage.foldername(name))[1], name)
+);
 create policy "View own chats" on public.chats for select to authenticated using (owner_id = auth.uid() or public.is_chat_member(id, auth.uid()));
 create policy "Create owned chats" on public.chats for insert to authenticated with check (owner_id = auth.uid());
 create policy "Owners update chats" on public.chats for update to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
@@ -477,15 +635,15 @@ grant execute on function public.review_identity_verification(uuid, boolean, tex
 -- APPLIED to production woavhlkgylarngqyvphf ("Nexus Next") on 2026-10-17. See the deployment record at the end of this file.
 -- Dual-tier identity verification.
 --
--- Tier 1 (instant, primary): the app matches the selfie on-device and calls the
---   security-definer RPC below, which records an already-approved row for the
---   caller only. The blue verified badge is shown as soon as this succeeds.
+-- Tier 1 (instant, primary): the member completes an Idswyft KYC session; once the
+--   provider returns APPROVED the server records an approved row for that member.
+--   The blue verified badge is shown as soon as this succeeds.
 -- Tier 2 (manual, secondary): the member completes a structured form and uploads
 --   a government ID plus a selfie; the row stays 'pending' until an admin
 --   approves it through review_identity_verification.
 --
 -- Both tiers resolve to the same blue verified badge. Email confirmation never
--- grants any badge, and only this RPC (not the browser) can self-approve.
+-- grants any badge, and only the server (never the browser) can self-approve.
 alter table public.identity_verifications
   add column if not exists tier text,
   add column if not exists full_legal_name text,
@@ -505,29 +663,37 @@ do $$ begin
     add constraint identity_verifications_tier_check check (tier in ('instant', 'manual'));
 exception when duplicate_object then null; end $$;
 
--- Instant automated verification. security definer so the member cannot mark
--- arbitrary rows approved: the function only ever writes the caller's own row.
-create or replace function public.submit_instant_identity_verification(_selfie_path text, _match_score numeric default null)
+-- 20261108090000_gate_instant_kyc_approval.sql
+-- Instant approvals are granted only from a server-verified Idswyft KYC session.
+-- The execute privilege is revoked from every browser role, so the browser can
+-- never self-approve: only the server (the webhook or the status poll, acting as
+-- service_role) can call this, and it approves exactly the member that owns the
+-- APPROVED session. The local selfie path is optional because the provider holds
+-- the verification media.
+create or replace function public.approve_identity_from_kyc(_session_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
+declare _user_id uuid;
 begin
-  if auth.uid() is null then raise exception 'Sign in to verify your identity'; end if;
-  if coalesce(trim(_selfie_path), '') = '' then raise exception 'A selfie is required for instant verification'; end if;
+  if _session_id is null then raise exception 'A verification session is required'; end if;
+  select user_id into _user_id
+    from public.kyc_sessions
+   where id = _session_id and status = 'APPROVED';
+  if _user_id is null then raise exception 'No approved verification session was found'; end if;
 
-  insert into public.identity_verifications (user_id, status, tier, match_score, selfie_path, id_document_path, reviewed_at)
-  values (auth.uid(), 'approved', 'instant', _match_score, _selfie_path, null, now())
+  insert into public.identity_verifications
+    (user_id, status, tier, match_score, selfie_path, id_document_path, reviewer_note, reviewed_by, reviewed_at)
+  values (_user_id, 'approved', 'instant', null, null, null, null, null, now())
   on conflict (user_id) do update
     set status = 'approved',
         tier = 'instant',
-        match_score = excluded.match_score,
-        selfie_path = excluded.selfie_path,
+        selfie_path = null,
         id_document_path = null,
         reviewer_note = null,
         reviewed_by = null,
-        reviewed_at = now(),
-        updated_at = now();
+        reviewed_at = now();
 end $$;
-revoke execute on function public.submit_instant_identity_verification(text, numeric) from public, anon;
-grant execute on function public.submit_instant_identity_verification(text, numeric) to authenticated, service_role;
+revoke execute on function public.approve_identity_from_kyc(uuid) from public, anon, authenticated;
+grant execute on function public.approve_identity_from_kyc(uuid) to service_role;
 
 -- 20261017040000_social_feed.sql
 -- APPLIED to production woavhlkgylarngqyvphf ("Nexus Next") on 2026-10-17. See the deployment record at the end of this file.
@@ -538,10 +704,18 @@ create table if not exists public.feed_posts (
   author_id uuid not null,
   content text not null default '' check (char_length(content) <= 5000),
   media jsonb not null default '[]'::jsonb,
+  post_type text not null default 'general' check (post_type in ('general', 'event')),
+  title text check (title is null or char_length(title) <= 160),
+  event_starts_at timestamptz,
+  event_location text check (event_location is null or char_length(event_location) <= 240),
   is_admin_post boolean not null default false,
   status text not null default 'active' check (status in ('active', 'hidden', 'removed')),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint feed_posts_event_metadata_check check (
+    (post_type = 'event' and nullif(trim(title), '') is not null and event_starts_at is not null)
+    or (post_type = 'general' and event_starts_at is null and event_location is null)
+  )
 );
 create index if not exists idx_feed_posts_created on public.feed_posts(created_at desc);
 create index if not exists idx_feed_posts_author on public.feed_posts(author_id);
@@ -703,10 +877,8 @@ grant execute on function public.set_my_e2ee_status(boolean, boolean) to authent
 -- Verified  Automated read-only checks against the live database: 74 of 77 passed.
 --           - identity_verifications gained tier, full_legal_name, date_of_birth,
 --             document_type, document_number, issuing_country (all nullable);
---             id_document_path is now nullable; identity_verifications_tier_check
---             enforces tier in ('instant','manual'); submit_instant_identity_verification
---             (text, numeric) is SECURITY DEFINER with search_path pinned, and is
---             executable by authenticated and service_role but not by anon.
+--             id_document_path is nullable for legacy rows. A later safety
+--             migration disables selfie-only approvals and limits tier to manual review.
 --           - feed_posts, feed_comments, feed_reactions and feed_comment_reactions
 --             created with RLS enabled, 12 policies, 4 indexes, 2 updated_at
 --             triggers, 4 ON DELETE CASCADE foreign keys, grants for

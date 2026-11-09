@@ -1,0 +1,56 @@
+- generic [ref=e74]:
+  - banner [ref=e75]:
+    - generic [ref=e76]:
+      - img "Nexus logo" [ref=e79]
+      - generic [ref=e80]:
+        - heading "Nexus Chat" [level=1] [ref=e81]
+        - paragraph [ref=e82]: Privacy-first encrypted messaging
+    - generic [ref=e102]:
+      - button "Toggle theme" [ref=e103] [cursor=pointer]
+      - button "CT" [ref=e107] [cursor=pointer]
+  - generic [ref=e138]:
+    - generic [ref=e140]:
+      - generic [ref=e141]:
+        - heading "Contacts" [level=2] [ref=e142]
+        - paragraph [ref=e146]: Your existing secure contacts on Nexus Network
+      - button "Add Contact" [ref=e147] [cursor=pointer]
+    - generic [ref=e151]:
+      - paragraph [ref=e156]: No contacts yet
+      - paragraph [ref=e157]: Add contacts to start messaging
+    - generic [ref=e197]:
+      - generic [ref=e198]:
+        - heading "Add New Contact" [level=3] [ref=e199]
+        - button [ref=e200] [cursor=pointer]
+      - generic [ref=e203]:
+        - generic [ref=e204]:
+          - generic [ref=e205]: Nexus ID
+          - textbox "10-XXXX-XXXX" [ref=e206]: 10-7991-8751
+          - paragraph [ref=e207]: Enter the 10-digit Nexus ID (e.g., 1012345678)
+          - generic [ref=e211]:
+            - generic [ref=e212]:
+              - generic [ref=e213]: SD
+              - generic [ref=e215]:
+                - paragraph [ref=e216]:
+                  - generic [ref=e217]: Start Daeryt
+                - paragraph [ref=e218]: 10-7991-8751
+            - generic [ref=e219]:
+              - button "Message" [active] [ref=e220] [cursor=pointer]
+              - button "Call" [ref=e223] [cursor=pointer]
+              - button "Save" [ref=e226] [cursor=pointer]
+        - generic [ref=e208]:
+          - button "Cancel" [ref=e209] [cursor=pointer]
+          - button "Add Contact" [ref=e210] [cursor=pointer]
+    - alertdialog [ref=e231]:
+      - generic [ref=e232]:
+        - generic [ref=e236]:
+          - heading "Save this contact before you message?" [level=3] [ref=e237]
+          - paragraph [ref=e238]: Start Daeryt is not in your contacts yet. Saving them first keeps their identity on record and lets you reach them again in an emergency. You can still continue without saving.
+        - button "Close" [ref=e239] [cursor=pointer]
+      - generic [ref=e242]:
+        - button "Ignore" [ref=e243] [cursor=pointer]
+        - button "Save First" [ref=e244] [cursor=pointer]
+  - generic [ref=e175]:
+    - button "Chats" [ref=e176] [cursor=pointer]
+    - button "Feeds" [ref=e181] [cursor=pointer]
+    - button "Contacts" [ref=e185] [cursor=pointer]
+    - button "Settings" [ref=e190] [cursor=pointer]

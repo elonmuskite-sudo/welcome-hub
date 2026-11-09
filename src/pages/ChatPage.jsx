@@ -2,7 +2,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import ChatView from '../components/chat/ChatView'
 import { SyncSpinner } from '../components/SyncIndicator'
-import { getChatById } from '../lib/persistence'
+import { getCachedChatById, getChatById } from '../lib/persistence'
 import { useAuth } from '../lib/AuthContext'
 
 export default function ChatPage() {
@@ -13,6 +13,7 @@ export default function ChatPage() {
   const [chat, setChat] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [cacheWarning, setCacheWarning] = useState(false)
   // Capture once: the lookup "Call" action navigates here with a transient flag
   // that should start the call a single time and must not replay on history nav.
   const [autoStartCall] = useState(() => Boolean(location.state?.autoStartCall))
@@ -36,22 +37,42 @@ export default function ChatPage() {
         const nextChat = await getChatById(chatId, user?.id)
         if (active && currentRequest === requestId) {
           setChat(nextChat)
+          setCacheWarning(false)
           setLoading(false)
         }
       } catch (err) {
         if (active && currentRequest === requestId) {
-          setError(err.message)
+          const cachedChat = getCachedChatById(chatId, user?.id)
+          if (cachedChat) {
+            setChat(cachedChat)
+            setCacheWarning(true)
+            setError(null)
+          } else {
+            setError(err.message)
+          }
           setLoading(false)
         }
       }
     }
-    setChat(null)
-    syncChat(true)
+    const cachedChat = getCachedChatById(chatId, user?.id)
+    setChat(cachedChat)
+    setCacheWarning(false)
+    setLoading(!cachedChat)
+    void syncChat(!cachedChat)
 
     // Bursts of updates (one sync tick can change several threads) collapse into
     // a single refetch instead of one full chat load per notification.
     let pending = null
-    const handleUpdate = () => {
+    const handleUpdate = (event) => {
+      if (event.detail?.cacheUpdated) {
+        const cachedChat = getCachedChatById(chatId, user?.id)
+        if (cachedChat) {
+          setChat(cachedChat)
+          setCacheWarning(false)
+          setError(null)
+        }
+        return
+      }
       if (pending) return
       pending = window.setTimeout(() => { pending = null; void syncChat() }, 150)
     }
@@ -103,6 +124,7 @@ export default function ChatPage() {
     <ChatView
       key={chat.id}
       chat={chat}
+      cacheWarning={cacheWarning}
       autoStartCall={autoStartCall}
       onBack={() => navigate('/app')}
     />

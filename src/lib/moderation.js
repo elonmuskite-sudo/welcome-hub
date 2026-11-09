@@ -4,6 +4,7 @@
 // policies.
 
 import { supabase, isSupabaseConfigured } from './supabase'
+import { isAppwriteAuthEnabled } from './appwrite.js'
 
 export const REPORT_REASONS = [
   { value: 'spam', label: 'Spam or scam' },
@@ -25,7 +26,7 @@ function requireModeration() {
   if (!supabase) throw new Error('Reporting and blocking are unavailable because the database is not connected.')
 }
 
-async function memberProfiles(ids) {
+async function memberProfiles(ids, { throwOnError = false } = {}) {
   const unique = [...new Set((ids || []).filter(Boolean).map(String))]
   const map = new Map()
   if (!unique.length) return map
@@ -33,7 +34,10 @@ async function memberProfiles(ids) {
   // column is `member_id`; the resolver RPC returns directory fields for any
   // member so blocked accounts and report authors resolve to real names.
   const { data, error } = await supabase.rpc('list_member_profiles', { p_ids: unique })
-  if (error) return map
+  if (error) {
+    if (throwOnError) throw new Error(error.message || 'Could not load member details.')
+    return map
+  }
   for (const row of data || []) {
     map.set(String(row.id), {
       name: row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Nexus member',
@@ -42,6 +46,13 @@ async function memberProfiles(ids) {
     })
   }
   return map
+}
+
+export async function getPublicMemberProfile(userId) {
+  if (isAppwriteAuthEnabled()) throw new Error('Public member details are not available with Appwrite sign-in yet.')
+  requireModeration()
+  const profiles = await memberProfiles([userId], { throwOnError: true })
+  return profiles.get(String(userId)) || null
 }
 
 // ---- Reporting -----------------------------------------------------------

@@ -3,11 +3,19 @@
   "installCommand": "npm install --legacy-peer-deps",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "routes": [
-    {      "handle": "filesystem"
+  "rewrites": [
+    { "source": "/api/kyc/init", "destination": "/api/kyc?action=init" },
+    { "source": "/api/kyc/initialize", "destination": "/api/kyc?action=initialize" },
+    { "source": "/api/kyc/upload", "destination": "/api/kyc?action=upload" },
+    { "source": "/api/kyc/status", "destination": "/api/kyc?action=status" },
+    { "source": "/api/webhooks/idswyft", "destination": "/api/kyc?action=webhook" },
+    { "source": "/api/calls/notify", "destination": "/api/calls?action=notify" },
+    { "source": "/api/calls/push-subscription", "destination": "/api/calls?action=push-subscription" },
+    { "source": "/api/storage/:action",
+      "destination": "/api/storage"
     },
-    {      "src": "/(.*)",
-      "dest": "/index.html"
+    { "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }

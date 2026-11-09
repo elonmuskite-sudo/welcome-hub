@@ -82,7 +82,7 @@ test('a new inbound message refreshes the contact-list preview immediately', asy
 test('simultaneous arrivals from several contacts each land on their own row', () => {
   const chats = seed([0, 1, 2, 3].map((index) => seedChat(`chat-${index}`, `peer-${index}`)))
 
-  const { chats: next } = applyChatSyncBatch(chats, [
+  const { chats: next, notifications } = applyChatSyncBatch(chats, [
     row('chat-2', 'peer-2', 'from two', at(4)),
     row('chat-0', 'peer-0', 'from zero', at(3)),
     row('chat-3', 'peer-3', 'from three', at(2)),
@@ -93,6 +93,9 @@ test('simultaneous arrivals from several contacts each land on their own row', (
     next.map((chat) => chatListPreview(chat, ME, NOW).snippet),
     ['from zero', 'from one', 'from two', 'from three'],
   )
+  assert.deepEqual(notifications.map((notification) => notification.chatId), [
+    'chat-2', 'chat-0', 'chat-3', 'chat-1',
+  ])
 })
 
 test('a batch that arrives out of order still settles on the newest message', () => {

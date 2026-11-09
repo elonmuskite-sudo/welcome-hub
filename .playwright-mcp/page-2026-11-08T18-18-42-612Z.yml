@@ -1,0 +1,39 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - img "Nexus logo" [ref=e8]
+      - generic [ref=e9]:
+        - heading "Nexus Chat" [level=1] [ref=e10]
+        - paragraph [ref=e11]: Privacy-first encrypted messaging
+    - generic [ref=e12]:
+      - button "Toggle theme" [ref=e13] [cursor=pointer]
+      - link "Sign in" [ref=e16] [cursor=pointer]:
+        - /url: /login
+  - main [ref=e17]:
+    - generic [ref=e18]:
+      - heading "Create your secure Nexus account" [level=2] [ref=e19]
+      - paragraph [ref=e20]: Register with your email address. We’ll email a one-time code to verify your account.
+    - generic [ref=e22]:
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - generic [ref=e25]: Email address
+          - textbox "Email address" [ref=e26]:
+            - /placeholder: you@example.com
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - generic [ref=e29]: First name
+            - textbox "Ava" [ref=e30]
+          - generic [ref=e31]:
+            - generic [ref=e32]: Last name
+            - textbox "Stone" [ref=e33]
+        - generic [ref=e34]:
+          - generic [ref=e35]: Password
+          - generic [ref=e36]:
+            - textbox "Password" [ref=e37]:
+              - /placeholder: Your password
+            - button "Show password" [ref=e38] [cursor=pointer]
+        - button "Create account" [ref=e42] [cursor=pointer]
+      - paragraph [ref=e43]:
+        - text: Already a member?
+        - link "Sign in" [ref=e44] [cursor=pointer]:
+          - /url: /login

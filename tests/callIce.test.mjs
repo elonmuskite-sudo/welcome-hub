@@ -14,7 +14,10 @@ test('a comma-separated STUN override replaces the defaults', () => {
 })
 
 test('TURN is only added when a relay URL is configured', () => {
-  assert.equal(buildIceServers({ VITE_TURN_USERNAME: 'user', VITE_TURN_CREDENTIAL: 'secret' }).iceServers.length, 1)
+  assert.throws(
+    () => buildIceServers({ VITE_TURN_USERNAME: 'user', VITE_TURN_CREDENTIAL: 'secret' }),
+    /require VITE_TURN_URL/,
+  )
 
   const { iceServers } = buildIceServers({
     VITE_TURN_URL: 'turn:relay.example:3478?transport=udp,turns:relay.example:5349',
@@ -30,7 +33,24 @@ test('TURN is only added when a relay URL is configured', () => {
   assert.equal(iceServers[1].credential, 'secret')
 })
 
-test('a credential-free TURN relay omits the auth fields', () => {
-  const { iceServers } = buildIceServers({ VITE_TURN_URL: 'turn:open.example:3478' })
-  assert.deepEqual(iceServers[1], { urls: ['turn:open.example:3478'] })
+test('TURN relay URLs require provider-issued credentials', () => {
+  assert.throws(
+    () => buildIceServers({ VITE_TURN_URL: 'turn:relay.example:3478' }),
+    /require both VITE_TURN_USERNAME and VITE_TURN_CREDENTIAL/,
+  )
+})
+
+test('TURN URLs and credentials must be complete and use supported URL schemes', () => {
+  assert.throws(
+    () => buildIceServers({ VITE_TURN_USERNAME: 'user', VITE_TURN_CREDENTIAL: 'secret' }),
+    /require VITE_TURN_URL/,
+  )
+  assert.throws(
+    () => buildIceServers({ VITE_TURN_URL: 'https://relay.example', VITE_TURN_USERNAME: 'user', VITE_TURN_CREDENTIAL: 'secret' }),
+    /only turn: or turns: URLs/,
+  )
+  assert.throws(
+    () => buildIceServers({ VITE_TURN_URL: 'turn:relay.example', VITE_TURN_USERNAME: 'user' }),
+    /must be set together/,
+  )
 })

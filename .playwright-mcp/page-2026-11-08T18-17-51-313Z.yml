@@ -1,0 +1,25 @@
+- generic [ref=e45]:
+  - banner [ref=e46]:
+    - generic [ref=e47]:
+      - img "Nexus logo" [ref=e50]
+      - generic [ref=e51]:
+        - heading "Nexus Chat" [level=1] [ref=e52]
+        - paragraph [ref=e53]: Privacy-first encrypted messaging
+    - generic [ref=e54]:
+      - button "Toggle theme" [ref=e55] [cursor=pointer]
+      - link "Sign in" [ref=e58] [cursor=pointer]:
+        - /url: /login
+  - main [ref=e59]:
+    - generic [ref=e60]:
+      - heading "Verify your email" [level=2] [ref=e61]
+      - paragraph [ref=e62]: Enter the verification code sent to dusima1378@temptami.com.
+    - generic [ref=e64]:
+      - generic [ref=e65]:
+        - generic [ref=e66]:
+          - generic [ref=e67]: Verification code
+          - textbox "Verification code" [active] [ref=e68]
+          - paragraph [ref=e69]: Codes are valid for a limited time.
+        - button "Verify email" [disabled] [ref=e70]
+      - generic [ref=e71]:
+        - generic [ref=e72]: Didn’t receive the code?
+        - button "Resend code" [ref=e73] [cursor=pointer]

@@ -1,0 +1,46 @@
+- generic [ref=e119]:
+  - banner [ref=e120]:
+    - generic [ref=e121]:
+      - img "Nexus logo" [ref=e124]
+      - generic [ref=e125]:
+        - heading "Nexus Chat" [level=1] [ref=e126]
+        - paragraph [ref=e127]: Privacy-first encrypted messaging
+    - generic [ref=e147]:
+      - button "Toggle theme" [ref=e148] [cursor=pointer]
+      - button "SD" [ref=e152] [cursor=pointer]
+  - generic [ref=e405]:
+    - button "Back to Settings" [ref=e406] [cursor=pointer]
+    - heading "Profile" [level=2] [ref=e409]
+    - generic [ref=e410]:
+      - generic [ref=e411]:
+        - generic [ref=e412] [cursor=pointer]: SD
+        - button "Change Profile Photo" [ref=e419] [cursor=pointer]
+      - generic [ref=e420]:
+        - text: Your Nexus ID (Unique Member ID)
+        - generic [ref=e421]:
+          - generic [ref=e422]: 10-7991-8751
+          - button "Copy Nexus ID" [ref=e423] [cursor=pointer]
+        - paragraph [ref=e427]: Provide this secure Nexus number to contacts so they can add and message you end-to-end encrypted.
+      - generic [ref=e428]:
+        - generic [ref=e429]:
+          - generic [ref=e430]:
+            - text: First Name
+            - textbox [ref=e431]: Start
+          - generic [ref=e432]:
+            - text: Last Name
+            - textbox [ref=e433]: Daeryt
+        - generic [ref=e434]:
+          - generic [ref=e435]:
+            - text: Interests
+            - textbox "Type an interest and press Enter" [ref=e436]
+          - generic [ref=e437]:
+            - text: Bio
+            - textbox "Write a rough bio — a few words is fine" [ref=e438]
+            - button "Polish with AI" [ref=e439] [cursor=pointer]
+            - paragraph [ref=e442]: You can edit the result before saving.
+        - button "Save Changes" [ref=e443] [cursor=pointer]
+  - generic [ref=e384]:
+    - button "Chats" [ref=e385] [cursor=pointer]
+    - button "Feeds" [ref=e390] [cursor=pointer]
+    - button "Contacts" [ref=e394] [cursor=pointer]
+    - button "Settings" [ref=e399] [cursor=pointer]

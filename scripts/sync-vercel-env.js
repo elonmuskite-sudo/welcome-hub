@@ -2,11 +2,15 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { getPartialOptionalEnvGroups } from './optional-env-groups.js'
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const runtimeConfigPath = path.join(rootDir, '.vercel-runtime-env.json')
 const linkedProjectPath = path.join(rootDir, '.vercel', 'project.json')
 const dryRun = process.argv.includes('--dry-run')
+const onlyMissing = process.argv.includes('--only-missing')
+const keysArgument = process.argv.find((argument) => argument.startsWith('--keys='))
+const targetArgument = process.argv.find((argument) => argument.startsWith('--target='))
 const localEnvPath = path.join(rootDir, '.env.local')
 
 // Vercel credentials may live in the gitignored .env.local so they survive
@@ -45,6 +49,21 @@ const OPTIONAL_ENV_KEYS = [
   'SUPABASE_POOLER_URL',
 ]
 
+const OPTIONAL_SERVER_KEYS = [
+  'IDSWYFT_API_URL',
+  'IDSWYFT_API_KEY',
+  'IDSWYFT_WEBHOOK_SECRET',
+  'IDSWYFT_SESSION_ENCRYPTION_KEY',
+  'IDSWYFT_INIT_PATH',
+  'IDSWYFT_STATUS_PATH',
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_AUTH_TOKEN',
+  'TWILIO_MESSAGING_SERVICE_SID',
+  'FILE_SCAN_API_URL',
+  'FILE_SCAN_API_KEY',
+  'FIREBASE_SERVICE_ACCOUNT_JSON',
+]
+
 // Voice-call ICE config. These are browser-safe (they ship in the bundle) and
 // optional, so they are only synced when a real value is present.
 const OPTIONAL_PUBLIC_KEYS = [
@@ -54,7 +73,29 @@ const OPTIONAL_PUBLIC_KEYS = [
   'VITE_TURN_CREDENTIAL',
 ]
 
-const PUBLIC_KEYS = new Set([
+// Object storage (Cloudflare R2 / S3-compatible). The credentials are
+// server-only and the base URL is browser-safe, so the set is optional and is
+// only synced once real values exist. Without them the storage API reports 503
+// and uploads fall back to Supabase.
+const OPTIONAL_R2_KEYS = [
+  'R2_BUCKET_NAME',
+  'R2_ACCOUNT_ID',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+  'VITE_R2_PUBLIC_BASE_URL',
+]
+
+// Background call alerts (Web Push). The public key ships to the browser in the
+// bundle, the private key is a server-only secret, and the subject is a contact
+// URL. Optional: without them the app reports that web push is not configured.
+const OPTIONAL_WEB_PUSH_KEYS = [
+  'VITE_WEB_PUSH_PUBLIC_KEY',
+  'WEB_PUSH_VAPID_PUBLIC_KEY',
+  'WEB_PUSH_VAPID_PRIVATE_KEY',
+  'WEB_PUSH_VAPID_SUBJECT',
+]
+
+export const PUBLIC_KEYS = new Set([
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_ANON_KEY',
   'VITE_AUTH_PROVIDER',
@@ -66,6 +107,14 @@ const PUBLIC_KEYS = new Set([
   'APPWRITE_PROJECT_ID',
   'RESEND_FROM',
   ...OPTIONAL_PUBLIC_KEYS,
+  // Only the public base URL is browser-safe; the R2 credentials must stay
+  // encrypted on Vercel.
+  'VITE_R2_PUBLIC_BASE_URL',
+  // The VAPID public key and subject are not secrets; the private key must stay
+  // encrypted on Vercel.
+  'VITE_WEB_PUSH_PUBLIC_KEY',
+  'WEB_PUSH_VAPID_PUBLIC_KEY',
+  'WEB_PUSH_VAPID_SUBJECT',
 ])
 
 const LEGACY_PUBLIC_SECRETS = ['VITE_ADMIN_PASSWORD']
@@ -106,8 +155,7 @@ function invalidValue(value) {
   return !normalized || PLACEHOLDER_HINTS.some((hint) => normalized.includes(hint))
 }
 
-function loadValues() {
-  const config = loadJson(runtimeConfigPath, 'Generated runtime environment')
+export function buildSyncedValues(config) {
   const provider = String(config.VITE_AUTH_PROVIDER || 'supabase').trim().toLowerCase()
   if (!['supabase', 'appwrite'].includes(provider)) {
     throw new Error('VITE_AUTH_PROVIDER must be either supabase or appwrite.')
@@ -122,16 +170,63 @@ function loadValues() {
   if (missing.length) {
     throw new Error(`Missing or placeholder values in generated environment: ${missing.join(', ')}`)
   }
+  if (String(config.ADMIN_SESSION_SECRET).trim().length < 32) {
+    throw new Error('ADMIN_SESSION_SECRET must be at least 32 characters.')
+  }
+  const partialGroups = getPartialOptionalEnvGroups(config, invalidValue)
+  if (partialGroups.length) {
+    const details = partialGroups
+      .map((group) => `${group.name}: ${group.missingKeys.join(', ')}`)
+      .join('; ')
+    throw new Error(`Configure each optional integration completely or leave it disabled. Missing values: ${details}`)
+  }
+  const optionalServer = Object.fromEntries(
+    OPTIONAL_SERVER_KEYS
+      .filter((key) => !invalidValue(config[key]))
+      .map((key) => [key, String(config[key])])
+  )
   const optionalPublic = Object.fromEntries(
     OPTIONAL_PUBLIC_KEYS
+      .filter((key) => !invalidValue(config[key]))
+      .map((key) => [key, String(config[key])])
+  )
+  const optionalR2 = Object.fromEntries(
+    OPTIONAL_R2_KEYS
+      .filter((key) => !invalidValue(config[key]))
+      .map((key) => [key, String(config[key])])
+  )
+  const optionalWebPush = Object.fromEntries(
+    OPTIONAL_WEB_PUSH_KEYS
       .filter((key) => !invalidValue(config[key]))
       .map((key) => [key, String(config[key])])
   )
   return {
     ...Object.fromEntries(requiredKeys.map((key) => [key, String(config[key])])),
     ...optionalPublic,
+    ...optionalR2,
+    ...optionalWebPush,
+    ...optionalServer,
     VITE_AUTH_PROVIDER: provider,
   }
+}
+
+export function selectSyncedValues(values, keys) {
+  if (!keys?.length) return values
+  const unknown = keys.filter((key) => !Object.hasOwn(values, key))
+  if (unknown.length) throw new Error(`Requested environment keys are unavailable: ${unknown.join(', ')}`)
+  return Object.fromEntries(keys.map((key) => [key, values[key]]))
+}
+
+export function parseVercelTarget(target) {
+  const selected = target || 'production'
+  if (!['production', 'preview'].includes(selected)) {
+    throw new Error('Vercel target must be production or preview.')
+  }
+  return selected
+}
+
+function loadValues() {
+  return buildSyncedValues(loadJson(runtimeConfigPath, 'Generated runtime environment'))
 }
 
 async function request(pathname, { method = 'GET', body } = {}) {
@@ -164,38 +259,41 @@ async function request(pathname, { method = 'GET', body } = {}) {
   return result
 }
 
-function getProductionMatch(envs, key) {
-  const matches = envs.filter((item) => item.key === key && item.target?.includes('production'))
-  if (matches.length > 1) throw new Error(`Multiple Production variables exist for ${key}; resolve duplicates in Vercel first.`)
+function getTargetMatch(envs, key, target) {
+  const matches = envs.filter((item) =>
+    item.key === key && item.target?.includes(target) && !item.gitBranch
+  )
+  const targetName = target === 'production' ? 'Production' : 'Preview'
+  if (matches.length > 1) throw new Error(`Multiple ${targetName} variables exist for ${key}; resolve duplicates in Vercel first.`)
   if (!matches.length) return null
 
   const targets = [...(matches[0].target || [])].sort()
-  if (targets.length !== 1 || targets[0] !== 'production') {
-    throw new Error(`${key} is shared with other Vercel targets; make it Production-only before syncing.`)
+  if (targets.length !== 1 || targets[0] !== target) {
+    throw new Error(`${key} is shared with other Vercel targets; make it ${targetName}-only before syncing.`)
   }
   return matches[0]
 }
 
-async function upsertProductionVariables(values, projectId, envs) {
+async function upsertTargetVariables(values, projectId, envs, target) {
   const projectPath = `/v10/projects/${encodeURIComponent(projectId)}/env`
   for (const key of Object.keys(values)) {
     const variable = {
       value: values[key],
       type: PUBLIC_KEYS.has(key) ? 'plain' : 'encrypted',
-      target: ['production'],
+      target: [target],
     }
-    const existing = getProductionMatch(envs, key)
+    const existing = getTargetMatch(envs, key, target)
 
     if (existing) {
       try {
         await request(`/v9/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(existing.id)}`, {
           method: 'PATCH',
-          body: { value: values[key], target: ['production'] },
+          body: { value: values[key], target: [target] },
         })
       } catch (error) {
         throw new Error(`Failed to update ${key}: ${error.message}`)
       }
-      console.log(`[vercel-env] Updated ${key} (production)`)
+      console.log(`[vercel-env] Updated ${key} (${target})`)
     } else {
       let created
       try {
@@ -207,7 +305,7 @@ async function upsertProductionVariables(values, projectId, envs) {
         throw new Error(`Failed to create ${key}: ${error.message}`)
       }
       if (created.id) envs.push({ key, ...variable, id: created.id })
-      console.log(`[vercel-env] Added ${key} (production)`)
+      console.log(`[vercel-env] Added ${key} (${target})`)
     }
   }
 }
@@ -226,7 +324,17 @@ let token = ''
 let teamId = ''
 
 async function main() {
-  const values = loadValues()
+  if (onlyMissing && !keysArgument) {
+    throw new Error('--only-missing requires an explicit --keys=KEY1,KEY2 allowlist.')
+  }
+  const requestedKeys = keysArgument
+    ? [...new Set(keysArgument.slice('--keys='.length).split(',').map((key) => key.trim()).filter(Boolean))]
+    : null
+  if (keysArgument && !requestedKeys.length) {
+    throw new Error('--keys must include at least one environment variable name.')
+  }
+  const target = parseVercelTarget(targetArgument?.slice('--target='.length))
+  let values = selectSyncedValues(loadValues(), requestedKeys)
   for (const key of Object.keys(values)) console.log(`[vercel-env] ${key}: ready`)
 
   if (dryRun) {
@@ -253,12 +361,20 @@ async function main() {
   const response = await request(`/v9/projects/${projectId}/env?limit=100`)
   const envs = Array.isArray(response.envs) ? response.envs : []
 
-  await upsertProductionVariables(values, projectConfig.projectId, envs)
-  await removeLegacyPublicSecrets(projectConfig.projectId, envs)
-  console.log('[vercel-env] Production environment sync complete.')
+  if (onlyMissing) {
+    const alreadyConfigured = Object.keys(values).filter((key) => getTargetMatch(envs, key, target))
+    for (const key of alreadyConfigured) console.log(`[vercel-env] Skipped ${key} (already configured for ${target})`)
+    values = Object.fromEntries(Object.entries(values).filter(([key]) => !alreadyConfigured.includes(key)))
+  }
+
+  await upsertTargetVariables(values, projectConfig.projectId, envs, target)
+  if (!requestedKeys) await removeLegacyPublicSecrets(projectConfig.projectId, envs)
+  console.log(`[vercel-env] ${target} environment sync complete.`)
 }
 
-main().catch((error) => {
-  console.error(`[vercel-env] ${error.message}`)
-  process.exitCode = 1
-})
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(`[vercel-env] ${error.message}`)
+    process.exitCode = 1
+  })
+}

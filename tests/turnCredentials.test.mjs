@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { buildValues, toList } from '../scripts/fetch-turn-credentials.js'
 
 // Shape returned by Metered's Open Relay credentials endpoint.
@@ -43,4 +44,10 @@ test('a response without a usable TURN credential is rejected', () => {
   assert.throws(() => buildValues('nope'), /iceServers/)
   assert.throws(() => buildValues([{ urls: 'stun:stun.relay:80' }]), /TURN entry/)
   assert.throws(() => buildValues([{ urls: 'turn:relay:80', username: 'u' }]), /TURN entry/)
+})
+
+test('TURN credential helper never reads the root .env file or prints credentials by default', () => {
+  const helper = fs.readFileSync(new URL('../scripts/fetch-turn-credentials.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(helper, /for \(const file of \['\.env\.local', '\.env'\]\)/)
+  assert.match(helper, /Rerun with --write to save relay credentials/)
 })

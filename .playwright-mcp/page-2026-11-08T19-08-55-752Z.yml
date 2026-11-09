@@ -1,0 +1,39 @@
+- generic [ref=e74]:
+  - banner [ref=e75]:
+    - generic [ref=e76]:
+      - img "Nexus logo" [ref=e79]
+      - generic [ref=e80]:
+        - heading "Nexus Chat" [level=1] [ref=e81]
+        - paragraph [ref=e82]: Privacy-first encrypted messaging
+    - generic [ref=e102]:
+      - button "Toggle theme" [ref=e103] [cursor=pointer]
+      - button "CT" [ref=e107] [cursor=pointer]
+  - generic [ref=e261]:
+    - generic [ref=e262]:
+      - generic [ref=e263]:
+        - button "Back to chats" [ref=e264] [cursor=pointer]
+        - button "Open contact profile" [ref=e267] [cursor=pointer]:
+          - generic [ref=e268]: SD
+          - generic [ref=e271]:
+            - generic [ref=e272]: Start Daeryt
+            - generic [ref=e274]: Private conversation
+      - generic [ref=e275]:
+        - button "Search conversation" [ref=e276] [cursor=pointer]
+        - button "Start call" [ref=e280] [cursor=pointer]
+        - button "Start video call" [ref=e283] [cursor=pointer]
+    - generic [ref=e294]:
+      - paragraph [ref=e297]: No messages yet
+      - paragraph [ref=e298]: Start a conversation
+    - generic [ref=e300]:
+      - button "Emoji" [disabled] [ref=e301]
+      - button "Stickers" [disabled] [ref=e305]
+      - button "Attach files" [disabled] [ref=e310]
+      - textbox "Message" [disabled] [ref=e314]:
+        - /placeholder: Message…
+        - text: Call test - can you receive this?
+      - button "Sending message" [disabled] [ref=e323]
+  - generic [ref=e175]:
+    - button "Chats" [ref=e176] [cursor=pointer]
+    - button "Feeds" [ref=e181] [cursor=pointer]
+    - button "Contacts" [ref=e185] [cursor=pointer]
+    - button "Settings" [ref=e190] [cursor=pointer]

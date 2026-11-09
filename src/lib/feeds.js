@@ -18,7 +18,7 @@ export { formatTimeAgo, formatExactTime } from './relativeTime'
 import { withSync } from './syncStatus'
 import { getBlockedUserIds } from './moderation'
 
-const POST_COLUMNS = 'id, author_id, content, media, is_admin_post, status, created_at, updated_at'
+const POST_COLUMNS = 'id, author_id, content, media, post_type, title, event_starts_at, event_location, is_admin_post, status, created_at, updated_at'
 const COMMENT_COLUMNS = 'id, post_id, author_id, parent_id, content, status, created_at, updated_at'
 
 export const FEED_REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉', '🔥']
@@ -52,10 +52,6 @@ async function viewerIsAdmin(userId) {
   }
   adminLookup = { userId, isAdmin, checkedAt: now }
   return isAdmin
-}
-
-function toTime(value) {
-  return value || new Date().toISOString()
 }
 
 export async function uploadFeedMedia({ userId, file, onProgress }) {
@@ -190,6 +186,10 @@ export async function listFeed() {
           userName: author.name,
           userAvatar: author.avatarUrl,
           content: post.content || '',
+          postType: post.post_type || 'general',
+          title: post.title || '',
+          eventStartsAt: post.event_starts_at || null,
+          eventLocation: post.event_location || '',
           media: Array.isArray(post.media) ? post.media : [],
           status: post.status,
           isAdminPost: Boolean(post.is_admin_post),
@@ -213,28 +213,46 @@ export async function listFeed() {
   })
 }
 
-export async function createFeedPost({ content = '', media = [], isAdmin = false }) {
+function normalizePostMetadata({ postType = 'general', title = '', eventStartsAt = null, eventLocation = '' }) {
+  if (!['general', 'event'].includes(postType)) throw new Error('Choose a valid post type.')
+  const cleanTitle = sanitizeFeedText(title, 160, 'title')
+  const cleanLocation = sanitizeFeedText(eventLocation, 240, 'event location')
+  if (postType === 'event') {
+    if (!cleanTitle) throw new Error('Event posts need a title.')
+    if (!eventStartsAt || !Number.isFinite(Date.parse(eventStartsAt))) throw new Error('Choose a valid event date and time.')
+  }
+  return {
+    post_type: postType,
+    title: cleanTitle || null,
+    event_starts_at: postType === 'event' ? new Date(eventStartsAt).toISOString() : null,
+    event_location: postType === 'event' ? cleanLocation || null : null,
+  }
+}
+
+export async function createFeedPost({ content = '', media = [], isAdmin = false, ...metadata }) {
   requireFeed()
   const text = sanitizeFeedText(content, FEED_POST_MAX_LENGTH, 'post')
   const normalized = normalizeFeedMedia(media)
-  if (!text && !normalized.length) throw new Error('Add text or media before posting.')
+  const postMetadata = normalizePostMetadata(metadata)
+  if (!text && !normalized.length && postMetadata.post_type !== 'event') throw new Error('Add text or media before posting.')
   const { data: auth } = await supabase.auth.getUser()
   const authorId = auth?.user?.id
   if (!authorId) throw new Error('Sign in to post to the feed.')
   const { data, error } = await supabase.from('feed_posts')
-    .insert({ author_id: authorId, content: text, media: normalized, is_admin_post: Boolean(isAdmin) })
+    .insert({ author_id: authorId, content: text, media: normalized, is_admin_post: Boolean(isAdmin), ...postMetadata })
     .select('id').single()
   if (error) throw new Error(error.message || 'Your post could not be published.')
   return data.id
 }
 
-export async function updateFeedPost({ id, content = '', media = [] }) {
+export async function updateFeedPost({ id, content = '', media = [], ...metadata }) {
   requireFeed()
   const text = sanitizeFeedText(content, FEED_POST_MAX_LENGTH, 'post')
   const normalized = normalizeFeedMedia(media)
-  if (!text && !normalized.length) throw new Error('A post needs text or media.')
+  const postMetadata = normalizePostMetadata(metadata)
+  if (!text && !normalized.length && postMetadata.post_type !== 'event') throw new Error('A post needs text or media.')
   const { error } = await supabase.from('feed_posts')
-    .update({ content: text, media: normalized })
+    .update({ content: text, media: normalized, ...postMetadata })
     .eq('id', id)
   if (error) throw new Error(error.message || 'Your post could not be updated.')
 }

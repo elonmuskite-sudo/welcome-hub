@@ -4,7 +4,7 @@ name: Set up production (Supabase database + Vercel env)
 # You are prompted for the Supabase address and anon key (both browser-safe).
 # Server-only values come from GitHub repo secrets (Settings → Secrets and variables → Actions):
 #   SUPABASE_DB_URL, SUPABASE_SERVICE_ROLE_KEY, VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_ORG_ID,
-#   RESEND_API_KEY, RESEND_FROM,
+#   RESEND_API_KEY, RESEND_FROM, ADMIN_SESSION_SECRET,
 #   APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID,
 #   SUPABASE_POOLER_URL, VERCEL_DEPLOY_HOOK_URL (required only for Appwrite cutover)
 on:
@@ -94,6 +94,7 @@ jobs:
           SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_FROM: ${{ secrets.RESEND_FROM }}
+          ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
           APPWRITE_ENDPOINT: ${{ secrets.APPWRITE_ENDPOINT }}
           APPWRITE_PROJECT_ID: ${{ secrets.APPWRITE_PROJECT_ID }}
           SUPABASE_POOLER_URL: ${{ secrets.SUPABASE_POOLER_URL }}
@@ -104,6 +105,8 @@ jobs:
           test -n "$SERVICE_ROLE" || { echo "Add SUPABASE_SERVICE_ROLE_KEY to GitHub repo secrets first."; exit 1; }
           test -n "$RESEND_API_KEY" || { echo "Add RESEND_API_KEY to GitHub repo secrets first."; exit 1; }
           test -n "$RESEND_FROM" || { echo "Add RESEND_FROM to GitHub repo secrets first."; exit 1; }
+          test -n "$ADMIN_SESSION_SECRET" || { echo "Add ADMIN_SESSION_SECRET to GitHub repo secrets first."; exit 1; }
+          test "${#ADMIN_SESSION_SECRET}" -ge 32 || { echo "ADMIN_SESSION_SECRET must be at least 32 characters."; exit 1; }
           team_query=""
           if [ -n "$VERCEL_ORG_ID" ]; then team_query="?teamId=$VERCEL_ORG_ID"; fi
           list_query="limit=100"
@@ -145,6 +148,7 @@ jobs:
           put SUPABASE_SERVICE_ROLE_KEY "$SERVICE_ROLE" sensitive
           put RESEND_API_KEY "$RESEND_API_KEY" sensitive
           put RESEND_FROM "$RESEND_FROM" plain
+          put ADMIN_SESSION_SECRET "$ADMIN_SESSION_SECRET" sensitive
           put VITE_AUTH_PROVIDER "$AUTH_PROVIDER" plain
           if [ "$AUTH_PROVIDER" = "appwrite" ]; then
             put APPWRITE_ENDPOINT "$APPWRITE_ENDPOINT" plain

@@ -4,6 +4,7 @@ import { supabase } from '../../../lib/supabase'
 import { useAuth } from '../../../lib/AuthContext'
 import { appwriteData, isAppwriteAuthEnabled } from '../../../lib/appwrite'
 import VerificationBadge from '../VerificationBadge'
+import KycWizard from '../../kyc/KycWizard'
 
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model'
 const DOCUMENT_TYPES = [
@@ -17,7 +18,8 @@ let faceApiPromise
 async function loadFaceApi() {
   if (!faceApiPromise) {
     faceApiPromise = (async () => {
-      const faceapi = await import('@vladmandic/face-api')
+      const { default: faceApiUrl } = await import('@vladmandic/face-api/dist/face-api.esm.js?url')
+      const faceapi = await import(/* @vite-ignore */ faceApiUrl)
       await Promise.all([
         faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
         faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
@@ -134,39 +136,6 @@ export default function VerificationSettings() {
     const { error: uploadError } = await supabase.storage.from('identity-docs').upload(path, blob, { contentType: mimeType })
     if (uploadError) throw uploadError
     return path
-  }
-
-  // Tier 1 — Instant: an on-device face check auto-approves the caller's own row.
-  const submitInstant = async () => {
-    if (!selfie || busy) return
-    setError(''); setInfo('')
-    try {
-      setBusy('Checking your selfie…')
-      const faceapi = await loadFaceApi()
-      const probe = await detectFace(faceapi, selfie)
-      if (!probe) throw new Error('No face found in your selfie. Try again in good light.')
-      const score = Number(probe.score.toFixed(3))
-
-      setBusy('Uploading securely…')
-      const selfiePath = await uploadIdentityFile(selfie, `selfie-${Date.now()}.jpg`, 'image/jpeg')
-
-      if (isAppwriteAuthEnabled()) {
-        const { record: result } = await appwriteData('verification.instant', { selfiePath, matchScore: score })
-        setRecord(result)
-      } else {
-        const { error: rpcError } = await supabase.rpc('submit_instant_identity_verification', {
-          _selfie_path: selfiePath, _match_score: score,
-        })
-        if (rpcError) throw rpcError
-        setRecord({ status: 'approved', tier: 'instant', match_score: score })
-      }
-      setSelfie(null)
-      setInfo('Identity verified instantly.')
-    } catch (err) {
-      setError(err.message || 'Instant verification could not be completed.')
-    } finally {
-      setBusy('')
-    }
   }
 
   // Tier 2 — Manual: structured form + government ID + selfie, held for admin review.
@@ -287,7 +256,7 @@ export default function VerificationSettings() {
               className={`flex flex-col items-start gap-1 rounded-2xl border p-3 text-left transition ${mode === 'instant' ? 'border-primary bg-primary/10' : 'border-border bg-card hover:bg-muted/40'}`}
             >
               <span className="flex items-center gap-2 text-sm font-semibold text-foreground"><Zap className="w-4 h-4 text-primary" /> Instant</span>
-              <span className="text-xs text-muted-foreground">Automated selfie check. Verified immediately.</span>
+              <span className="text-xs text-muted-foreground">Automated document and selfie check. Verified once the provider approves.</span>
             </button>
             <button
               onClick={() => { setMode('manual'); setError('') }}
@@ -298,68 +267,63 @@ export default function VerificationSettings() {
             </button>
           </div>
 
-          {SelfieCard}
-
-          {mode === 'manual' && (
-            <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-              <p className="font-semibold text-foreground">Identity details</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="text-sm">
-                  <span className="mb-1 block text-muted-foreground">Full legal name</span>
-                  <input value={form.fullLegalName} onChange={(e) => setForm({ ...form, fullLegalName: e.target.value })}
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="As shown on your ID" />
-                </label>
-                <label className="text-sm">
-                  <span className="mb-1 block text-muted-foreground">Date of birth</span>
-                  <input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })}
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" />
-                </label>
-                <label className="text-sm">
-                  <span className="mb-1 block text-muted-foreground">Document type</span>
-                  <select value={form.documentType} onChange={(e) => setForm({ ...form, documentType: e.target.value })}
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm">
-                    {DOCUMENT_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </label>
-                <label className="text-sm">
-                  <span className="mb-1 block text-muted-foreground">Document number</span>
-                  <input value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })}
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" />
-                </label>
-                <label className="text-sm sm:col-span-2">
-                  <span className="mb-1 block text-muted-foreground">Issuing country</span>
-                  <input value={form.issuingCountry} onChange={(e) => setForm({ ...form, issuingCountry: e.target.value })}
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="e.g. United Kingdom" />
-                </label>
-              </div>
-            </div>
-          )}
-
-          {mode === 'manual' && (
-            <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-              <p className="flex items-center gap-2 font-semibold text-foreground"><IdCard className="w-4 h-4" /> Upload your government ID</p>
-              <input type="file" accept={ACCEPTED_IMAGE_TYPES} onChange={(e) => setIdDoc(e.target.files?.[0] || null)} className="text-sm" />
-              <p className="text-xs text-muted-foreground">A clear photo of the photo page of your passport, national ID or driving licence.</p>
-            </div>
-          )}
-
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {info && <p className="text-sm text-primary">{info}</p>}
-
           {mode === 'instant' ? (
-            <button onClick={submitInstant} disabled={!selfie || !!busy}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
-              {busy ? <><LoaderCircle className="w-4 h-4 animate-spin" /> {busy}</> : 'Verify instantly'}
-            </button>
+            <KycWizard />
           ) : (
-            <button onClick={submitManual} disabled={!selfie || !idDoc || !!busy}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
-              {busy ? <><LoaderCircle className="w-4 h-4 animate-spin" /> {busy}</> : 'Submit for admin review'}
-            </button>
+            <>
+              {SelfieCard}
+
+              <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+                <p className="font-semibold text-foreground">Identity details</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Full legal name</span>
+                    <input value={form.fullLegalName} onChange={(e) => setForm({ ...form, fullLegalName: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="As shown on your ID" />
+                  </label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Date of birth</span>
+                    <input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" />
+                  </label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Document type</span>
+                    <select value={form.documentType} onChange={(e) => setForm({ ...form, documentType: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm">
+                      {DOCUMENT_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Document number</span>
+                    <input value={form.documentNumber} onChange={(e) => setForm({ ...form, documentNumber: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" />
+                  </label>
+                  <label className="text-sm sm:col-span-2">
+                    <span className="mb-1 block text-muted-foreground">Issuing country</span>
+                    <input value={form.issuingCountry} onChange={(e) => setForm({ ...form, issuingCountry: e.target.value })}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm" placeholder="e.g. United Kingdom" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+                <p className="flex items-center gap-2 font-semibold text-foreground"><IdCard className="w-4 h-4" /> Upload your government ID</p>
+                <input type="file" accept={ACCEPTED_IMAGE_TYPES} onChange={(e) => setIdDoc(e.target.files?.[0] || null)} className="text-sm" />
+                <p className="text-xs text-muted-foreground">A clear photo of the photo page of your passport, national ID or driving licence.</p>
+              </div>
+
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              {info && <p className="text-sm text-primary">{info}</p>}
+
+              <button onClick={submitManual} disabled={!selfie || !idDoc || !!busy}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+                {busy ? <><LoaderCircle className="w-4 h-4 animate-spin" /> {busy}</> : 'Submit for admin review'}
+              </button>
+              <p className="text-xs text-muted-foreground">
+                Face matching runs on your device. Your photos are stored privately and only reviewers can see them.
+              </p>
+            </>
           )}
-          <p className="text-xs text-muted-foreground">
-            Face matching runs on your device. Your photos are stored privately and only reviewers (for manual submissions) can see them.
-          </p>
         </>
       )}
     </div>

@@ -1,0 +1,23 @@
+- generic [ref=e119]:
+  - banner [ref=e120]:
+    - generic [ref=e121]:
+      - img "Nexus logo" [ref=e124]
+      - generic [ref=e125]:
+        - heading "Nexus Chat" [level=1] [ref=e126]
+        - paragraph [ref=e127]: Privacy-first encrypted messaging
+    - generic [ref=e147]:
+      - button "Toggle theme" [ref=e148] [cursor=pointer]
+      - button "SD" [ref=e152] [cursor=pointer]
+  - status:
+    - status "Syncing chats…"
+    - generic: Syncing chats…
+  - generic [ref=e449]:
+    - textbox "Search or start new chat" [ref=e454]
+    - generic [ref=e456]:
+      - status "Loading chats" [ref=e457]
+      - paragraph [ref=e458]: Loading conversations…
+  - generic [ref=e384]:
+    - button "Chats" [active] [ref=e385] [cursor=pointer]
+    - button "Feeds" [ref=e390] [cursor=pointer]
+    - button "Contacts" [ref=e394] [cursor=pointer]
+    - button "Settings" [ref=e399] [cursor=pointer]

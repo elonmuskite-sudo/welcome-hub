@@ -1,0 +1,26 @@
+- generic [ref=e74]:
+  - banner [ref=e75]:
+    - generic [ref=e76]:
+      - img "Nexus logo" [ref=e79]
+      - generic [ref=e80]:
+        - heading "Nexus Chat" [level=1] [ref=e81]
+        - paragraph [ref=e82]: Privacy-first encrypted messaging
+    - navigation "Primary" [ref=e83]:
+      - button "Chats" [ref=e84] [cursor=pointer]
+      - button "Feeds" [ref=e89] [cursor=pointer]
+      - button "Contacts" [active] [ref=e93] [cursor=pointer]
+      - button "Settings" [ref=e98] [cursor=pointer]
+    - generic [ref=e102]:
+      - button "Toggle theme" [ref=e103] [cursor=pointer]
+      - button "CT" [ref=e107] [cursor=pointer]
+  - generic [ref=e110]:
+    - button "← Back to Chats" [ref=e137] [cursor=pointer]
+    - generic [ref=e138]:
+      - generic [ref=e140]:
+        - generic [ref=e141]:
+          - heading "Contacts" [level=2] [ref=e142]
+          - paragraph [ref=e146]: Your existing secure contacts on Nexus Network
+        - button "Add Contact" [ref=e147] [cursor=pointer]
+      - generic [ref=e151]:
+        - paragraph [ref=e156]: No contacts yet
+        - paragraph [ref=e157]: Add contacts to start messaging

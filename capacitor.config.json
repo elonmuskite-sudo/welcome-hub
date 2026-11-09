@@ -3,6 +3,9 @@
   "appName": "Nexus Chat",
   "webDir": "dist",
   "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    },
     "SplashScreen": {
       "launchShowDuration": 1500,
       "backgroundColor": "#020617"

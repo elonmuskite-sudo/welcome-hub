@@ -9,6 +9,7 @@ export const FEED_MEDIA_MAX_ITEMS = 10
 export const FEED_MEDIA_NAME_MAX_LENGTH = 200
 
 // Control characters except tab/newline, plus runaway blank lines.
+// eslint-disable-next-line no-control-regex -- control characters are stripped on purpose
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g
 
 export function sanitizeFeedText(value, maxLength, label = 'post') {
@@ -31,9 +32,14 @@ export function sanitizeMediaName(value) {
 
 // Media is rendered in <img>/<video> sources, so only same-origin paths and
 // http(s) URLs are accepted; anything else (javascript:, data:, file:) is dropped.
+// Durable storage references (r2:// object keys, storage:// Supabase paths) are
+// resolved to real URLs at read time, so they must survive validation here.
+const DURABLE_MEDIA_PREFIXES = ['r2://', 'storage://', 'inline://']
+
 export function isSafeMediaUrl(value) {
   const url = String(value || '').trim()
   if (!url) return false
+  if (DURABLE_MEDIA_PREFIXES.some((prefix) => url.startsWith(prefix))) return true
   if (url.startsWith('/') && !url.startsWith('//')) return true
   try {
     const parsed = new URL(url)

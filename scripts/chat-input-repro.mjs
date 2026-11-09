@@ -21,6 +21,7 @@
  *
  * Usage:
  *   node scripts/chat-input-repro.mjs                 # chromium, 390x844, 30 exchanges
+ *   node scripts/chat-input-repro.mjs --tablet        # chromium, 768x1024, 30 exchanges
  *   node scripts/chat-input-repro.mjs --matrix        # 5 engines x 3 viewports
  *   REPRO_EXCHANGES=40 node scripts/chat-input-repro.mjs
  */
@@ -37,6 +38,7 @@ const SESSION_STORAGE_KEY = `sb-${PROJECT_REF}-auth-token`
 const CHAT_STORAGE_KEY = 'nexus-chat-state-v1'
 const EXCHANGES = Number(process.env.REPRO_EXCHANGES || 30)
 const MATRIX = process.argv.includes('--matrix')
+const TABLET_ONLY = process.argv.includes('--tablet')
 
 // Fixed UUIDs so the Supabase code paths (which validate UUIDs) stay active.
 const SELF = { id: '11111111-1111-4111-8111-111111111111', email: 'repro.a@example.com' }
@@ -236,13 +238,17 @@ function probeComposer() {
   result.bottom = Math.round(rect.bottom)
   result.viewportHeight = window.innerHeight
   result.disabled = Boolean(el.disabled)
+  result.inputMode = el.getAttribute('inputmode')
+  result.readOnly = Boolean(el.readOnly)
   result.display = style.display
   result.visibility = style.visibility
   result.opacity = style.opacity
   result.visible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0
   result.insideViewport = rect.top >= -1 && rect.bottom <= window.innerHeight + 1
   result.hitTestable = Boolean(topmost) && (topmost === el || el.contains(topmost) || topmost.contains(el))
-  result.ok = result.found && result.visible && result.insideViewport && result.hitTestable && !result.disabled && !result.errorScreen && !result.loadingScreen && !result.rootEmpty
+  result.ok = result.found && result.visible && result.insideViewport && result.hitTestable
+    && !result.disabled && result.inputMode === 'none' && !result.readOnly
+    && !result.errorScreen && !result.loadingScreen && !result.rootEmpty
   return result
 }
 
@@ -292,6 +298,8 @@ const VIEWPORTS = MATRIX
       { name: 'tablet-768x1024', viewport: { width: 768, height: 1024 } },
       { name: 'desktop-1440x900', viewport: { width: 1440, height: 900 } },
     ]
+  : TABLET_ONLY
+    ? [{ name: 'tablet-768x1024', viewport: { width: 768, height: 1024 } }]
   : [{ name: 'mobile-390x844', viewport: { width: 390, height: 844 } }]
 
 function summarise(probe) {
@@ -309,6 +317,8 @@ function summarise(probe) {
   if (!probe.insideViewport) reasons.push(`off-screen (top ${probe.top}, bottom ${probe.bottom} of ${probe.viewportHeight})`)
   if (!probe.hitTestable) reasons.push('covered by another element')
   if (probe.disabled) reasons.push('disabled')
+  if (probe.inputMode !== 'none') reasons.push(`inputmode is ${probe.inputMode || 'missing'}`)
+  if (probe.readOnly) reasons.push('read-only')
   return reasons.length ? reasons.join('; ') : 'ok'
 }
 
@@ -328,6 +338,16 @@ async function exerciseEmoji(page) {
       null,
       { timeout: 15000 },
     )
+    const emojiSearchMode = await page.evaluate(() => (
+      document.querySelector('em-emoji-picker')?.shadowRoot?.querySelector('input')?.getAttribute('inputmode')
+    ))
+    if (emojiSearchMode !== 'none') {
+      return {
+        step: 'emoji search keyboard mode',
+        detail: `expected inputmode=none, got ${emojiSearchMode || 'no search input'}`,
+        probe: await page.evaluate(probeComposer),
+      }
+    }
 
     const before = await page.inputValue('textarea[aria-label="Message"]')
     await page.evaluate(() => {
@@ -423,6 +443,21 @@ async function runSession(engine, target) {
     const baseline = await page.evaluate(probeComposer)
     const failures = []
     const samples = [{ step: 'start', probe: baseline }]
+    const composer = page.locator('textarea[aria-label="Message"]')
+    await composer.focus()
+    await page.keyboard.type('physical keyboard check')
+    const physicalTyping = await composer.inputValue()
+    const physicalTypingProbe = await page.evaluate(probeComposer)
+    if (physicalTyping !== 'physical keyboard check' || !physicalTypingProbe.ok) {
+      failures.push({
+        step: 'physical keyboard typing',
+        detail: physicalTyping !== 'physical keyboard check'
+          ? 'physical keyboard input did not reach the composer'
+          : summarise(physicalTypingProbe),
+        probe: physicalTypingProbe,
+      })
+    }
+    await composer.fill('')
 
     for (let index = 1; index <= EXCHANGES; index += 1) {
       // --- user sends -------------------------------------------------------

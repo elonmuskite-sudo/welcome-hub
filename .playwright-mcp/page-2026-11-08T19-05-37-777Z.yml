@@ -1,0 +1,114 @@
+- generic [ref=e119]:
+  - banner [ref=e120]:
+    - generic [ref=e121]:
+      - img "Nexus logo" [ref=e124]
+      - generic [ref=e125]:
+        - heading "Nexus Chat" [level=1] [ref=e126]
+        - paragraph [ref=e127]: Privacy-first encrypted messaging
+    - navigation "Primary" [ref=e128]:
+      - button "Chats" [ref=e129] [cursor=pointer]
+      - button "Feeds" [ref=e134] [cursor=pointer]
+      - button "Contacts" [ref=e138] [cursor=pointer]
+      - button "Settings" [ref=e143] [cursor=pointer]
+    - generic [ref=e147]:
+      - button "Toggle theme" [ref=e148] [cursor=pointer]
+      - generic [ref=e151]:
+        - button "SD" [expanded] [active] [ref=e152] [cursor=pointer]
+        - menu [ref=e202]:
+          - menuitem "Profile settings" [ref=e203] [cursor=pointer]
+          - menuitem "Log out" [ref=e204] [cursor=pointer]
+  - generic [ref=e155]:
+    - generic [ref=e157]:
+      - textbox "Search or start new chat" [ref=e162]
+      - generic [ref=e163]:
+        - button "TA Tunike Alicia 1h ago Encrypted message" [ref=e164] [cursor=pointer]:
+          - generic [ref=e165]: TA
+          - generic [ref=e167]:
+            - generic [ref=e168]:
+              - heading "Tunike Alicia" [level=3] [ref=e170]
+              - generic [ref=e171]: 1h ago
+            - paragraph [ref=e173]: Encrypted message
+        - button [ref=e174] [cursor=pointer]:
+          - img "Elon Muskite" [ref=e176]
+          - generic [ref=e177]:
+            - heading "Elon Muskite" [level=3] [ref=e180]
+            - paragraph [ref=e182]: No messages yet
+        - button "SC Supress compressor 27 Oct IMG-20261026-WA0002.jpg" [ref=e205] [cursor=pointer]:
+          - generic [ref=e184]: SC
+          - generic [ref=e186]:
+            - generic [ref=e187]:
+              - heading "Supress compressor" [level=3] [ref=e189]
+              - generic [ref=e206]: 27 Oct
+            - paragraph [ref=e191]: IMG-20261026-WA0002.jpg
+    - generic [ref=e207]:
+      - generic [ref=e208]:
+        - button "Open contact profile" [ref=e210] [cursor=pointer]:
+          - generic [ref=e211]: SC
+          - generic [ref=e214]:
+            - generic [ref=e215]: Supress compressor
+            - generic [ref=e217]: Private conversation
+        - generic [ref=e218]:
+          - button "Search conversation" [ref=e219] [cursor=pointer]
+          - button "Start call" [ref=e223] [cursor=pointer]
+          - button "Start video call" [ref=e226] [cursor=pointer]
+      - generic [ref=e231]:
+        - generic [ref=e234]:
+          - paragraph [ref=e235]: 🔒 Encrypted message — unable to decrypt
+          - generic [ref=e236]:
+            - text: 10:46 AM
+            - img "Read" [ref=e237]
+          - generic "Message actions" [ref=e240]:
+            - button "React to message" [ref=e241] [cursor=pointer]
+            - button "Reply to message" [ref=e245] [cursor=pointer]
+            - button "Copy message" [ref=e249] [cursor=pointer]
+        - generic [ref=e255]:
+          - paragraph [ref=e256]: 🔒 Encrypted message — unable to decrypt
+          - generic [ref=e257]: 10:46 AM
+          - generic "Message actions" [ref=e258]:
+            - button "React to message" [ref=e259] [cursor=pointer]
+            - button "Reply to message" [ref=e263] [cursor=pointer]
+            - button "Copy message" [ref=e267] [cursor=pointer]
+        - generic [ref=e273]:
+          - paragraph [ref=e274]: 🔒 Encrypted message — unable to decrypt
+          - generic [ref=e275]: 10:47 AM
+          - generic "Message actions" [ref=e276]:
+            - button "React to message" [ref=e277] [cursor=pointer]
+            - button "Reply to message" [ref=e281] [cursor=pointer]
+            - button "Copy message" [ref=e285] [cursor=pointer]
+        - generic [ref=e291]:
+          - paragraph [ref=e292]: 🔒 Encrypted message — unable to decrypt
+          - generic [ref=e293]: 2:07 PM
+          - generic "Message actions" [ref=e294]:
+            - button "React to message" [ref=e295] [cursor=pointer]
+            - button "Reply to message" [ref=e299] [cursor=pointer]
+            - button "Copy message" [ref=e303] [cursor=pointer]
+        - generic [ref=e309]:
+          - button [ref=e310] [cursor=pointer]:
+            - generic [ref=e315]:
+              - paragraph [ref=e316]: IMG-20261026-WA0018.jpg
+              - paragraph [ref=e317]: Image · Tap to open
+          - generic [ref=e321]: 2:08 PM
+          - generic "Message actions" [ref=e322]:
+            - button "React to message" [ref=e323] [cursor=pointer]
+            - button "Reply to message" [ref=e327] [cursor=pointer]
+          - generic [ref=e331]:
+            - 'button "😂: 2 reactions" [pressed] [ref=e332] [cursor=pointer]': 😂 2
+            - 'button "😮: 1 reaction" [pressed] [ref=e333] [cursor=pointer]': 😮 1
+            - 'button "😢: 2 reactions" [pressed] [ref=e334] [cursor=pointer]': 😢 2
+            - 'button "🙏: 1 reaction" [ref=e335] [cursor=pointer]': 🙏 1
+        - generic [ref=e338]:
+          - button [ref=e339] [cursor=pointer]:
+            - generic [ref=e344]:
+              - paragraph [ref=e345]: IMG-20261026-WA0002.jpg
+              - paragraph [ref=e346]: Image · Tap to open
+          - generic [ref=e350]: 2:47 PM
+          - generic "Message actions" [ref=e351]:
+            - button "React to message" [ref=e352] [cursor=pointer]
+            - button "Reply to message" [ref=e356] [cursor=pointer]
+      - generic [ref=e361]:
+        - button "Emoji" [ref=e362] [cursor=pointer]
+        - button "Stickers" [ref=e366] [cursor=pointer]
+        - button "Attach files" [ref=e371] [cursor=pointer]
+        - textbox "Message" [ref=e375]:
+          - /placeholder: Message…
+        - button "Record voice message" [ref=e376] [cursor=pointer]

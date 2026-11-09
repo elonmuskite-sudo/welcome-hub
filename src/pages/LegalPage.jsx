@@ -6,7 +6,7 @@ import Header from '../components/Header'
 // account, so this page renders standalone at /privacy and /terms and also
 // inside the signed-in shell at /app/privacy and /app/terms.
 const SUPPORT_EMAIL = 'support@nexus-chat-world.com'
-const LAST_UPDATED = '20 October 2026'
+const LAST_UPDATED = '6 November 2026'
 const APP_NAME = 'Nexus Chat'
 
 function Section({ title, children }) {
@@ -34,7 +34,7 @@ function PrivacyContent() {
         <p><strong className="text-foreground">Profile details you provide.</strong> An optional avatar, bio and interests.</p>
         <p><strong className="text-foreground">Messages and media.</strong> Text and sticker messages must be end-to-end encrypted on your device. If encryption or a recipient key is unavailable, the message is not sent. Private keys stay on your device. Attachments and voice notes are not covered by E2EE; we store files so they can be delivered to recipients.</p>
         <p><strong className="text-foreground">Contacts and feed content.</strong> The contacts you save and any posts, comments or reactions you publish in the social feed.</p>
-        <p><strong className="text-foreground">Identity verification (optional).</strong> If you choose manual verification, you upload a government ID and a selfie. Instant verification runs on your device using face matching. We only keep what is needed to review and record the outcome.</p>
+        <p><strong className="text-foreground">Identity verification (optional).</strong> Manual verification sends your government ID and selfie to our private storage for administrator review. If you choose Idswyft verification, your ID images and selfie are sent through our server to Idswyft for document extraction, liveness checks, and a verification decision; Nexus does not store copies of those uploaded images. We store an encrypted provider session token and a minimized verification result. Idswyft may retain submitted files under its privacy policy.</p>
         <p><strong className="text-foreground">Technical data.</strong> Basic device and connection information needed to deliver messages reliably and keep the service secure.</p>
       </Section>
 
@@ -51,7 +51,7 @@ function PrivacyContent() {
       </Section>
 
       <Section title="Service providers">
-        <p>We rely on trusted providers to run the service: Supabase (database, authentication and file storage), Resend (transactional email), Twilio (phone verification and optional transactional SMS), and our hosting provider. These providers only process data on our instructions.</p>
+        <p>We rely on trusted providers to run the service: Supabase (database, authentication and file storage), Idswyft (optional identity verification), Resend (transactional email), Twilio (phone verification and optional transactional SMS), and our hosting provider. They process data to provide their services; Idswyft may retain identity files under its applicable privacy policy.</p>
       </Section>
 
       <Section title="Data retention">

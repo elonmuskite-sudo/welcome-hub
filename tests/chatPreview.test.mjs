@@ -5,6 +5,7 @@ import {
   chatListPreview,
   messageSnippet,
   normalizeSnippet,
+  participantNamesFor,
   peerIdOf,
   resolveLastMessage,
   EMPTY_SNIPPET,
@@ -64,6 +65,15 @@ test('the row is named from the viewer\u2019s perspective', () => {
   assert.equal(chatDisplayName(chat({ participant_ids: [ME, PEER, 'user-3'], participant_names: null }), ME), 'Shared title')
 })
 
+test('new private chats store both names by participant id for either viewer', () => {
+  const participantNames = participantNamesFor(ME, 'Ada Sender', PEER, 'Sam Receiver')
+  const newChat = chat({ participant_names: participantNames })
+
+  assert.equal(chatDisplayName(newChat, ME), 'Sam Receiver')
+  assert.equal(chatDisplayName(newChat, PEER), 'Ada Sender')
+  assert.equal(participantNamesFor(ME, '', PEER, ''), null)
+})
+
 test('the viewer\u2019s own last message is marked as theirs', () => {
   const preview = chatListPreview(chat(storedLast('On my way', { sender: ME })), ME, NOW)
 
@@ -116,6 +126,7 @@ test('reactions and receipts never become the preview; the last real message is 
       { id: 'm1', sender_id: PEER, content: 'Are you around?', type: 'text', created_at: new Date(NOW - 5 * 60000).toISOString() },
       { id: 'm2', sender_id: PEER, content: '{"messageId":"m1","emoji":"\ud83d\udc4d","active":true}', type: 'reaction', created_at: new Date(NOW - 60000).toISOString() },
       { id: 'm3', sender_id: ME, content: '{"messageIds":["m1"],"status":"read"}', type: 'receipt', created_at: new Date(NOW - 30000).toISOString() },
+      { id: 'm4', sender_id: PEER, content: 'nexus:v1:{"kind":"call"}', type: 'call', created_at: new Date(NOW - 10000).toISOString() },
     ],
   }), ME, NOW)
 

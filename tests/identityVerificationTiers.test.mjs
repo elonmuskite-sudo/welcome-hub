@@ -2,8 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const migration = fs.readFileSync(
+const tiersMigration = fs.readFileSync(
   new URL('../supabase/migrations/20261017030000_identity_verification_tiers.sql', import.meta.url),
+  'utf8',
+)
+const kycGateMigration = fs.readFileSync(
+  new URL('../supabase/migrations/20261108090000_gate_instant_kyc_approval.sql', import.meta.url),
   'utf8',
 )
 const schema = fs.readFileSync(new URL('../docs/supabase-schema.sql', import.meta.url), 'utf8')
@@ -16,13 +20,8 @@ function functionBody(sql, marker) {
   return end === -1 ? sql.slice(start) : sql.slice(start, end)
 }
 
-test('the canonical schema mirrors the identity verification tiers migration', () => {
-  assert.match(schema, /-- 20261017030000_identity_verification_tiers\.sql/)
-  assert.match(schema, /submit_instant_identity_verification\(_selfie_path text, _match_score numeric/)
-})
-
 test('identity verification carries the structured manual-submission fields', () => {
-  for (const sql of [migration, schema]) {
+  for (const sql of [tiersMigration, schema]) {
     assert.match(sql, /add column if not exists tier text/)
     assert.match(sql, /add column if not exists full_legal_name text/)
     assert.match(sql, /add column if not exists date_of_birth date/)
@@ -34,23 +33,33 @@ test('identity verification carries the structured manual-submission fields', ()
   }
 })
 
-test('instant verification is a security-definer RPC that only approves the caller', () => {
-  for (const sql of [migration, schema]) {
-    const body = functionBody(sql, 'public.submit_instant_identity_verification(_selfie_path')
-    assert.match(body, /security definer/)
-    assert.match(body, /auth\.uid\(\)/)
-    assert.match(body, /insert into public\.identity_verifications \(user_id, status, tier, match_score, selfie_path, id_document_path, reviewed_at\)/)
-    assert.match(body, /'approved', 'instant'/)
-    // The caller cannot target another member: there is no user-id parameter.
-    assert.doesNotMatch(body, /_user_id/)
-  }
+test('the canonical schema retires the forgeable client self-approval RPC', () => {
+  // The forward migration removes the browser-callable instant self-approval and
+  // the canonical schema reflects that final state.
+  assert.match(kycGateMigration, /drop function if exists public\.submit_instant_identity_verification\(text, numeric\)/)
+  assert.doesNotMatch(schema, /submit_instant_identity_verification/)
 })
 
-test('instant verification cannot be called by anonymous users', () => {
-  for (const sql of [migration, schema]) {
-    assert.match(sql, /revoke execute on function public\.submit_instant_identity_verification\(text, numeric\) from public, anon/)
-    assert.match(sql, /grant execute on function public\.submit_instant_identity_verification\(text, numeric\) to authenticated, service_role/)
+test('instant approval is a security-definer function granted only to the server role', () => {
+  for (const sql of [kycGateMigration, schema]) {
+    const body = functionBody(sql, 'public.approve_identity_from_kyc(_session_id')
+    assert.match(body, /security definer/)
+    // The approval is keyed to a server-verified approved session, not a client score.
+    assert.match(body, /from public\.kyc_sessions/)
+    assert.match(body, /status = 'APPROVED'/)
+    assert.match(body, /'approved', 'instant'/)
+
+    assert.match(sql, /revoke execute on function public\.approve_identity_from_kyc\(uuid\) from public, anon, authenticated/)
+    assert.match(sql, /grant execute on function public\.approve_identity_from_kyc\(uuid\) to service_role/)
   }
+  // No browser role may ever execute the approval function.
+  assert.doesNotMatch(kycGateMigration, /approve_identity_from_kyc\(uuid\) to [^;]*authenticated/)
+  assert.doesNotMatch(schema, /approve_identity_from_kyc\(uuid\) to [^;]*authenticated/)
+})
+
+test('the instant tier no longer stores a local selfie, so the column is optional', () => {
+  assert.match(kycGateMigration, /alter column selfie_path drop not null/)
+  assert.match(schema, /selfie_path text, id_document_path text/)
 })
 
 test('both identity tiers resolve to the same approved badge level', () => {
