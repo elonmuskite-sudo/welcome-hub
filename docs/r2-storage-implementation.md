@@ -33,9 +33,63 @@ R2 is additive and takes over only when configured.
 ## Required environment variables
 
 Server-only: `R2_BUCKET_NAME`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
-`R2_SECRET_ACCESS_KEY`. Browser-safe: `VITE_R2_PUBLIC_BASE_URL` (feed media only;
-leave blank to use short-lived signed links). The bucket CORS must allow `PUT`
-and `GET` from the app origin.
+`R2_SECRET_ACCESS_KEY`. Browser-safe: `VITE_R2_PUBLIC_BASE_URL` — currently
+**empty by design**; every object, feed media included, is served by short-lived
+signed URLs (see Bucket configuration below).
+
+## Bucket configuration
+
+Applied to the `nexuschat` bucket. Nothing here is managed by
+infrastructure-as-code — there is no Terraform/Pulumi in the repo and
+`wrangler.jsonc` declares no R2 binding — so this section is the source of truth.
+Both settings are reproducible: CORS with the S3 API (`PutBucketCors`) using the
+`R2_*` credentials, public access with
+`PUT /accounts/{account_id}/r2/buckets/nexuschat/domains/managed`.
+
+### CORS
+
+Before this change the bucket had **no** CORS policy at all (`GetBucketCors` →
+`NoSuchCORSConfiguration`), so browser-side direct uploads failed. The single
+rule now in force:
+
+| Field | Value |
+| --- | --- |
+| `AllowedOrigins` | `https://nexus-chat-world.com`, `https://www.nexus-chat-world.com`, `https://welcome-hub-tau.vercel.app`, `https://localhost`, `capacitor://localhost`, `http://localhost:5173` |
+| `AllowedMethods` | `GET`, `PUT`, `HEAD` |
+| `AllowedHeaders` | `*` |
+| `ExposeHeaders` | `ETag`, `Content-Type`, `Content-Length` |
+| `MaxAgeSeconds` | `3600` |
+
+`https://localhost` and `capacitor://localhost` are the Capacitor WebView origins
+for Android and iOS. The origin list is explicit — no wildcards — and `POST` is
+absent because uploads go straight to the bucket with a presigned `PUT`.
+
+Validation: preflight `OPTIONS` from the three production/dev origins returned
+`204` with the origin echoed; `https://evil.example.com` returned `403` with no
+`Access-Control-Allow-Origin`. An anonymous `GET` on the S3 endpoint was rejected
+(`400`).
+
+### Public access
+
+**Disabled.** The `r2.dev` managed domain (`pub-e6fa…r2.dev`) was enabled, which
+made every object world-readable — including private `chat-attachments/<userId>/…`
+keys that `api/storage.js` otherwise protects with signed URLs. R2 cannot scope
+public access to a prefix, so it was all-or-nothing and is now off:
+
+```
+PUT /accounts/{account_id}/r2/buckets/nexuschat/domains/managed  {"enabled": false}
+```
+
+Consequence: `VITE_R2_PUBLIC_BASE_URL` must stay empty — a public base would 404
+and would silently publish private attachments. Re-enabling public access means
+restoring that variable and rebuilding.
+
+Validation: a presigned `GET` still returns `200`; an anonymous fetch of the same
+object via the `r2.dev` host now returns `401`.
+
+R2 has no AWS-style IAM users/policies and no "Block Public Access" toggle.
+Authorisation comes from bucket-scoped R2 API tokens — the four `R2_*`
+credentials are one such token — plus this single public-access switch.
 
 ## File-corruption incident and resolution
 
