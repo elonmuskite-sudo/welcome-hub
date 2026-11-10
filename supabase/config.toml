@@ -6,6 +6,12 @@ project_id = "woavhlkgylarngqyvphf"
 # Supabase's minimum and default are both 6.
 otp_length = 6
 
+# Native email OTP expiry, in seconds. Pinned to 10 minutes so the real
+# validity matches the "expires in 10 minutes" copy in the Resend template
+# (supabase/functions/_shared/otp-email.js) and docs/supabase-auth-setup.md.
+# Supabase's default is 3600; this overrides it.
+otp_expiry = 600
+
 [functions.email-code]
 verify_jwt = false
 

@@ -38,7 +38,7 @@ In Supabase Dashboard, open **Authentication → URL Configuration**:
 
 Keep **Confirm email** enabled in **Authentication → Providers → Email**. App verification codes expire after 10 minutes, allow at most five guesses, and are rate-limited by the database RPC installed by the schema migration. Do not send Supabase's built-in confirmation or recovery links; Resend delivers the OTP instead.
 
-Set **Email OTP Length** to `6` in **Authentication → Providers → Email** so the delivered code matches the app's `/verify-email` input and the Resend template. This is pinned as `otp_length = 6` under `[auth.email]` in `supabase/config.toml`; the app relays Supabase's native OTP, so the length is governed here, not in application code. Confirm **Email OTP Expiration** agrees with the ten-minute validity stated in the email copy.
+Set **Email OTP Length** to `6` in **Authentication → Providers → Email** so the delivered code matches the app's `/verify-email` input and the Resend template. This is pinned as `otp_length = 6` under `[auth.email]` in `supabase/config.toml`; the app relays Supabase's native OTP, so the length is governed here, not in application code. Set **Email OTP Expiration** to `600` seconds as well: `otp_expiry = 600` under `[auth.email]` pins the real validity to ten minutes, matching the "expires in 10 minutes" copy in `supabase/functions/_shared/otp-email.js`. Supabase's default is 3600 seconds, so leaving it unpinned would tell users ten minutes while codes stay valid for an hour.
 
 ## 3. Configure Resend API
 
