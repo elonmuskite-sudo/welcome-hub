@@ -1,5 +1,11 @@
 project_id = "woavhlkgylarngqyvphf"
 
+[auth.email]
+# Native email OTP length, in digits. Keep at 6 so it matches the app's
+# /verify-email input, the Resend template, and docs/supabase-auth-setup.md.
+# Supabase's minimum and default are both 6.
+otp_length = 6
+
 [functions.email-code]
 verify_jwt = false
 

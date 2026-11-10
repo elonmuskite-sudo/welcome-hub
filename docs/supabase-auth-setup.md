@@ -36,6 +36,8 @@ In Supabase Dashboard, open **Authentication → URL Configuration**:
 
 Keep **Confirm email** enabled in **Authentication → Providers → Email**. App verification codes expire after 10 minutes, allow at most five guesses, and are rate-limited by the database RPC installed by the schema migration. Do not send Supabase's built-in confirmation or recovery links; Resend delivers the OTP instead.
 
+Set **Email OTP Length** to `6` in **Authentication → Providers → Email** so the delivered code matches the app's `/verify-email` input and the Resend template. This is pinned as `otp_length = 6` under `[auth.email]` in `supabase/config.toml`; the app relays Supabase's native OTP, so the length is governed here, not in application code. Confirm **Email OTP Expiration** agrees with the ten-minute validity stated in the email copy.
+
 ## 3. Configure Resend API
 
 `nexus-chat-world.com` is registered in Resend and reported as **verified** with sending **enabled** (confirmed against `GET https://api.resend.com/domains` on 2026-10-17; domain id `4346b5a9-7004-470b-95ca-047171b0673c`, region `us-east-1`). Create or reuse an API key with send-only permissions. The server function sends through `https://api.resend.com/emails` using these Vercel Production variables:
