@@ -16,15 +16,17 @@ Projects provisioned before the superseded migrations were retired may still car
 alter table public.members drop column if exists password;
 ```
 
-Create admin identities through Supabase Auth, then promote only the intended account in the SQL Editor:
+Create admin identities through Supabase Auth, then promote only the intended account. Roles are **not** a column on `public.members`; they are rows in `public.user_roles` (enum `public.app_role`), and the app checks them with `public.has_role(...)`. Run this in the SQL Editor:
 
 ```sql
-update public.members
-set role = 'admin'
-where auth_user_id = (
-  select id from auth.users where lower(email) = lower('admin@your-domain.com')
-);
+insert into public.user_roles (user_id, role)
+select id, 'admin'
+from auth.users
+where lower(email) = lower('admin@your-domain.com')
+on conflict (user_id, role) do nothing;
 ```
+
+The equivalent guarded RPC is `select public.admin_set_admin_role((select id from auth.users where lower(email) = lower('admin@your-domain.com')), true);`. To confirm the grant, run `select user_id, role from public.user_roles where role = 'admin';`.
 
 ## 2. Configure auth URLs
 
