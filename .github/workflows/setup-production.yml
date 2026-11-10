@@ -4,9 +4,13 @@ name: Set up production (Supabase database + Vercel env)
 # You are prompted for the Supabase address and anon key (both browser-safe).
 # Server-only values come from GitHub repo secrets (Settings → Secrets and variables → Actions):
 #   SUPABASE_DB_URL, SUPABASE_SERVICE_ROLE_KEY, VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_ORG_ID,
-#   RESEND_API_KEY, RESEND_FROM, ADMIN_SESSION_SECRET,
-#   APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID,
-#   SUPABASE_POOLER_URL, VERCEL_DEPLOY_HOOK_URL (required only for Appwrite cutover)
+#   RESEND_API_KEY, RESEND_FROM, ADMIN_SESSION_SECRET, VERCEL_DEPLOY_HOOK_URL,
+#   APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID, SUPABASE_POOLER_URL
+#
+# VERCEL_DEPLOY_HOOK_URL is the project's Production deploy hook (branch: main).
+# Every run ends by triggering it, so Vercel builds a production deployment that
+# automatically receives the production domains (nexus-chat-world.com, www,
+# verify). No manual "Redeploy"/"Promote to Production" in the dashboard.
 on:
   workflow_dispatch:
     inputs:
@@ -107,6 +111,7 @@ jobs:
           test -n "$RESEND_FROM" || { echo "Add RESEND_FROM to GitHub repo secrets first."; exit 1; }
           test -n "$ADMIN_SESSION_SECRET" || { echo "Add ADMIN_SESSION_SECRET to GitHub repo secrets first."; exit 1; }
           test "${#ADMIN_SESSION_SECRET}" -ge 32 || { echo "ADMIN_SESSION_SECRET must be at least 32 characters."; exit 1; }
+          test -n "$VERCEL_DEPLOY_HOOK_URL" || { echo "Add the Vercel Production deploy hook URL as VERCEL_DEPLOY_HOOK_URL so deployments reach production automatically."; exit 1; }
           team_query=""
           if [ -n "$VERCEL_ORG_ID" ]; then team_query="?teamId=$VERCEL_ORG_ID"; fi
           list_query="limit=100"
@@ -163,15 +168,15 @@ jobs:
             put VITE_APPWRITE_ENDPOINT "$APPWRITE_ENDPOINT" plain
             put VITE_APPWRITE_PROJECT_ID "$APPWRITE_PROJECT_ID" plain
           fi
+          hook_response="$(mktemp)"
+          trap 'rm -f "$env_file" "$response_file" "$hook_response"' EXIT
+          code=$(curl -sS -o "$hook_response" -w '%{http_code}' -X POST "$VERCEL_DEPLOY_HOOK_URL")
+          [ "$code" -lt 300 ] && jq -e '.job.state == "PENDING" or .job.state == "BUILDING"' "$hook_response" >/dev/null || {
+            echo "Vercel accepted environment values, but the production deploy hook failed (HTTP $code)."
+            exit 1
+          }
           if [ "$AUTH_PROVIDER" = "appwrite" ]; then
-            hook_response="$(mktemp)"
-            trap 'rm -f "$env_file" "$response_file" "$hook_response"' EXIT
-            code=$(curl -sS -o "$hook_response" -w '%{http_code}' -X POST "$VERCEL_DEPLOY_HOOK_URL")
-            [ "$code" -lt 300 ] && jq -e '.job.state == "PENDING" or .job.state == "BUILDING"' "$hook_response" >/dev/null || {
-              echo "Vercel accepted environment values, but the production deploy hook failed (HTTP $code)."
-              exit 1
-            }
             echo "Appwrite environment configured; production deployment triggered. Verify it reaches Ready in Vercel before announcing cutover."
           else
-            echo "Supabase Auth environment configured. Redeploy in Vercel if these values changed."
+            echo "Supabase Auth environment configured; production deployment triggered with the production domains assigned automatically."
           fi
