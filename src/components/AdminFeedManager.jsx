@@ -13,9 +13,22 @@ import {
   formatTimeAgo,
   formatExactTime,
 } from '../lib/feeds'
+import { useMediaUrl } from '../hooks/useMediaUrl'
 
 const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.avi'
 const MAX_MEDIA = 10
+
+// Composer thumbnails can reference a large R2 upload (`r2://`), so resolve the
+// reference to a usable source before rendering.
+function AdminComposerMedia({ item }) {
+  const url = useMediaUrl(item.url)
+  if (!url) return <div className="h-16 w-full animate-pulse bg-muted" />
+  return item.type === 'video' ? (
+    <video src={url} className="h-16 w-full object-cover" muted />
+  ) : (
+    <img src={url} alt="" className="h-16 w-full object-cover" />
+  )
+}
 
 // Admin feed module: publish official posts on behalf of the platform and
 // moderate any member post (hide, remove, restore or delete).
@@ -156,9 +169,7 @@ export default function AdminFeedManager() {
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
                 {media.map((item, index) => (
                   <div key={`${item.url}-${index}`} className="relative overflow-hidden rounded-lg border border-border">
-                    {item.type === 'video'
-                      ? <video src={item.url} className="h-16 w-full object-cover" muted />
-                      : <img src={item.url} alt="" className="h-16 w-full object-cover" />}
+                    <AdminComposerMedia item={item} />
                     <button
                       type="button"
                       onClick={() => setMedia((prev) => prev.filter((_, i) => i !== index))}

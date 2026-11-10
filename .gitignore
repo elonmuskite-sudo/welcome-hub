@@ -93,3 +93,6 @@ android-sdk/
 
 # Database backups — contain member data (names, chat titles, UUIDs). Never commit.
 supabase/backups/
+
+# Supabase CLI scratch state: link metadata and local `supabase start` secrets. Never commit.
+supabase/.temp/

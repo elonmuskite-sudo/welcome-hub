@@ -52,6 +52,17 @@ const OPTIONAL_PUBLIC_KEYS = [
   'VITE_TURN_URL',
   'VITE_TURN_USERNAME',
   'VITE_TURN_CREDENTIAL',
+  'VITE_R2_PUBLIC_BASE_URL',
+]
+
+// Cloudflare R2 credentials for the >2 MB presigned-upload path. These are
+// server-only secrets and are synced as a group so a partial config can never
+// reach production; when absent, large uploads fall back to Supabase Storage.
+const R2_SERVER_KEYS = [
+  'R2_ACCOUNT_ID',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+  'R2_BUCKET_NAME',
 ]
 
 const PUBLIC_KEYS = new Set([
@@ -127,9 +138,16 @@ function loadValues() {
       .filter((key) => !invalidValue(config[key]))
       .map((key) => [key, String(config[key])])
   )
+  const presentR2Keys = R2_SERVER_KEYS.filter((key) => !invalidValue(config[key]))
+  if (presentR2Keys.length && presentR2Keys.length !== R2_SERVER_KEYS.length) {
+    const missingR2 = R2_SERVER_KEYS.filter((key) => !presentR2Keys.includes(key))
+    throw new Error(`Incomplete Cloudflare R2 configuration; set all of ${R2_SERVER_KEYS.join(', ')} or none. Missing: ${missingR2.join(', ')}`)
+  }
+  const r2Server = Object.fromEntries(presentR2Keys.map((key) => [key, String(config[key])]))
   return {
     ...Object.fromEntries(requiredKeys.map((key) => [key, String(config[key])])),
     ...optionalPublic,
+    ...r2Server,
     VITE_AUTH_PROVIDER: provider,
   }
 }

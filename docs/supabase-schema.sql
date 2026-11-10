@@ -37,7 +37,7 @@ grant execute on function public.get_verification_badge(uuid) to anon, authentic
 create policy "ID docs own upload" on storage.objects for insert to authenticated with check (bucket_id='identity-docs' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "ID docs own or admin read" on storage.objects for select to authenticated using (bucket_id='identity-docs' and ((storage.foldername(name))[1] = auth.uid()::text or public.has_role(auth.uid(),'admin')));
 create policy "Chat files own upload" on storage.objects for insert to authenticated with check (bucket_id='chat-files' and (storage.foldername(name))[1] = auth.uid()::text);
-create policy "Chat files signed-in read" on storage.objects for select to authenticated using (bucket_id='chat-files');
+create policy "Chat files own or admin read" on storage.objects for select to authenticated using (bucket_id='chat-files' and ((storage.foldername(name))[1] = auth.uid()::text or public.has_role(auth.uid(),'admin')));
 create policy "Chat files own delete" on storage.objects for delete to authenticated using (bucket_id='chat-files' and (storage.foldername(name))[1] = auth.uid()::text);
 -- from 20261012105808_722066b4-005b-47d7-aa9a-df0f18f3aeed.sql
 revoke execute on function public.has_role(uuid, public.app_role) from public, anon;

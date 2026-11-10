@@ -3,6 +3,8 @@
 // invisible control characters and media URLs pointing at an unsafe scheme.
 // Kept dependency-free so it can be unit tested without a Supabase client.
 
+import { isR2Reference } from './storageReferences.js'
+
 export const FEED_POST_MAX_LENGTH = 5000
 export const FEED_COMMENT_MAX_LENGTH = 3000
 export const FEED_MEDIA_MAX_ITEMS = 10
@@ -29,11 +31,14 @@ export function sanitizeMediaName(value) {
   return cleaned || null
 }
 
-// Media is rendered in <img>/<video> sources, so only same-origin paths and
-// http(s) URLs are accepted; anything else (javascript:, data:, file:) is dropped.
+// Media is rendered in <img>/<video> sources, so only same-origin paths,
+// http(s) URLs and internal `r2://` references are accepted; anything else
+// (javascript:, data:, file:) is dropped.
 export function isSafeMediaUrl(value) {
   const url = String(value || '').trim()
   if (!url) return false
+  // `r2://` references are resolved to a short-lived signed URL before render.
+  if (isR2Reference(url)) return true
   if (url.startsWith('/') && !url.startsWith('//')) return true
   try {
     const parsed = new URL(url)

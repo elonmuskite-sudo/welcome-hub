@@ -49,6 +49,16 @@ test('only same-origin paths and http(s) media urls are accepted', () => {
   assert.equal(isSafeMediaUrl(undefined), false)
 })
 
+test('internal r2 references are accepted so large media survives validation', () => {
+  const key = `${UUID}/feed/1715000000-clip.mp4`
+  assert.equal(isSafeMediaUrl(`r2://${key}`), true)
+  const normalized = normalizeFeedMedia([{ url: `r2://${key}`, type: 'video' }])
+  assert.equal(normalized.length, 1)
+  assert.equal(normalized[0].url, `r2://${key}`)
+  // A bare scheme with no object key is not a real reference.
+  assert.equal(isSafeMediaUrl('r2://'), false)
+})
+
 test('media normalisation drops unsafe urls, caps the count and sanitises names', () => {
   const items = [
     { url: 'https://cdn.example.com/ok.jpg', type: 'image', name: 'photo\u0000.jpg' },

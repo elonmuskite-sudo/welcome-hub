@@ -3,6 +3,7 @@ import { memo, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { FileText, Download, Film, Music, SmilePlus, Reply, Copy, Check, CheckCheck } from 'lucide-react'
 import ChatButton from './ChatButton'
+import { useMediaUrl } from '../../hooks/useMediaUrl'
 import { REACTIONS, decodeContent } from '../../lib/chatProtocol'
 
 function formatTime(dateString) {
@@ -27,6 +28,9 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
   }
   const timeLabel = useMemo(() => formatTime(message.created_at), [message.created_at])
   const isSticker = message.type === 'sticker'
+  // `r2://` attachments resolve to a short-lived signed URL; everything else
+  // (Supabase signed URLs, same-origin paths) is returned unchanged.
+  const mediaUrl = useMediaUrl(message.file_url)
 
   const renderContent = useMemo(() => {
     switch (message.type) {
@@ -36,10 +40,10 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
       case 'image':
         return (
           <img
-            src={message.file_url}
+            src={mediaUrl}
             alt="Shared image"
             className="w-full max-w-xs sm:max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition"
-            onClick={() => window.open(message.file_url, '_blank')}
+            onClick={() => window.open(mediaUrl, '_blank')}
           />
         )
 
@@ -47,7 +51,7 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
         return (
           <div className="max-w-xs sm:max-w-sm">
             <video
-              src={message.file_url}
+              src={mediaUrl}
               controls
               className="rounded-lg w-full"
               preload="metadata"
@@ -66,7 +70,7 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
           <div className="flex items-center gap-2 min-w-0 max-w-full">
             <Music className="w-4 h-4 flex-shrink-0" />
             <audio
-              src={message.file_url}
+              src={mediaUrl}
               controls
               className="h-8 w-52 max-w-full min-w-0"
             />
@@ -87,7 +91,7 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
       case 'file':
         return (
           <a
-            href={message.file_url}
+            href={mediaUrl}
             download={message.file_name}
             target="_blank"
             rel="noopener noreferrer"
@@ -109,7 +113,7 @@ function MessageBubble({ message, isOwn, userId, onReact, onReply, reacting, rec
       default:
         return <p className="text-xs sm:text-sm">{decoded.text}</p>
     }
-  }, [message.type, message.content, message.file_url, message.file_name, message.duration, decoded.text])
+  }, [message.type, message.content, message.file_name, message.duration, decoded.text, mediaUrl])
 
   return (
     <div id={`message-${message.id}`} className={`chat-enter flex ${isOwn ? 'justify-end' : 'justify-start'} px-0`}>

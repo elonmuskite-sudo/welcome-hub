@@ -44,9 +44,32 @@ import {
   isFeedAvailable,
 } from '../lib/feeds'
 import { FEED_COMMENT_MAX_LENGTH, FEED_POST_MAX_LENGTH } from '../lib/feedContent'
+import { useMediaUrl } from '../hooks/useMediaUrl'
 
 const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.avi'
 const MAX_MEDIA = 10
+
+// Feed media can be a Supabase signed URL or an `r2://` reference for large
+// files; both resolve to a usable source here.
+function GridMedia({ item, index }) {
+  const url = useMediaUrl(item.url)
+  if (!url) return <div className="min-h-[120px] w-full animate-pulse bg-muted" />
+  return item.type === 'video' ? (
+    <video src={url} controls playsInline preload="metadata" className="max-h-[420px] w-full bg-black object-contain" />
+  ) : (
+    <img src={url} alt={item.name || `Post media ${index + 1}`} loading="lazy" className="max-h-[420px] w-full object-cover" />
+  )
+}
+
+function ComposerMedia({ item }) {
+  const url = useMediaUrl(item.url)
+  if (!url) return <div className="h-24 w-full animate-pulse bg-muted" />
+  return item.type === 'video' ? (
+    <video src={url} className="h-24 w-full object-cover" muted />
+  ) : (
+    <img src={url} alt="" className="h-24 w-full object-cover" />
+  )
+}
 
 function MediaGrid({ media }) {
   if (!media?.length) return null
@@ -54,11 +77,7 @@ function MediaGrid({ media }) {
     <div className={`grid gap-1 px-4 pb-3 ${media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
       {media.map((item, index) => (
         <div key={`${item.url}-${index}`} className="overflow-hidden rounded-xl border border-border bg-black/5">
-          {item.type === 'video' ? (
-            <video src={item.url} controls playsInline preload="metadata" className="max-h-[420px] w-full bg-black object-contain" />
-          ) : (
-            <img src={item.url} alt={item.name || `Post media ${index + 1}`} loading="lazy" className="max-h-[420px] w-full object-cover" />
-          )}
+          <GridMedia item={item} index={index} />
         </div>
       ))}
     </div>
@@ -659,7 +678,7 @@ export default function FeedsPage() {
                 <div className="grid grid-cols-3 gap-2">
                   {composerMedia.map((item, index) => (
                     <div key={`${item.url}-${index}`} className="relative overflow-hidden rounded-lg border border-border">
-                      {item.type === 'video' ? <video src={item.url} className="h-24 w-full object-cover" muted /> : <img src={item.url} alt="" className="h-24 w-full object-cover" />}
+                      <ComposerMedia item={item} />
                       <button
                         onClick={() => setComposerMedia((prev) => prev.filter((_, i) => i !== index))}
                         className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white"

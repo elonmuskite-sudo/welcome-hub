@@ -1,13 +1,20 @@
 import { supabase, isSupabaseConfigured } from './supabase'
 import { appwriteData, isAppwriteAuthEnabled } from './appwrite'
 import { UNSUPPORTED_FILE_MESSAGE, classifyFileType, formatBytes, isSupportedFile } from './chatAttachments'
+import { R2_URL_PREFIX, isR2Reference, r2ObjectKeyOf, shouldUseR2 } from './storageReferences'
 
 export { ATTACHMENT_ACCEPT, UNSUPPORTED_FILE_MESSAGE, classifyFileType, formatBytes, isSupportedFile } from './chatAttachments'
+export { isR2Reference, r2ObjectKeyOf } from './storageReferences'
 
 export const STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024 // 5 GB per user
 export const MAX_VIDEO_DURATION_SECONDS = 45
 const BUCKET = 'chat-files'
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 365
+const STORAGE_ENDPOINT = '/api/storage'
+// Signed R2 GET URLs live for an hour server-side; drop them a little early so
+// a cached URL is never used after it expires.
+const R2_READ_TTL_MS = 60 * 60 * 1000
+const R2_CACHE_SAFETY_MS = 5 * 60 * 1000
 
 export function probeMediaDuration(file) {
   return new Promise((resolve) => {
@@ -140,6 +147,105 @@ function uploadWithProgress(url, file, { onProgress, headers = {} } = {}) {
   })
 }
 
+// Server endpoints that own the R2 credentials. The browser passes its Supabase
+// access token and only ever receives short-lived presigned URLs back.
+class StorageServiceError extends Error {
+  constructor(message, status) {
+    super(message)
+    this.name = 'StorageServiceError'
+    this.status = status
+  }
+}
+
+async function storageApi(action, payload) {
+  const { data } = await supabase.auth.getSession()
+  const token = data?.session?.access_token
+  if (!token) throw new Error('Sign in again to manage files.')
+  const response = await fetch(STORAGE_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action, ...payload }),
+  })
+  const body = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new StorageServiceError(body?.error || `The storage service responded ${response.status}.`, response.status)
+  }
+  return body || {}
+}
+
+// Large files bypass Supabase Storage: the server presigns a PUT, the browser
+// uploads straight to R2, then the server verifies, scans and registers the
+// object. Only the `r2://` object key is returned for the message to store.
+async function uploadToR2({ userId: _userId, chatId, file, fileType, durationSeconds, onProgress }) {
+  const report = typeof onProgress === 'function' ? onProgress : () => {}
+  const shared = {
+    chatId: chatId ? String(chatId) : null,
+    fileName: file.name || 'file',
+    fileType,
+    mimeType: file.type || 'application/octet-stream',
+    sizeBytes: file.size,
+    durationSeconds,
+  }
+  const prepared = await storageApi('prepare', shared)
+  await uploadWithProgress(prepared.uploadUrl, file, { onProgress: report })
+  const finished = await storageApi('finish', { ...shared, objectKey: prepared.objectKey })
+  const reference = finished.fileUrl || `${R2_URL_PREFIX}${prepared.objectKey}`
+  return {
+    fileUrl: reference,
+    fileName: finished.fileName || file.name || 'file',
+    fileType: finished.fileType || fileType,
+    durationSeconds: finished.durationSeconds ?? durationSeconds,
+    storagePath: reference,
+    scanStatus: finished.scanStatus || 'unavailable',
+  }
+}
+
+// `r2://` media is resolved to a short-lived signed GET URL on demand. Requests
+// made in the same tick (a message list or a whole feed) are coalesced into one
+// call, and results are cached until shortly before the signed URL expires.
+const signedUrlCache = new Map()
+let signingBatch = new Map()
+let signingTimer = null
+
+function flushSigningBatch() {
+  signingTimer = null
+  const batch = signingBatch
+  signingBatch = new Map()
+  const keys = [...batch.keys()]
+  void (async () => {
+    try {
+      const { urls = {} } = await storageApi('sign', { keys })
+      for (const key of keys) {
+        const waiters = batch.get(key) || []
+        const url = urls[key]
+        if (url) {
+          signedUrlCache.set(key, { url, expiresAt: Date.now() + R2_READ_TTL_MS - R2_CACHE_SAFETY_MS })
+          for (const waiter of waiters) waiter.resolve(url)
+        } else {
+          for (const waiter of waiters) waiter.resolve(null)
+        }
+      }
+    } catch (error) {
+      for (const key of keys) for (const waiter of (batch.get(key) || [])) waiter.reject(error)
+    }
+  })()
+}
+
+export function resolveMediaUrl(reference) {
+  if (!isR2Reference(reference)) return Promise.resolve(reference || null)
+  const key = r2ObjectKeyOf(reference)
+  const cached = signedUrlCache.get(key)
+  if (cached) {
+    if (cached.expiresAt > Date.now()) return Promise.resolve(cached.url)
+    signedUrlCache.delete(key)
+  }
+  return new Promise((resolve, reject) => {
+    if (!signingBatch.has(key)) signingBatch.set(key, [])
+    signingBatch.get(key).push({ resolve, reject })
+    if (!signingTimer) signingTimer = setTimeout(flushSigningBatch, 0)
+  })
+}
+
 export async function uploadChatFile({ userId, chatId, file, kind = 'file', durationSeconds = null, onProgress }) {
   if (!isSupabaseConfigured()) throw new Error('File storage is not configured.')
   if (!userId) throw new Error('Sign in to send files.')
@@ -183,6 +289,17 @@ export async function uploadChatFile({ userId, chatId, file, kind = 'file', dura
       throw error
     }
   }
+  // Files above the threshold go straight to R2. If the deployment has no R2
+  // credentials the server answers 503 and the upload falls back to Supabase
+  // Storage, so a large file still succeeds.
+  if (shouldUseR2(file.size)) {
+    try {
+      return await uploadToR2({ userId, chatId, file, fileType, durationSeconds: duration, onProgress: report })
+    } catch (error) {
+      if (!(error instanceof StorageServiceError && error.status === 503)) throw error
+    }
+  }
+
   const path = `${userId}/${chatId || 'direct'}/${Date.now()}-${safeFileName(file.name)}`
   const contentType = file.type || 'application/octet-stream'
 
@@ -257,7 +374,13 @@ export async function deleteStorageFiles(userId, fileIds) {
     .in('id', ids)
   if (readError) throw readError
 
-  const paths = (rows || []).map((row) => row.storage_path).filter(Boolean)
+  const allRows = rows || []
+  // R2 objects are removed by the server (it holds the credentials); Supabase
+  // Storage objects are removed directly.
+  const r2Keys = allRows.map((row) => r2ObjectKeyOf(row.storage_path)).filter(Boolean)
+  if (r2Keys.length) await storageApi('delete', { keys: r2Keys })
+
+  const paths = allRows.map((row) => row.storage_path).filter((path) => path && !isR2Reference(path))
   if (paths.length) {
     const { error: removeError } = await supabase.storage.from(BUCKET).remove(paths)
     if (removeError) throw new Error(removeError.message || 'Files could not be deleted from storage.')
@@ -270,5 +393,5 @@ export async function deleteStorageFiles(userId, fileIds) {
     .in('id', ids)
   if (deleteError) throw deleteError
 
-  return { deleted: rows?.length || 0 }
+  return { deleted: allRows.length }
 }

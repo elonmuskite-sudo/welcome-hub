@@ -76,6 +76,28 @@ test('text messages require a versioned encrypted payload in every database writ
   assert.match(migration, /not valid/i)
 })
 
+test('chat-files reads are scoped to the owner folder and admins', () => {
+  const schema = fs.readFileSync(path.join(root, 'docs', 'supabase-schema.sql'), 'utf8')
+  const migrationsDir = path.join(root, 'supabase', 'migrations')
+  const scopeMigration = fs.readdirSync(migrationsDir)
+    .find((file) => file.endsWith('_chat_files_read_owner_scope.sql'))
+
+  assert.ok(scopeMigration, 'expected a forward migration to scope chat-files reads to the owner')
+  // The bucket-wide read policy must be gone from the canonical schema and must
+  // be dropped by the forward migration so existing databases pick it up too.
+  assert.doesNotMatch(schema, /create policy "Chat files signed-in read"/i)
+  const migration = fs.readFileSync(path.join(migrationsDir, scopeMigration), 'utf8')
+  assert.match(migration, /drop policy if exists "Chat files signed-in read" on storage\.objects/i)
+  // Both the canonical schema and the migration must enforce the owner/admin scope.
+  for (const sql of [schema, migration]) {
+    const normalized = sql.replace(/\s+/g, ' ')
+    assert.match(
+      normalized,
+      /create policy "Chat files own or admin read" on storage\.objects for select to authenticated using \(\s*bucket_id\s*=\s*'chat-files' and \(\(storage\.foldername\(name\)\)\[1\]\s*=\s*auth\.uid\(\)::text or public\.has_role\(auth\.uid\(\),\s*'admin'\)\s*\)\s*\)/i,
+    )
+  }
+})
+
 test('schema dry-run rejects non-PostgreSQL URLs', () => {
   assert.throws(
     () => inspectSupabaseSchema({ databaseUrl: 'https://example.invalid/database', root }),

@@ -18,6 +18,14 @@ const APPWRITE_SERVER_KEYS = [
   'SUPABASE_POOLER_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
 ]
+// Optional hybrid-storage config. When unset, >2 MB uploads fall back to
+// Supabase Storage, so a partial config is a warning rather than a hard failure.
+const R2_SERVER_KEYS = [
+  'R2_ACCOUNT_ID',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+  'R2_BUCKET_NAME',
+]
 
 const PLACEHOLDER_HINTS = [
   'your_',
@@ -100,6 +108,12 @@ async function main() {
   }
   if (hasTurnUser !== hasTurnCredential) {
     console.warn('[env:validate] TURN username and credential must be set together; relay credentials will be ignored.')
+  }
+  // Hybrid storage: R2 holds uploads above the 2 MB threshold, but a partial
+  // config silently degrades every large upload to Supabase Storage.
+  const missingR2 = R2_SERVER_KEYS.filter((key) => isPlaceholder(getEnvValue(key)))
+  if (missingR2.length && missingR2.length !== R2_SERVER_KEYS.length) {
+    console.warn(`[env:validate] Cloudflare R2 is partially configured; set all of ${R2_SERVER_KEYS.join(', ')} or none. Missing: ${missingR2.join(', ')}. Large uploads fall back to Supabase Storage.`)
   }
   if (isStrictDeploy && missing.length) {
     console.error('[env:validate] Missing production env values before deploy:')
