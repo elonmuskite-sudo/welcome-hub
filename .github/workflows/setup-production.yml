@@ -9,8 +9,10 @@ name: Set up production (Supabase database + Vercel env)
 #
 # VERCEL_DEPLOY_HOOK_URL is the project's Production deploy hook (branch: main).
 # Every run ends by triggering it, so Vercel builds a production deployment that
-# automatically receives the production domains (nexus-chat-world.com, www,
-# verify). No manual "Redeploy"/"Promote to Production" in the dashboard.
+# automatically receives the production domains (nexus-chat-world.com and www).
+# Email OTP verification uses the /verify-email path on the main domain, so no
+# separate verification subdomain is required. No manual "Redeploy"/"Promote to
+# Production" in the dashboard.
 on:
   workflow_dispatch:
     inputs:
