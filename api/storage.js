@@ -100,7 +100,10 @@ async function presignHandler(req, res, { admin, userId }, config) {
         Key: fileKey,
         ContentType: String(req.body?.fileType || 'application/octet-stream'),
       }),
-      { expiresIn: PRESIGN_TTL_SECONDS },
+      // Pin content-type into the signature so a PUT that omits it or sends a
+      // different value is rejected by the bucket, rather than relying on
+      // browser-only CORS enforcement.
+      { expiresIn: PRESIGN_TTL_SECONDS, signableHeaders: new Set(['content-type']) },
     )
   } catch (signError) {
     console.error('R2 presign failed', signError)

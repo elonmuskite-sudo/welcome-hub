@@ -848,7 +848,7 @@ export async function executeUserDataOperation(client, identity, body, admin, ac
         ['APPWRITE_ENDPOINT', process.env.APPWRITE_ENDPOINT],
         ['APPWRITE_PROJECT_ID', process.env.APPWRITE_PROJECT_ID],
         ['SUPABASE_URL', process.env.SUPABASE_URL],
-        ['SUPABASE_ANON_KEY', process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY],
+        ['SUPABASE_ANON_KEY', process.env.SUPABASE_ANON_KEY],
         ['SUPABASE_SERVICE_ROLE_KEY', process.env.SUPABASE_SERVICE_ROLE_KEY],
         ['SUPABASE_POOLER_URL', process.env.SUPABASE_POOLER_URL],
         ['RESEND_API_KEY', process.env.RESEND_API_KEY],

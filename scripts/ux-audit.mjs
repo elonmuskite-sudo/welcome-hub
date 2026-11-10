@@ -28,7 +28,7 @@ import { E2EE_PROTOCOL, isEncryptedTextEnvelope } from '../src/lib/crypto/envelo
 
 const PORT = Number(process.env.UX_AUDIT_PORT || 4178)
 const BASE_URL = `http://localhost:${PORT}`
-const PROJECT_REF = 'woavhlkgylarngqyvphf'
+const PROJECT_REF = 'vitmhynebbaiahayylid'
 const SUPABASE_MATCH = `**/${PROJECT_REF}.supabase.co/**`
 const SESSION_STORAGE_KEY = `sb-${PROJECT_REF}-auth-token`
 const MATRIX = process.argv.includes('--matrix')

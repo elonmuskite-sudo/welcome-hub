@@ -120,7 +120,11 @@ jobs:
           [ "$code" -lt 300 ] && jq -e '.envs | type == "array"' "$env_file" >/dev/null || { echo "Failed to list Vercel environment variables (HTTP $code)."; exit 1; }
           put() { # name value type
             [ -n "$2" ] || { echo "Missing value for $1."; exit 1; }
-            body=$(jq -n --arg k "$1" --arg v "$2" --arg t "$3" '{key:$k,value:$v,type:$t,target:["production"]}')
+            # Vercel rejects a PATCH that includes the immutable `key` field when
+            # the variable type is `sensitive` (HTTP 400), so the update body
+            # omits it; only the create body keeps the key.
+            update_body=$(jq -n --arg v "$2" --arg t "$3" '{value:$v,type:$t,target:["production"]}')
+            create_body=$(jq -n --arg k "$1" --arg v "$2" --arg t "$3" '{key:$k,value:$v,type:$t,target:["production"]}')
             match_count=$(jq --arg key "$1" '[.envs[]? | select(.key == $key and ((.target // []) | index("production")) and ((.gitBranch // "") == ""))] | length' "$env_file")
             if [ "$match_count" -gt 1 ]; then
               echo "Multiple Production variables exist for $1; resolve duplicates in Vercel first."
@@ -132,10 +136,12 @@ jobs:
               endpoint="https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env/$env_id$team_query"
               method="PATCH"
               label="Updated"
+              body="$update_body"
             else
               endpoint="https://api.vercel.com/v10/projects/$VERCEL_PROJECT_ID/env$team_query"
               method="POST"
               label="Added"
+              body="$create_body"
             fi
             code=$(curl -sS -o "$response_file" -w '%{http_code}' -X "$method" "$endpoint" \
               -H "Authorization: Bearer $VERCEL_TOKEN" -H 'Content-Type: application/json' -d "$body")

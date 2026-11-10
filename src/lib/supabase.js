@@ -3,7 +3,7 @@ import { appwriteAccount, appwriteData, createAppwriteRecovery, isAppwriteAuthEn
 
 const env = import.meta.env || {}
 const supabaseUrl = env.VITE_SUPABASE_URL || ''
-const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || ''
+const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || ''
 const appwriteSelected = env.VITE_AUTH_PROVIDER === 'appwrite'
 
 export const supabase = supabaseUrl && supabaseAnonKey

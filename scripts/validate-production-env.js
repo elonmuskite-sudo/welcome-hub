@@ -13,7 +13,7 @@ const rootDir = path.resolve(__dirname, '..')
 // for Production deployments and reported as warnings in Preview/local builds.
 const REQUIRED_GROUPS = [
   ['VITE_SUPABASE_URL', 'SUPABASE_URL'],
-  ['VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY', 'VITE_SUPABASE_PUBLISHABLE_KEY'],
+  ['VITE_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY'],
 ]
 const REQUIRED_PRODUCTION_KEYS = [
   'SUPABASE_SERVICE_ROLE_KEY',

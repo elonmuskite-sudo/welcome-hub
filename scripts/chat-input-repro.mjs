@@ -32,7 +32,7 @@ import { spawn } from 'node:child_process'
 
 const PORT = Number(process.env.REPRO_PORT || 4177)
 const BASE_URL = `http://localhost:${PORT}`
-const PROJECT_REF = 'woavhlkgylarngqyvphf'
+const PROJECT_REF = 'vitmhynebbaiahayylid'
 const SUPABASE_MATCH = `**/${PROJECT_REF}.supabase.co/**`
 const SESSION_STORAGE_KEY = `sb-${PROJECT_REF}-auth-token`
 const CHAT_STORAGE_KEY = 'nexus-chat-state-v1'

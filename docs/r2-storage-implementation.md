@@ -56,7 +56,7 @@ rule now in force:
 | --- | --- |
 | `AllowedOrigins` | `https://nexus-chat-world.com`, `https://www.nexus-chat-world.com`, `https://welcome-hub-tau.vercel.app`, `https://localhost`, `capacitor://localhost`, `http://localhost:5173` |
 | `AllowedMethods` | `GET`, `PUT`, `HEAD` |
-| `AllowedHeaders` | `*` |
+| `AllowedHeaders` | `content-type` |
 | `ExposeHeaders` | `ETag`, `Content-Type`, `Content-Length` |
 | `MaxAgeSeconds` | `3600` |
 
@@ -64,10 +64,47 @@ rule now in force:
 for Android and iOS. The origin list is explicit — no wildcards — and `POST` is
 absent because uploads go straight to the bucket with a presigned `PUT`.
 
-Validation: preflight `OPTIONS` from the three production/dev origins returned
-`204` with the origin echoed; `https://evil.example.com` returned `403` with no
-`Access-Control-Allow-Origin`. An anonymous `GET` on the S3 endpoint was rejected
-(`400`).
+`AllowedHeaders` is limited to `content-type` because that is the only header the
+app ever sends to the bucket: `putWithProgress` in `src/hooks/useChatUploader.ts`
+sets exactly one request header. (The `x-upsert` header in
+`src/lib/storageManager.js` goes to a Supabase signed upload URL, not to R2.) Every
+other header now fails preflight. `content-type` must be listed because a value
+such as `image/png` is not a CORS-safelisted value, so the browser preflights it.
+
+Validation — `OPTIONS` preflight against the bucket:
+
+| `Access-Control-Request-Headers` | Result |
+| --- | --- |
+| *(none)* | `204` |
+| `content-type` | `204`, `Access-Control-Allow-Headers: content-type` |
+| `x-upsert` | `403` rejected |
+| `authorization` | `403` rejected |
+| `content-type, x-custom-header` | `403` rejected |
+| *(unapproved origin)* | `403`, no `Access-Control-Allow-Origin` |
+
+An anonymous `GET` on the S3 endpoint is rejected (`400`).
+
+### Content-type is pinned into the upload signature
+
+CORS only constrains browser clients. To enforce the header server-side for any
+caller, the presigned URL is generated with
+`signableHeaders: new Set(['content-type'])` in `api/storage.js`, which yields
+`X-Amz-SignedHeaders=content-type;host`. `Content-Type` is therefore part of the
+signed request and a PUT that omits it or sends a different value is rejected by
+the bucket with `403` — for browsers and out-of-browser clients alike.
+
+Validation — PUT against a freshly presigned URL signed for `text/plain`:
+
+| PUT `Content-Type` | Result |
+| --- | --- |
+| `text/plain` (matching) | `200` |
+| `application/json` (mismatched) | `403` |
+| *(absent)* | `403` |
+
+The client remains compatible because it sends
+`file.type || 'application/octet-stream'` — the exact value the server signs
+(`src/hooks/useChatUploader.ts` line 55 vs the `ContentType` in the presign
+command).
 
 ### Public access
 

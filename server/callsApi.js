@@ -24,8 +24,8 @@ function createUserClient(url, key, token) {
 
 function getSupabaseConfig() {
   const url = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim()
-  const key = String(process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLISHABLE_KEY
-    || process.env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim()
+  const key = String(process.env.SUPABASE_ANON_KEY
+    || process.env.VITE_SUPABASE_ANON_KEY || '').trim()
   return { url, key }
 }
 

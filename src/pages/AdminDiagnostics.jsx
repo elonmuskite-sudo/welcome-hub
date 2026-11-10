@@ -6,7 +6,7 @@ import { appwriteData, isAppwriteAuthEnabled } from '../lib/appwrite'
 
 const BROWSER_CHECKS = [
   { service: 'Supabase', key: 'VITE_SUPABASE_URL', configured: Boolean(import.meta.env.VITE_SUPABASE_URL) },
-  { service: 'Supabase', key: 'VITE_SUPABASE_ANON_KEY', configured: Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) },
+  { service: 'Supabase', key: 'VITE_SUPABASE_ANON_KEY', configured: Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY) },
   { service: 'Appwrite', key: 'VITE_APPWRITE_ENDPOINT', configured: Boolean(import.meta.env.VITE_APPWRITE_ENDPOINT) },
   { service: 'Appwrite', key: 'VITE_APPWRITE_PROJECT_ID', configured: Boolean(import.meta.env.VITE_APPWRITE_PROJECT_ID) },
 ]
