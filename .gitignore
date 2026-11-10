@@ -96,3 +96,6 @@ supabase/backups/
 
 # Supabase CLI scratch state: link metadata and local `supabase start` secrets. Never commit.
 supabase/.temp/
+
+# Accidental nested copy of this repo (it was cloned into a folder of the same name). Never commit.
+welcome-hub/
